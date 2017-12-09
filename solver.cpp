@@ -29,11 +29,14 @@
 		platforms that adhere to the standards.
 
 	To do:
-	- Eliminate dictionary list.
-	- Optimize traversal & sanitize (check) supplied board.
+	- Add timing to testbed.
+	- Sanitize (check) supplied board.
+
 	- Full word in tree nodes: kill it?
 	- Use hashes?
-	- Let Albert run it through his own test?
+	- Other FIXMEs?
+
+	- Eliminate dictionary list.
 	- Kill prints, write a README.TXT, pack, ship!
 */
 
@@ -235,7 +238,7 @@ public:
 
 private:
 
-	unsigned WordScore(const std::string& word)
+	unsigned WordScore(const std::string& word) const
 	{
 		const unsigned LUT[] = { 1, 1, 2, 3, 5, 11 };
 		size_t length = word.length();
@@ -279,6 +282,9 @@ private:
 		const unsigned boundY = m_height-1;
 		const unsigned boundX = m_width-1;
 
+		// FIXME: now this is not necessarily ideal traversal, especially when the board gets really wide, but
+		//        for now it seems to do fairly OK.
+
 		if (iX > 0) 
 		{
 			TraverseBoard(iY, iX-1, node); // Left.
@@ -304,8 +310,6 @@ private:
 			// Bottom.
 			TraverseBoard(iY+1, iX, node);
 		}
-
-		// FIXME: re-evaluate the above tomorrow :-)
 
 		// Open up this position on the board again.
 		m_visited[iBoard] = false;
