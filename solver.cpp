@@ -47,6 +47,8 @@
 		to improve performance, but for now I feel confident this is sufficient.
 */
 
+#define _CRT_SECURE_NO_WARNINGS // Make VC++ 2015 shut up and walk in line.
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -91,7 +93,7 @@ private:
 };
 
 // Input word must be lowercase!
-static void AddWordToDictionary(const std::string& word, unsigned &longestWord, unsigned &wordCount)
+static void AddWordToDictionary(const std::string& word, size_t &longestWord, size_t &wordCount)
 {
 	const size_t length = word.length();
 
@@ -142,19 +144,22 @@ void LoadDictionary(const char* path)
 {
 	// If the dictionary fails to load, you'll be left with an empty dictionary.
 	FreeDictionary();
-
+	
 	if (nullptr == path)
 		return;
 
 	FILE* file = fopen(path, "r");
 	if (nullptr == file)
+	{
+		debug_print("Can not open dictionary for read access at: %s\n", path);
 		return;
+	}
 
 	DictionaryLock lock;
 
 	int character;
 	std::string word;
-	unsigned longestWord = 0, wordCount = 0;
+	size_t longestWord = 0, wordCount = 0;
 
 	do
 	{
@@ -178,7 +183,7 @@ void LoadDictionary(const char* path)
 
 	fclose(file);
 
-	debug_print("Dictionary loaded. %u words, longest being %u characters.\n", wordCount, longestWord);
+	debug_print("Dictionary loaded. %zu words, longest being %zu characters.\n", wordCount, longestWord);
 }
 
 void FreeDictionary()
@@ -233,7 +238,7 @@ public:
 		}
 
 		// Copy words to Results structure and calculate the score.
-		m_results.Count = m_wordsFound.size();
+		m_results.Count = (unsigned) m_wordsFound.size();
 		m_results.Words = new char*[m_results.Count];
 		m_results.Score = 0;
 		

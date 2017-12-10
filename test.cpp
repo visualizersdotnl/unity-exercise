@@ -28,7 +28,7 @@ int main(int argC, char **arguments)
 
 	const unsigned xSize = atoi(arguments[1]);
 	const unsigned ySize = atoi(arguments[2]);
-
+	
 	srand(42);
 	std::unique_ptr<char[]> board(new char[xSize*ySize]);
 	char* write = board.get();
@@ -37,8 +37,8 @@ int main(int argC, char **arguments)
 	{
 		for (unsigned iX = 0; iX < xSize; ++iX, ++iBoard)
 		{
-			const int random = iBoard % 25;
-//			const int random = rand() % 25;
+//			const int random = iBoard % 25;
+			const int random = rand() % 25;
 			const char character = 'a' + random;
 			*write++ = character;
 
@@ -52,13 +52,15 @@ int main(int argC, char **arguments)
 #endif
 	}
 
-//	board[10] = '#';
+//	board[10] = '#'; // Breaks the board..
 
 #else // USE_UNITY_REF_GRID
 
 	const unsigned xSize = 3;
 	const unsigned ySize = 3;
-	const char *board = "dzxeaiqut";
+	std::unique_ptr<char[]> board(new char[9]);
+	const char *reference = "dzxeaiqut";
+	memcpy(board.get(), reference, 9 * sizeof(char));
 
 #endif
 
