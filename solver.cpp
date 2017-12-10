@@ -41,7 +41,7 @@
 		to be a little sparing, not explaining what's self-explanatory.
 
 		I've written this using the latest OSX, but it should compile out of the box on most platforms that adhere to
-		the standards. Didn't compile with Visual Studio yet, though.
+		the C++11 standard.
 
 		As for my approach: I wanted function, readability and portability. There are options worth considering that
 		to improve performance, but for now I feel confident this is sufficient.
@@ -51,12 +51,12 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include <pthread.h>
 
 #include <memory>
 #include <vector>
 #include <string>
 #include <map>
+#include <mutex>
 
 #include "api.h"
 
@@ -76,15 +76,18 @@ struct DictionaryNode
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
-static pthread_mutex_t s_dictMutex = PTHREAD_MUTEX_INITIALIZER;
+static std::mutex s_dictMutex;
 static DictionaryNode s_dictTree;
 
 // Scoped lock for all dictionary globals.
 class DictionaryLock
 {
 public:
-	DictionaryLock()  { pthread_mutex_lock(&s_dictMutex);   }
-	~DictionaryLock() { pthread_mutex_unlock(&s_dictMutex); }
+	DictionaryLock() :
+		m_lock(s_dictMutex) {}
+
+private:
+	std::lock_guard<std::mutex> m_lock;
 };
 
 // Input word must be lowercase!
