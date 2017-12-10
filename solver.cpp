@@ -156,7 +156,7 @@ void LoadDictionary(const char* path)
 	do
 	{
 		character = fgetc(file);
-		if (true == isalpha((unsigned char) character))
+		if (0 != isalpha((unsigned char) character))
 		{
 			// Boggle tiles are simply A-Z, where Q means 'Qu'.
 			word += tolower(character);
@@ -365,7 +365,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		for (unsigned iTile = 0; iTile < gridSize; ++iTile)
 		{
 			char letter = *board++;
-			if (true == isalpha((unsigned char) letter))
+			if (0 != isalpha((unsigned char) letter))
 			{
 				sanitized[iTile] = tolower(letter);
 			}

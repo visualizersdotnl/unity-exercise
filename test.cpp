@@ -87,7 +87,7 @@ int main(int argC, char **arguments)
 	FreeWords(results);
 	FreeDictionary();
 
-	printf("\nSolver ran %u times for avg. %.f second(s).\n", (unsigned) NUM_QUERIES, (end-start)/CLOCKS_PER_SEC/NUM_QUERIES);
+	printf("\nSolver ran %u times for avg. %.2f second(s).\n", (unsigned) NUM_QUERIES, (end-start)/CLOCKS_PER_SEC/NUM_QUERIES);
 	// ^^ Reports a false positive in Valgrind on OSX.
 
 	return 0;
