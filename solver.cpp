@@ -1,7 +1,7 @@
 
 /*
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
-	Please take a second to read this piece of text.
+	Please take a minute to read this piece of text.
 
 	Rules:
 		- Only use the same word once.
@@ -21,30 +21,30 @@
 
 	Rules and scoring taken from Wikipedia.
 
-	IMPORTANT:
-	- Compile with (at least) -O3 (or equivalent)!
-	- I can't assume much about the test harness. 
-	- I'm not printing anything. 
-	- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
-	- All these functions can be called at any time from any thread as the single shared resource, the dictionary,
-	  is shielded by a mutex and no globals are used.
-	- If an invalid board is supplied (anything non-alphanumerical detected) the query is skipped, yielding zero results.
+	Notes:
+		- Compile with (at least) -O3 (or equivalent), look at the Makefile :)
+		- I can't assume much about the test harness. 
+		- I'm not printing anything. 
+		- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
+		- All these functions can be called at any time from any thread as the single shared resource, the dictionary,
+		  is shielded by a mutex and no globals are used.
+		- If an invalid board is supplied (anything non-alphanumerical detected) the query is skipped, yielding zero results.
+	
+	I've done leak testing using Valgrind and I seem to be in the clear; there are some inconclusive and (hopefully) irrelevant
+	ones reported in the runtime library, but you shouldn't run into killer pileups.
 
-	The code style is of course according to personal preferences given the type and scope of this
-	exercise. They're purely personal, I adapt to a company or client's way of working and most of all
-	just try to keep things consistent. You'll also notice some Yoda notation here and there.. ;)
+	About:
+		The code style is influenced by my personal preference and the scope of this project.
+		It's purely personal, I adapt easily and feel it's in everyone interest to be consistent.
 
-	I've written this in the latest OSX, but it should pretty much compile out of the box on most
-	platforms that adhere to the standards.
+		I might have been a tad verbose with my comments, call it a little better-safe-than-sorry, usually I try
+		to be a little sparing, not explaining what's self-explanatory.
 
-	As for the approach, I am sure there are a few approaches and optimizations possible to improve performance
-	but my primary goal was to be functional, readable and portable.
+		I've written this using the latest OSX, but it should compile out of the box on most platforms that adhere to
+		the standards. Didn't compile with Visual Studio yet, though.
 
-	To do (must):
-	- Stash a bullshit character in the dictionary (eliminate 'covfefe') and the board to see where that goes.
-	- Do a memory leak test (CRT or Valgrind).
-	- Eliminate dictionary list (not needed).
-	- Kill prints, write a README.TXT, pack, ship!
+		As for my approach: I wanted function, readability and portability. There are options worth considering that
+		to improve performance, but for now I feel confident this is sufficient.
 */
 
 #include <stdlib.h>
@@ -53,14 +53,15 @@
 #include <string.h>
 #include <pthread.h>
 
+#include <memory>
 #include <vector>
 #include <string>
 #include <map>
 
 #include "api.h"
 
-// Disable before packing!
 #define debug_print printf
+// inline void debug_print(const char* format, ...) {}
 
 // We'll be using a word tree built out of these simple nodes.
 struct DictionaryNode
@@ -70,15 +71,13 @@ struct DictionaryNode
 		return false == word.empty();
 	}
 
-	std::string word; // FIXME: possible to track during traversal.
+	std::string word;
 	std::map<char, DictionaryNode> children;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
 static pthread_mutex_t s_dictMutex = PTHREAD_MUTEX_INITIALIZER;
-static std::vector<std::string> s_dictionary;
 static DictionaryNode s_dictTree;
-static size_t s_longestWord = 0;
 
 // Scoped lock for all dictionary globals.
 class DictionaryLock
@@ -89,7 +88,7 @@ public:
 };
 
 // Input word must be lowercase!
-static void AddWordToDictionary(const std::string& word)
+static void AddWordToDictionary(const std::string& word, unsigned &longestWord, unsigned &wordCount)
 {
 	const size_t length = word.length();
 
@@ -100,10 +99,10 @@ static void AddWordToDictionary(const std::string& word)
 		return;
 	}
 
-	if (length > s_longestWord)
+	if (length > longestWord)
 	{
-		// Longest word thusfar (just in case I see use for that).
-		s_longestWord = length;
+		// Longest word thusfar (just a print statistic).
+		longestWord = length;
 	}
 
 	DictionaryNode* current = &s_dictTree;
@@ -133,14 +132,13 @@ static void AddWordToDictionary(const std::string& word)
 	}
 
 	current->word = word;
-	s_dictionary.push_back(word);
+	++wordCount;
 }
 
 void LoadDictionary(const char* path)
 {
 	// If the dictionary fails to load, you'll be left with an empty dictionary.
-	DictionaryLock lock;
-	s_dictionary.clear();
+	FreeDictionary();
 
 	if (nullptr == path)
 		return;
@@ -149,8 +147,11 @@ void LoadDictionary(const char* path)
 	if (nullptr == file)
 		return;
 
+	DictionaryLock lock;
+
 	int character;
 	std::string word;
+	unsigned longestWord = 0, wordCount = 0;
 
 	do
 	{
@@ -165,7 +166,7 @@ void LoadDictionary(const char* path)
 			// We've hit EOF or a non-alphanumeric character.
 			if (false == word.empty()) // Got a word?
 			{
-				AddWordToDictionary(word);
+				AddWordToDictionary(word, longestWord, wordCount);
 				word.clear();
 			}
 		}
@@ -174,22 +175,23 @@ void LoadDictionary(const char* path)
 
 	fclose(file);
 
-	debug_print("Dictionary loaded. %zu words, longest being %zu characters.\n", s_dictionary.size(), s_longestWord);
+	debug_print("Dictionary loaded. %u words, longest being %u characters.\n", wordCount, longestWord);
 }
 
 void FreeDictionary()
 {
 	DictionaryLock lock;
-
 	s_dictTree.word.clear();
 	s_dictTree.children.clear();
-
-	s_dictionary.clear();
 }
 
 // This class contains the actual solver and it's entire context, including a local copy of the dictionary.
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
+
+// I'm flagging tiles of my sanitized copy of the board to prevent reuse of letters in a word.
+const unsigned kTileVisitedBit = 128;
+
 class Query
 {
 public:
@@ -198,16 +200,22 @@ public:
 ,		m_board(sanitized)
 ,		m_width(width)
 ,		m_height(height)
-,		m_gridSize(width*height)
-	{
-		DictionaryLock lock;
-		m_tree = s_dictTree;
-	}
+,		m_gridSize(width*height) {}
 
 	~Query() {}
 
 	void Execute()
 	{
+		// Just in case another Execute() call is made on the same context: avoid leaking.
+		if (nullptr != m_results.Words)
+		{
+			FreeWords(m_results);
+		}
+
+		// Get a copy of the current dictionary.
+		// TraverseBoard() changes the local copy at runtime, so we need this in case of multiple Execute() calls.
+		GetLatestDictionary();
+
 		m_wordsFound.clear();
 
 		if (false == m_tree.children.empty())
@@ -240,6 +248,12 @@ public:
 
 private:
 
+	void GetLatestDictionary()
+	{
+		DictionaryLock lock;
+		m_tree = s_dictTree;
+	}
+
 	unsigned GetWordScore(const std::string& word) const
 	{
 		const unsigned LUT[] = { 1, 1, 2, 3, 5, 11 };
@@ -255,7 +269,7 @@ private:
 		const char letter = m_board[iBoard];
 
 		// Using the MSB of the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
-		if (letter & ~0x7f)
+		if (letter & ~0x7f) // kTileVisitedBit)
 		{
 			return;
 		}
@@ -278,45 +292,49 @@ private:
 			node->word.clear();
 		}
 
-		// Before recursion, mark this board position as evaluated.
-		m_board[iBoard] |= 128;
-
-		const unsigned boundY = m_height-1;
-		const unsigned boundX = m_width-1;
-
-		// I've played around with different rolled and unrolled traversion calls & orders, and when unrolled it doesn't
-		// seem to differ significantly where I go first, but to the eye this make sense.
-
-		if (iX > 0)
+		// Recurse if necessary (i.e. more letters to look for).
+		if (false == node->children.empty())
 		{
-			// Left.
-			TraverseBoard(iY, iX-1, node);
-		}
+			// Before recursion, mark this board position as evaluated.
+			m_board[iBoard] |= 128; // kTileVisitedBit;
 
-		if (iX < boundX)
-		{
-			// Right.
-			TraverseBoard(iY, iX+1, node);
-		}
+			const unsigned boundY = m_height-1;
+			const unsigned boundX = m_width-1;
 
-		// Top row.
-		if (iY > 0) 
-		{
-			TraverseBoard(iY-1, iX, node);
-			if (iX > 0) TraverseBoard(iY-1, iX-1, node);
-			if (iX < boundX) TraverseBoard(iY-1, iX+1, node);
-		}
+			// I've played around with different rolled and unrolled traversion calls & orders, and when unrolled it doesn't
+			// seem to differ significantly where I go first, but to the eye this make sense.
 
-		// Bottom row.
-		if (iY < boundY)
-		{
-			TraverseBoard(iY+1, iX, node); 
-			if (iX > 0) TraverseBoard(iY+1, iX-1, node); 
-			if (iX < boundX) TraverseBoard(iY+1, iX+1, node); 
-		}
+			if (iX > 0)
+			{
+				// Left.
+				TraverseBoard(iY, iX-1, node);
+			}
 
-		// Open up this position on the board again.
-		m_board[iBoard] &= 0x7f;
+			if (iX < boundX)
+			{
+				// Right.
+				TraverseBoard(iY, iX+1, node);
+			}
+
+			// Top row.
+			if (iY > 0) 
+			{
+				TraverseBoard(iY-1, iX, node);
+				if (iX > 0) TraverseBoard(iY-1, iX-1, node);
+				if (iX < boundX) TraverseBoard(iY-1, iX+1, node);
+			}
+
+			// Bottom row.
+			if (iY < boundY)
+			{
+				TraverseBoard(iY+1, iX, node); 
+				if (iX > 0) TraverseBoard(iY+1, iX-1, node); 
+				if (iX < boundX) TraverseBoard(iY+1, iX+1, node); 
+			}
+
+			// Open up this position on the board again.
+			m_board[iBoard] &= 0x7f; // ~kTileVisitedBit;
+		}
 	}
 
 
@@ -343,23 +361,24 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	{
 		// Yes: sanitize it (check for illegal input and force all to lowercase).
 		const unsigned gridSize = width*height;
-		char* sanitized = new char[gridSize];
+		std::unique_ptr<char[]> sanitized(new char[gridSize]);
 		for (unsigned iTile = 0; iTile < gridSize; ++iTile)
 		{
 			char letter = *board++;
-			if (isalpha((unsigned char) letter))
+			if (true == isalpha((unsigned char) letter))
 			{
 				sanitized[iTile] = tolower(letter);
 			}
 			else
 			{
-				// BAIL!
-				// use std scoped ptr
+				// Invalid character: skip query.
+				return results;
 			}
 		}
 
-		Query query(results, sanitized, width, height);
+		Query query(results, sanitized.get(), width, height);
 		query.Execute();
+//		query.Execute(); // Leak test..
 	}
 
 	return results;
@@ -381,4 +400,3 @@ void FreeWords(Results results)
 	results.Count = results.Score = 0;
 	results.UserData = nullptr;
 }
-
