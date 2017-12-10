@@ -5,7 +5,7 @@
 	Rules:
 		- Only use the same word once.
 		- Can't reuse a letter in the same word.
-		- There's no 'q', but there is 'qu'.
+		- There's no 'Q', but there is 'Qu'.
 		- Words must be at least 3 letters long.
 
 	Scoring:
@@ -19,6 +19,9 @@
 		I can't assume anything about the test harness, so I'm not printing anything; if the input dictionary
 		could not be loaded, the current dictionary will be empty and FindWords() will simply yield zero result.
 
+		All these functions can be called at any time from any thread as the single shared resource, the dictionary,
+		is protected with a mutex and no globals are used.
+
 		If an invalid board is supplied, I'll report back 1 word in the Results structure indicating this was the case.
 
 		The code style is of course according to personal preferences given the type and scope of this
@@ -28,16 +31,23 @@
 		I've written this in the latest OSX, but it should pretty much compile out of the box on most
 		platforms that adhere to the standards.
 
-	To do:
+	To do (must):
 	- Add timing to testbed.
-	- Sanitize (check) supplied board.
-
-	- Full word in tree nodes: kill it?
-	- Use hashes?
-	- Other FIXMEs?
-
-	- Eliminate dictionary list.
+	- Implement FreeWords().
+	- Sanitize (check) supplied board and use the upper bit to mark visited tiles.
+	- Eliminate dictionary list (not needed).
+	- Add -O3!
 	- Kill prints, write a README.TXT, pack, ship!
+
+	To do (test):
+	- Stash a bullshit character in the dictionary.
+	- Do a memory leak test (CRT or Valgrind).
+	- 
+
+	To do, possibly:
+	- Full word in tree nodes: kill it in favor of building a string as I traverse? Easy.
+	- Use hashes?
+	- FIXMEs
 */
 
 #include <stdlib.h>
@@ -52,7 +62,7 @@
 
 #include "api.h"
 
-// Note-to-self: before packaging comment this one, comment lines where used.
+// Note-to-self: before packaging comment this one, comment this one :)
 #define debug_print printf
 
 // We'll be using a word tree built out of these simple nodes.
@@ -106,6 +116,7 @@ static void AddWordToDictionary(const std::string& word)
 		const char letter = *iLetter;
 		current = &current->children[letter];
 
+		// Handle 'Qu' rule.
 		if ('q' == letter)
 		{
 			auto next = iLetter+1;
@@ -334,14 +345,14 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	results.Words = nullptr;
 	results.Count = 0;
 	results.Score = 0;
-	results.UserData = nullptr; // Unused, didn't spend time threading the algorithm myself.
+	results.UserData = nullptr; // Didn't need it in this implementation.
 
 	// Sane board?
 	if (nullptr != board && !(0 == width && 0 == height))
 	{
-		// Convert board to lowercase, just to be sure.
-		// I'm not going to assume there might be garbage in it.
-		// ...
+		// Convert board to lowercase, just to be sure, and while we're at it check if there's garbage in it.
+		// Perhaps that's stretching it a bit and eating a tiny portion of the performance, but...
+		// ... std::isalpha() needs unsigned!
 
 		Query query(results, board, width, height);
 		query.Execute();
