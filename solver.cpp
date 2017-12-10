@@ -8,28 +8,35 @@
 		- There's no 'Q', but there is 'Qu'.
 		- Words must be at least 3 letters long.
 
-	Scoring:
+	Scoring (original):
 		- 3, 4 = 1
 		- 5 = 2
 		- 6 = 3
 		- 7 = 5
 		- >7 = 11
 
+	"For the purposes of scoring Qu counts as two letters: squid would score two points (for a five-letter word) despite being formed from a 
+	chain of only four cubes."
+
+	Rules and scoring taken from Wikipedia.
+
 	Notes:
-		I can't assume anything about the test harness, so I'm not printing anything; if the input dictionary
-		could not be loaded, the current dictionary will be empty and FindWords() will simply yield zero result.
+	- I can't assume much about the test harness. 
+	- I'm not printing anything. 
+	- If the LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero result.
+	- All these functions can be called at any time from any thread as the single shared resource, the dictionary,
+	  is shielded by a mutex and no globals are used.
+	- If an invalid board is supplied, I'll report back 1 word in the Results structure indicating this was the case.
 
-		All these functions can be called at any time from any thread as the single shared resource, the dictionary,
-		is protected with a mutex and no globals are used.
+	The code style is of course according to personal preferences given the type and scope of this
+	exercise. They're purely personal, I adapt to a company or client's way of working and most of all
+	just try to keep things consistent. You'll also notice some Yoda notation here and there.. ;)
 
-		If an invalid board is supplied, I'll report back 1 word in the Results structure indicating this was the case.
+	I've written this in the latest OSX, but it should pretty much compile out of the box on most
+	platforms that adhere to the standards.
 
-		The code style is of course according to personal preferences given the type and scope of this
-		exercise. They're purely personal, I adapt to a company or client's way of working and most of all
-		just try to keep things consistent. You'll notice some Yoda notation here and there.. ;)
-
-		I've written this in the latest OSX, but it should pretty much compile out of the box on most
-		platforms that adhere to the standards.
+	As for the approach, I am sure there are a few approaches and optimizations possible to improve performance
+	but my primary goal was to be functional, readable and portable.
 
 	To do (must):
 	- Add timing to testbed.
@@ -42,12 +49,6 @@
 	To do (test):
 	- Stash a bullshit character in the dictionary.
 	- Do a memory leak test (CRT or Valgrind).
-	- 
-
-	To do, possibly:
-	- Full word in tree nodes: kill it in favor of building a string as I traverse? Easy.
-	- Use hashes?
-	- FIXMEs
 */
 
 #include <stdlib.h>
@@ -73,7 +74,7 @@ struct DictionaryNode
 		return false == word.empty();
 	}
 
-	std::string word; // FIXME: perhaps find a better way?
+	std::string word; // FIXME: possible to track during traversal.
 	std::map<char, DictionaryNode> children;
 };
 
@@ -236,10 +237,11 @@ public:
 		m_results.Words = new char*[m_results.Count];
 		m_results.Score = 0;
 		
-		char** words = const_cast<char**>(m_results.Words); // Not too pretty, but I own this data.
+		char** words = const_cast<char**>(m_results.Words); // After all I own this data.
 		for (const std::string &word:m_wordsFound)
 		{
-			m_results.Score += WordScore(word);
+			// Uses full word to get the correct score.
+			m_results.Score += GetWordScore(word);
 
 			const size_t length = word.length();
 			*words = new char[length+1];
@@ -249,7 +251,7 @@ public:
 
 private:
 
-	unsigned WordScore(const std::string& word) const
+	unsigned GetWordScore(const std::string& word) const
 	{
 		const unsigned LUT[] = { 1, 1, 2, 3, 5, 11 };
 		size_t length = word.length();
@@ -352,7 +354,8 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	{
 		// Convert board to lowercase, just to be sure, and while we're at it check if there's garbage in it.
 		// Perhaps that's stretching it a bit and eating a tiny portion of the performance, but...
-		// ... std::isalpha() needs unsigned!
+		// - std::isalpha() needs unsigned!
+		// - Do this in Query?
 
 		Query query(results, board, width, height);
 		query.Execute();
