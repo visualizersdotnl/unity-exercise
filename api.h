@@ -1,7 +1,5 @@
 
-/*
-	Exercise API as supplied @ https://files.unity3d.com/scobi/boggle.html
-*/
+// https://files.unity3d.com/scobi/boggle.html
 
 #ifndef API_H
 #define API_H

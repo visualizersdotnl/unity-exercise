@@ -1,24 +1,28 @@
 
-Hi!
+Hi.
 
-Here's my boggle solver.
+Here's my boggle solver, the entire solver lives in solver.cpp; please read as most details are explained
+in (and on top of) that file.
 
-Most details are explaind both on top of and in the implementation (solver.cpp), so please read.
+* I've developed this on OSX (with clang as compiler), tested on Ubuntu and Windows (32-bit & 64-bit, VS2015).
+  Makefile and VS2015 solution (stripped of all unnecessary files) 
 
-I've developed this on OSX (with clang as compiler), tested on Ubuntu and Windows (32-bit & 64-bit, VS2015).
-When using the test Windows solution keep an eye on the command line parameters and working directory.
+* When using the test Windows solution (/VS2015) keep an eye on the command line parameters and working directory.
 
-The test accepts 2 parameters being the width and height of the board.
+* The test accepts 2 parameters being the width and height of the board.
 
-It seems to be a little quicker on OSX and Linux, but given the slim, beaten up and old MacBook I've developed it on
-there's really no telling other than that the speed seem pretty decent, and doesn't blow up exponentially.
+* It seems to be a little quicker on OSX and Linux, but given how the old slim MacBook I've developed this on runs
+  Windows I can't say anything conclusive about this. It seems to perform well, though, and the execution time doesn't
+  blow up.
 
-- It should compile and run on any platform that adheres to the C++11 standard.
-- Calls are threadsafe (the global dictionary is guarded by a mutex) and do not depend on any order.
+* It should compile and run on any platform that adheres to the C++11 standard.
 
-Leak testing with Valgrind on OSX reported no memory leaks, except a few bogus ones caused by the runtime library.
+* Calls are threadsafe (the global dictionary is guarded by a mutex) and do not depend on any order.
 
-And if I forgot to remove the .gitignore, please keep in mind that I used the private area of my account.
+* Leak testing with Valgrind on OSX reported no memory leaks, except a few bogus ones caused by the runtime library.
+
+* Look for debug_print() on top of the solver to print some information on the go, if needed.
+
 
 Cheers,
 - Niels (ndewit@gmail.com)
