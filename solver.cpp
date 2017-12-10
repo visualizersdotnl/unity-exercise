@@ -1,6 +1,7 @@
 
 /*
-	Boggle solver implementation, written the weekend of December 9 & 10, 2017.
+	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
+	Please take a second to read this piece of text.
 
 	Rules:
 		- Only use the same word once.
@@ -20,13 +21,14 @@
 
 	Rules and scoring taken from Wikipedia.
 
-	Notes:
+	IMPORTANT:
+	- Compile with (at least) -O3 (or equivalent)!
 	- I can't assume much about the test harness. 
 	- I'm not printing anything. 
-	- If the LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero result.
+	- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
 	- All these functions can be called at any time from any thread as the single shared resource, the dictionary,
 	  is shielded by a mutex and no globals are used.
-	- If an invalid board is supplied, I'll report back 1 word in the Results structure indicating this was the case.
+	- If an invalid board is supplied (anything non-alphanumerical detected) the query is skipped, yielding zero results.
 
 	The code style is of course according to personal preferences given the type and scope of this
 	exercise. They're purely personal, I adapt to a company or client's way of working and most of all
@@ -39,16 +41,10 @@
 	but my primary goal was to be functional, readable and portable.
 
 	To do (must):
-	- Add timing to testbed.
-	- Implement FreeWords().
-	- Sanitize (check) supplied board and use the upper bit to mark visited tiles.
-	- Eliminate dictionary list (not needed).
-	- Add -O3!
-	- Kill prints, write a README.TXT, pack, ship!
-
-	To do (test):
-	- Stash a bullshit character in the dictionary.
+	- Stash a bullshit character in the dictionary (eliminate 'covfefe') and the board to see where that goes.
 	- Do a memory leak test (CRT or Valgrind).
+	- Eliminate dictionary list (not needed).
+	- Kill prints, write a README.TXT, pack, ship!
 */
 
 #include <stdlib.h>
@@ -63,7 +59,7 @@
 
 #include "api.h"
 
-// Note-to-self: before packaging comment this one, comment this one :)
+// Disable before packing!
 #define debug_print printf
 
 // We'll be using a word tree built out of these simple nodes.
@@ -159,7 +155,7 @@ void LoadDictionary(const char* path)
 	do
 	{
 		character = fgetc(file);
-		if (true == isalpha(character))
+		if (true == isalpha((unsigned char) character))
 		{
 			// Boggle tiles are simply A-Z, where Q means 'Qu'.
 			word += tolower(character);
@@ -197,25 +193,18 @@ void FreeDictionary()
 class Query
 {
 public:
-	Query(Results &results, const char* board, unsigned width, unsigned height) :
+	Query(Results &results, char* sanitized, unsigned width, unsigned height) :
 		m_results(results)
-,		m_board(board)
+,		m_board(sanitized)
 ,		m_width(width)
 ,		m_height(height)
 ,		m_gridSize(width*height)
 	{
 		DictionaryLock lock;
 		m_tree = s_dictTree;
-
-		// FIXME: temporary.
-		m_visited = new bool[m_gridSize];
-		memset(m_visited, 0, m_gridSize);
 	}
 
-	~Query() 
-	{
-		delete[] m_visited;
-	}
+	~Query() {}
 
 	void Execute()
 	{
@@ -263,13 +252,13 @@ private:
 	{
 		const unsigned iBoard = iY*m_width + iX;
 
-		if (true == m_visited[iBoard])
+		const char letter = m_board[iBoard];
+
+		// Using the MSB of the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
+		if (letter & ~0x7f)
 		{
-			// Can't use the same letter twice in 1 word: bail.
 			return;
 		}
-
-		const char letter = m_board[iBoard];
 
 		auto iNode = parent->children.find(letter);
 		if (iNode == parent->children.end())
@@ -290,56 +279,56 @@ private:
 		}
 
 		// Before recursion, mark this board position as evaluated.
-		m_visited[iBoard] = true;
+		m_board[iBoard] |= 128;
 
 		const unsigned boundY = m_height-1;
 		const unsigned boundX = m_width-1;
 
-		// FIXME: now this is not necessarily ideal traversal, especially when the board gets really wide, but
-		//        for now it seems to do fairly OK.
+		// I've played around with different rolled and unrolled traversion calls & orders, and when unrolled it doesn't
+		// seem to differ significantly where I go first, but to the eye this make sense.
 
-		if (iX > 0) 
+		if (iX > 0)
 		{
-			TraverseBoard(iY, iX-1, node); // Left.
-			if (iY > 0) TraverseBoard(iY-1, iX-1, node); // Top left.
-			if (iY < boundY) TraverseBoard(iY+1, iX-1, node); // Bottom left.
+			// Left.
+			TraverseBoard(iY, iX-1, node);
 		}
 
 		if (iX < boundX)
 		{
-			TraverseBoard(iY, iX+1, node); // Right.
-			if (iY > 0) TraverseBoard(iY-1, iX+1, node); // Top right.
-			if (iY < boundY) TraverseBoard(iY+1, iX+1, node); // Bottom right.
+			// Right.
+			TraverseBoard(iY, iX+1, node);
 		}
 
-		if (iY > 0)
+		// Top row.
+		if (iY > 0) 
 		{
-			// Top.
 			TraverseBoard(iY-1, iX, node);
+			if (iX > 0) TraverseBoard(iY-1, iX-1, node);
+			if (iX < boundX) TraverseBoard(iY-1, iX+1, node);
 		}
 
+		// Bottom row.
 		if (iY < boundY)
 		{
-			// Bottom.
-			TraverseBoard(iY+1, iX, node);
+			TraverseBoard(iY+1, iX, node); 
+			if (iX > 0) TraverseBoard(iY+1, iX-1, node); 
+			if (iX < boundX) TraverseBoard(iY+1, iX+1, node); 
 		}
 
 		// Open up this position on the board again.
-		m_visited[iBoard] = false;
+		m_board[iBoard] &= 0x7f;
 	}
 
 
 	Results& m_results;
-	const char* m_board;
+	char* const m_board;
 	const unsigned m_width, m_height;
 	const size_t m_gridSize;
 
 	DictionaryNode m_tree;	
-	bool* m_visited; // FIXME: optimize into copy of board (bit).
 
 	std::vector<std::string> m_wordsFound;
 };
-
 
 Results FindWords(const char* board, unsigned width, unsigned height)
 {
@@ -349,15 +338,27 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	results.Score = 0;
 	results.UserData = nullptr; // Didn't need it in this implementation.
 
-	// Sane board?
+	// Board parameters check out?
 	if (nullptr != board && !(0 == width && 0 == height))
 	{
-		// Convert board to lowercase, just to be sure, and while we're at it check if there's garbage in it.
-		// Perhaps that's stretching it a bit and eating a tiny portion of the performance, but...
-		// - std::isalpha() needs unsigned!
-		// - Do this in Query?
+		// Yes: sanitize it (check for illegal input and force all to lowercase).
+		const unsigned gridSize = width*height;
+		char* sanitized = new char[gridSize];
+		for (unsigned iTile = 0; iTile < gridSize; ++iTile)
+		{
+			char letter = *board++;
+			if (isalpha((unsigned char) letter))
+			{
+				sanitized[iTile] = tolower(letter);
+			}
+			else
+			{
+				// BAIL!
+				// use std scoped ptr
+			}
+		}
 
-		Query query(results, board, width, height);
+		Query query(results, sanitized, width, height);
 		query.Execute();
 	}
 
@@ -366,6 +367,18 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 void FreeWords(Results results)
 {
-	// ...
+	if (0 != results.Count && nullptr != results.Words)
+	{
+		for (unsigned iWord = 0; iWord < results.Count; ++iWord)
+		{
+			delete[] results.Words[iWord];
+		}
+	}
+
+	delete[] results.Words;
+	results.Words = nullptr;
+
+	results.Count = results.Score = 0;
+	results.UserData = nullptr;
 }
 
