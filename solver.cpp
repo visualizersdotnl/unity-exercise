@@ -33,17 +33,16 @@
 	ones reported in the runtime library, but you shouldn't run into killer pileups.
 
 	About:
-		The code style is influenced by my personal preference and the scope of this project.
-		It's purely personal, I adapt easily and feel it's in everyone interest to be consistent.
+		This code style is influenced by my personal preference (today) and the scope of this project.
+		As a professional, I like to adapt and feel it's in everyone interest to be consistent.
 
-		I might have been a tad verbose with my comments, call it a little better-safe-than-sorry, usually I try
-		to be a little sparing, not explaining what's self-explanatory.
+		I might have been a tad more verbose with my comments than usual ;)
 
 		I've written this using the latest OSX, but it should compile out of the box on most platforms that adhere to
 		the C++11 standard, including Linux and Windows.
 
 		As for my approach: I wanted function, readability and portability. There are options worth considering that
-		to improve performance, but for now I feel confident this is sufficient.
+		could improve performance, but for now I feel confident this is sufficient.
 */
 
 // Make VC++ 2015 shut up and walk in line.
