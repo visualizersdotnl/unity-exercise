@@ -22,15 +22,14 @@
 	Rules and scoring taken from Wikipedia.
 
 	Notes:
-		- Compile with (at least) -O3 (or equivalent), look at the Makefile :)
-		- I can't assume much about the test harness. 
-		- I'm not printing anything. 
+		- Compile with full optimization (-O3 for ex.) for best performance.
+		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
 		- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
 		- All these functions can be called at any time from any thread as the single shared resource, the dictionary,
-		  is shielded by a mutex and no globals are used.
+		  is guarded by a mutex and no globals are used.
 		- If an invalid board is supplied (anything non-alphanumerical detected) the query is skipped, yielding zero results.
 	
-	I've done leak testing using Valgrind and I seem to be in the clear; there are some inconclusive and (hopefully) irrelevant
+	I've done leak testing using Valgrind in OSX and I seem to be in the clear; there are some inconclusive and (hopefully) irrelevant
 	ones reported in the runtime library, but you shouldn't run into killer pileups.
 
 	About:
@@ -41,13 +40,14 @@
 		to be a little sparing, not explaining what's self-explanatory.
 
 		I've written this using the latest OSX, but it should compile out of the box on most platforms that adhere to
-		the C++11 standard.
+		the C++11 standard, including Linux and Windows.
 
 		As for my approach: I wanted function, readability and portability. There are options worth considering that
 		to improve performance, but for now I feel confident this is sufficient.
 */
 
-#define _CRT_SECURE_NO_WARNINGS // Make VC++ 2015 shut up and walk in line.
+// Make VC++ 2015 shut up and walk in line.
+#define _CRT_SECURE_NO_WARNINGS 
 
 #include <stdlib.h>
 #include <stdio.h>

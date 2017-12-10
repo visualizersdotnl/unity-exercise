@@ -37,8 +37,8 @@ int main(int argC, char **arguments)
 	{
 		for (unsigned iX = 0; iX < xSize; ++iX, ++iBoard)
 		{
-//			const int random = iBoard % 25;
-			const int random = rand() % 25;
+			const int random = iBoard % 25;
+//			const int random = rand() % 25;
 			const char character = 'a' + random;
 			*write++ = character;
 

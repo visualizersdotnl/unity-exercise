@@ -1,20 +1,22 @@
 
 Hi!
 
-Here's my boggle solver; most details are explained on top of the solver implementation which resides in 'solver.cpp', please read.
+Here's my boggle solver.
 
-I'll quickly go over the most important things here:
+Most details are explaind both on top of and in the implementation (solver.cpp), so please read.
 
-	* I developed and tested this solution with OSX (w/clang), be sure to take a look at the test and the Makefile.
+I've developed this on OSX (with clang as compiler), tested on Ubuntu and Windows (32-bit & 64-bit, VS2015).
+When using the test Windows solution keep an eye on the command line parameters and working directory.
 
-	* Tested on OSX, Ubuntu & Windows (Visual Studio Community 2015).
+The test accepts 2 parameters being the width and height of the board.
 
-	* It should compile with any modern standard-adhering C++ compiler; please turn optimization on ;)
+It seems to be a little quicker on OSX and Linux, but given the slim, beaten up and old MacBook I've developed it on
+there's really no telling other than that the speed seem pretty decent, and doesn't blow up exponentially.
 
-	* Calls are threadsafe (the global dictionary is shielded by a mutex lock) and can be called in any order.
+- It should compile and run on any platform that adheres to the C++11 standard.
+- Calls are threadsafe (the global dictionary is guarded by a mutex) and do not depend on any order.
 
-	* Testing with Valgrind reported no memory leaks (except a few bogus ones caused by the runtime library).
-
+Leak testing with Valgrind on OSX reported no memory leaks, except a few bogus ones caused by the runtime library.
 
 And if I forgot to remove the .gitignore, please keep in mind that I used the private area of my account.
 
