@@ -5,7 +5,7 @@ Here's my boggle solver, the entire solver lives in solver.cpp; please read as m
 in (and on top of) that file.
 
 * I've developed this on OSX (with clang as compiler), tested on Ubuntu and Windows (32-bit & 64-bit, VS2015).
-  Makefile and VS2015 solution (stripped of all unnecessary files) 
+  Makefile and VS2015 solution (stripped of all unnecessary files) for my test(s) are available.
 
 * When using the test Windows solution (/VS2015) keep an eye on the command line parameters and working directory.
 
