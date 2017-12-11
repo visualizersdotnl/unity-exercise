@@ -5,7 +5,7 @@
 
 // To even out the timing results a little, since clock() isn't the sharpest of knives.
 // WARNING: multiple queries causes leaks (no FreeWords() calls made except on the last set).
-#define NUM_QUERIES 1
+#define NUM_QUERIES 4
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -37,8 +37,8 @@ int main(int argC, char **arguments)
 	{
 		for (unsigned iX = 0; iX < xSize; ++iX, ++iBoard)
 		{
-			const int random = iBoard % 25;
-//			const int random = rand() % 25;
+//			const int random = iBoard % 25;
+			const int random = rand() % 25;
 			const char character = 'a' + random;
 			*write++ = character;
 

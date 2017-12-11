@@ -1,0 +1,13 @@
+
+Grotere twijfels:
+- Je kan in principe in de trein de thread safety instelbaar maken (aan/uit). Te ver gegaan?
+- Map, kan bijvoorbeeld unordered, wat is werkelijk beter?
+- De dictionary hoef ik in principe niet voor elke query te kopieren, ik kan er ook 1 houden en ref. counten: het is wel zo gek als de caller het maakt he?
+  ^ Die laatste is een goed argument, want simpel gebruik impliceert geen al te gekke penalties!
+
+Kleinere twijfels:
+- Windows perf.: niet nader onderzocht.
+- Threading: limited testing.
+- Mersenne random?
+
+VERDRINK NIET IN DETAILS VERDER - DAT HADDEN ZIJ OOK NIET GEWILD
