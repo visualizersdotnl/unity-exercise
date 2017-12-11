@@ -202,7 +202,7 @@ const unsigned kTileVisitedBit = 128;
 class Query
 {
 public:
-	Query(Results &results, char* sanitized, unsigned width, unsigned height) :
+	Query(Results& results, char* sanitized, unsigned width, unsigned height) :
 		m_results(results)
 ,		m_board(sanitized)
 ,		m_width(width)
