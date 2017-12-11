@@ -26,3 +26,4 @@ Fouten @ submission:
 
 - In de test is de alphabet range verkeerd; gelukkig maakt dat niet uit.
 - Cosmetische dingetjes.
+- Verteld op maandagavond dat ik een "huge optimize" had, en dat is ook zo, maar hoe huge kunnen ze niet echt meten zonder code!
