@@ -261,7 +261,7 @@ private:
 		m_tree = s_dictTree;
 	}
 
-	unsigned GetWordScore(const std::string& word) const
+	inline unsigned GetWordScore(const std::string& word) const
 	{
 		const unsigned LUT[] = { 1, 1, 2, 3, 5, 11 };
 		size_t length = word.length();
@@ -269,7 +269,7 @@ private:
 		return LUT[length-3];
 	}
 
-	void TraverseBoard(unsigned iY, unsigned iX, DictionaryNode* parent)
+	inline void TraverseBoard(unsigned iY, unsigned iX, DictionaryNode* parent)
 	{
 		const unsigned iBoard = iY*m_width + iX;
 
