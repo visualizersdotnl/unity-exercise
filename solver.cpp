@@ -276,7 +276,7 @@ private:
 		const char letter = m_board[iBoard];
 
 		// Using the MSB of the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
-		if (letter & ~0x7f) // kTileVisitedBit)
+		if (letter & kTileVisitedBit)
 		{
 			return;
 		}
@@ -303,7 +303,7 @@ private:
 		if (false == node->children.empty())
 		{
 			// Before recursion, mark this board position as evaluated.
-			m_board[iBoard] |= 128; // kTileVisitedBit;
+			m_board[iBoard] |= kTileVisitedBit;
 
 			const unsigned boundY = m_height-1;
 			const unsigned boundX = m_width-1;
@@ -340,7 +340,7 @@ private:
 			}
 
 			// Open up this position on the board again.
-			m_board[iBoard] &= 0x7f; // ~kTileVisitedBit;
+			m_board[iBoard] &= ~kTileVisitedBit;
 		}
 	}
 
