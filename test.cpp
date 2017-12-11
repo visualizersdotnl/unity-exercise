@@ -37,8 +37,8 @@ int main(int argC, char **arguments)
 	{
 		for (unsigned iX = 0; iX < xSize; ++iX, ++iBoard)
 		{
-//			const int random = iBoard % 25;
-			const int random = rand() % 25;
+//			const int random = iBoard % 26;
+			const int random = rand() % 26;
 			const char character = 'a' + random;
 			*write++ = character;
 
@@ -59,7 +59,7 @@ int main(int argC, char **arguments)
 	const unsigned xSize = 3;
 	const unsigned ySize = 3;
 	std::unique_ptr<char[]> board(new char[9]);
-	const char *reference = "dzxeaiqut";
+	const char* reference = "dzxeaiqut";
 	memcpy(board.get(), reference, 9 * sizeof(char));
 
 #endif

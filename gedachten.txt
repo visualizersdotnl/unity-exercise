@@ -22,3 +22,8 @@ Kleinere twijfels:
 - Windows perf.: niet nader onderzocht.
 - Threading: limited testing.
 - Mersenne-Twister random?
+
+Fouten:
+
+- In de test is de alphabet range verkeerd!
+- Cosmetisch..
