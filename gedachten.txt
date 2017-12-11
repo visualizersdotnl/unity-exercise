@@ -1,8 +1,7 @@
 
 Grotere twijfels:
 
-Q: Je kan in principe in de trein de thread safety instelbaar maken: ben ik te ver gegaan?
-   Wees eerlijk dat tests je de zenuwen geven. En normaal heb je meer informatie!
+Q: Je kan in principe in de thread safety instelbaar maken: ben ik te ver gegaan? Test geven me de zenuwen.
 A:
 
 Q: Map, kan bijvoorbeeld unordered, wat is werkelijk beter?
@@ -12,7 +11,7 @@ Q: De dictionary hoef ik in principe niet voor elke query te kopieren, ik kan er
 A: Ik kan het heel ingewikkeld maken maar uiteindelijk weet ik niet hoe het gebruikt wordt.
 
 Q: Board copy is misschien niet helemaal lekker, maar je doet 't maar 1 keer; je zou het optioneel kunnen maken, of sneller?
-A:
+A: Kan allemaal.
 
 Q: No assertions.
 A: Valt niet zo veel te asserten zo zonder assumpties te mogen maken.
@@ -21,9 +20,9 @@ Kleinere twijfels:
 
 - Windows perf.: niet nader onderzocht.
 - Threading: limited testing.
-- Mersenne-Twister random?
+- Mersenne-Twister random gebruiken voor een realistischer bord?
 
-Fouten:
+Fouten @ submission:
 
-- In de test is de alphabet range verkeerd!
-- Cosmetisch..
+- In de test is de alphabet range verkeerd; gelukkig maakt dat niet uit.
+- Cosmetische dingetjes.

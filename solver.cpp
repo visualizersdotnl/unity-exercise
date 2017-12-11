@@ -16,7 +16,7 @@
 		- 7 = 5
 		- >7 = 11
 
-	"For the purposes of scoring Qu counts as two letters: squid would score two points (for a five-letter word) despite being formed from a 
+	"For the purposes of scoring Qu counts as two letters: squid would score tw§o points (for a five-letter word) despite being formed from a 
 	chain of only four cubes."
 
 	Rules and scoring taken from Wikipedia.
@@ -364,7 +364,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	results.UserData = nullptr; // Didn't need it in this implementation.
 
 	// Board parameters check out?
-	if (nullptr != board && !(0 == width && 0 == height))
+	if (nullptr != board && !(0 == width || 0 == height))
 	{
 		// Yes: sanitize it (check for illegal input and force all to lowercase).
 		const unsigned gridSize = width*height;
