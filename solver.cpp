@@ -92,7 +92,7 @@ private:
 };
 
 // Input word must be lowercase!
-static void AddWordToDictionary(const std::string& word, size_t &longestWord, size_t &wordCount)
+static void AddWordToDictionary(const std::string& word, size_t& longestWord, size_t& wordCount)
 {
 	const size_t length = word.length();
 
@@ -269,7 +269,7 @@ private:
 		return LUT[length-3];
 	}
 
-	void TraverseBoard(unsigned iY, unsigned iX, DictionaryNode *parent)
+	void TraverseBoard(unsigned iY, unsigned iX, DictionaryNode* parent)
 	{
 		const unsigned iBoard = iY*m_width + iX;
 

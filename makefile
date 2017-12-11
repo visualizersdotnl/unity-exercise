@@ -8,4 +8,4 @@ all:
 
 #	Debug (Valgrind).
 #	g++ -o boggle test.cpp solver.cpp -std=c++11 -g
-#	valgrind --leak-check=yes -v ./boggle 10 10
+#	valgrind --leak-check=yes -v ./boggle 10 100

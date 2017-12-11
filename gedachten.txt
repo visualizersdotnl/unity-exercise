@@ -11,6 +11,11 @@ A: Tests wijzen uit dat die map iets duurder is, in elk geval voor een fiks woor
 Q: De dictionary hoef ik in principe niet voor elke query te kopieren, ik kan er ook 1 houden en ref. counten.
 A: Ik kan het heel ingewikkeld maken maar uiteindelijk weet ik niet hoe het gebruikt wordt.
 
+Q: Board copy is misschien niet helemaal lekker, maar je doet 't maar 1 keer; je zou het optioneel kunnen maken, of sneller?
+A:
+
+Q: No assertions.
+A: Valt niet zo veel te asserten zo zonder assumpties te mogen maken.
 
 Kleinere twijfels:
 
