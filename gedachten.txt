@@ -16,6 +16,9 @@ A: Kan allemaal.
 Q: No assertions.
 A: Valt niet zo veel te asserten zo zonder assumpties te mogen maken.
 
+Q: Alles wat ik "dubbel" doe valt toch een beetje in het niet bij de recursie?
+A: Yup.
+
 Kleinere twijfels:
 
 - Windows perf.: niet nader onderzocht.

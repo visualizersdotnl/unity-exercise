@@ -43,6 +43,8 @@
 
 		As for my approach: I wanted function, readability and portability. There are options worth considering that
 		could improve performance, but for now I feel confident this is sufficient.
+
+		There's a lot of pre- and post-query copying going on I'm not too happy about that.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -242,7 +244,7 @@ public:
 		m_results.Score = 0;
 		
 		char** words = const_cast<char**>(m_results.Words); // After all I own this data.
-		for (const std::string &word:m_wordsFound)
+		for (const std::string& word:m_wordsFound)
 		{
 			// Uses full word to get the correct score.
 			m_results.Score += GetWordScore(word);
@@ -371,7 +373,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		std::unique_ptr<char[]> sanitized(new char[gridSize]);
 		for (unsigned iTile = 0; iTile < gridSize; ++iTile)
 		{
-			char letter = *board++;
+			const char letter = *board++;
 			if (0 != isalpha((unsigned char) letter))
 			{
 				sanitized[iTile] = tolower(letter);
