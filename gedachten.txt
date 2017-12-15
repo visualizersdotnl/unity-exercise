@@ -1,25 +1,4 @@
 
-Grotere twijfels:
-
-Q: Je kan in principe in de thread safety instelbaar maken: ben ik te ver gegaan? Test geven me de zenuwen.
-A:
-
-Q: Map, kan bijvoorbeeld unordered, wat is werkelijk beter?
-A: Tests wijzen uit dat die map iets duurder is, in elk geval voor een fiks woordenboek (lineair geheugen vs. lists met ref. counted (denkelijk) pointers).
-
-Q: De dictionary hoef ik in principe niet voor elke query te kopieren, ik kan er ook 1 houden en ref. counten.
-A: Ik kan het heel ingewikkeld maken maar uiteindelijk weet ik niet hoe het gebruikt wordt.
-
-Q: Board copy is misschien niet helemaal lekker, maar je doet 't maar 1 keer; je zou het optioneel kunnen maken, of sneller?
-A: Kan allemaal.
-
-Q: No assertions.
-A: Valt niet zo veel te asserten zo zonder assumpties te mogen maken.
-
-Q: Alles wat ik "dubbel" doe valt toch een beetje in het niet bij de recursie?
-A: Yup.
-
-Kleinere twijfels:
 
 - Windows perf.: niet nader onderzocht.
 - Threading: limited testing.
@@ -29,4 +8,3 @@ Fouten @ submission:
 
 - In de test is de alphabet range verkeerd; gelukkig maakt dat niet uit.
 - Cosmetische dingetjes.
-- Verteld op maandagavond dat ik een "huge optimize" had, en dat is ook zo, maar hoe huge kunnen ze niet echt meten zonder code!
