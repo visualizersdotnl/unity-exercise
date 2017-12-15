@@ -28,9 +28,10 @@ int main(int argC, char **arguments)
 
 	const unsigned xSize = atoi(arguments[1]);
 	const unsigned ySize = atoi(arguments[2]);
+	const unsigned gridSize = xSize*ySize;
 	
 	srand(42);
-	std::unique_ptr<char[]> board(new char[xSize*ySize]);
+	std::unique_ptr<char[]> board(new char[gridSize]);
 	char* write = board.get();
 
 	for (unsigned iBoard = 0, iY = 0; iY < ySize; ++iY)
@@ -58,9 +59,10 @@ int main(int argC, char **arguments)
 
 	const unsigned xSize = 3;
 	const unsigned ySize = 3;
-	std::unique_ptr<char[]> board(new char[9]);
+	const unsigned gridSize = xSize*ySize;
+	std::unique_ptr<char[]> board(new char[gridSize]);
 	const char* reference = "dzxeaiqut";
-	memcpy(board.get(), reference, 9 * sizeof(char));
+	memcpy(board.get(), reference, gridSize*sizeof(char));
 
 #endif
 
@@ -89,7 +91,7 @@ int main(int argC, char **arguments)
 	FreeWords(results);
 	FreeDictionary();
 
-	printf("\nSolver ran %u times for avg. %.2f second(s).\n", (unsigned) NUM_QUERIES, (end-start)/CLOCKS_PER_SEC/NUM_QUERIES);
+	printf("\nSolver ran %u times for avg. %.2f second(s), %.2f sec. per tile.\n", (unsigned) NUM_QUERIES, (end-start)/CLOCKS_PER_SEC/NUM_QUERIES, gridSize/(end-start));
 	// ^^ Reports a false positive in Valgrind on OSX.
 
 	return 0;
