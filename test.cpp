@@ -1,11 +1,11 @@
 
 // #define USE_UNITY_REF_GRID
-// #define PRINT_WORDS
-// #define PRINT_GRID
+#define PRINT_WORDS
+#define PRINT_GRID
 
 // To even out the timing results a little, since clock() isn't the sharpest of knives.
 // WARNING: multiple queries causes leaks (no FreeWords() calls made except on the last set).
-#define NUM_QUERIES 2
+#define NUM_QUERIES 1
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -91,7 +91,7 @@ int main(int argC, char **arguments)
 	FreeWords(results);
 	FreeDictionary();
 
-	printf("\nSolver ran %u times for avg. %.2f second(s), %.2f sec. per tile.\n", (unsigned) NUM_QUERIES, (end-start)/CLOCKS_PER_SEC/NUM_QUERIES, gridSize/(end-start));
+	printf("\nSolver ran %u times for avg. %.2f second(s), %.4f sec. per tile.\n", (unsigned) NUM_QUERIES, (end-start)/CLOCKS_PER_SEC/NUM_QUERIES, gridSize/(end-start));
 	// ^^ Reports a false positive in Valgrind on OSX.
 
 	return 0;
