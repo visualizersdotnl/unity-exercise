@@ -2,7 +2,6 @@
 
 - Windows perf.: niet nader onderzocht.
 - Threading: limited testing.
-- Mersenne-Twister random gebruiken voor een realistischer bord?
 
 Fouten @ submission:
 

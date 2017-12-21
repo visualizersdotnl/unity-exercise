@@ -15,6 +15,7 @@
 #include <memory>
 
 #include "api.h"
+#include "random.h"
 
 int main(int argC, char **arguments)
 {

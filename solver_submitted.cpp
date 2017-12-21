@@ -53,9 +53,6 @@
 // Make VC++ 2015 shut up and walk in line.
 #define _CRT_SECURE_NO_WARNINGS 
 
-// Cache-coherency swizzling: yes or no?
-#define DO_NOT_SWIZZLE
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -269,15 +266,6 @@ private:
 		m_tree = s_dictTree;
 	}
 
-	inline char& Board(unsigned index)
-	{
-#if defined(DO_NOT_SWIZZLE)
-		return m_board[index];
-#else
-		return m_board[index];
-#endif
-	}
-
 	inline unsigned GetWordScore(const std::string& word) const
 	{
 		const unsigned LUT[] = { 1, 1, 2, 3, 5, 11 };
@@ -290,7 +278,7 @@ private:
 	{
 		const unsigned iBoard = iY*m_width + iX;
 
-		const char letter = Board(iBoard);
+		const char letter = m_board[iBoard];
 
 		// Using the MSB of the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
 		if (letter & kTileVisitedBit)
@@ -320,7 +308,7 @@ private:
 		if (false == node->children.empty())
 		{
 			// Before recursion, mark this board position as evaluated.
-			Board(iBoard) |= kTileVisitedBit;
+			m_board[iBoard] |= kTileVisitedBit;
 
 			const unsigned boundY = m_height-1;
 			const unsigned boundX = m_width-1;
@@ -357,7 +345,7 @@ private:
 			}
 
 			// Open up this position on the board again.
-			Board(iBoard) &= ~kTileVisitedBit;
+			m_board[iBoard] &= ~kTileVisitedBit;
 		}
 	}
 
@@ -384,10 +372,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
 		// Yes: sanitize it (check for illegal input and force all to lowercase).
-		// TODO: and swizzle it.
 		const unsigned gridSize = width*height;
-
-#if defined(DO_NOT_SWIZZLE)
 		std::unique_ptr<char[]> sanitized(new char[gridSize]);
 		for (unsigned iTile = 0; iTile < gridSize; ++iTile)
 		{
@@ -402,10 +387,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				return results;
 			}
 		}
-#elif !defined (DO_NOT_SWIZZLE)
-		std::unique_ptr<char[]> sanitized(new char[gridSize]);
-		memcpy(sanitized.get(), board, gridSize);		
-#endif
 
 		Query query(results, sanitized.get(), width, height);
 		query.Execute();
