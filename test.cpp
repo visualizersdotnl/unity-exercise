@@ -42,7 +42,7 @@ int main(int argC, char **arguments)
 		for (unsigned iX = 0; iX < xSize; ++iX, ++iBoard)
 		{
 //			const int random = iBoard % 26;
-			const int random = mt_rand32() % 26;
+			const int random = mt_randu32() % 26;
 			const char character = 'a' + random;
 			*write++ = character;
 
