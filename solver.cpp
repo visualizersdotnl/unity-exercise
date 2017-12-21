@@ -16,7 +16,7 @@
 		- 7 = 5
 		- >7 = 11
 
-	"For the purposes of scoring Qu counts as two letters: squid would score tw§o points (for a five-letter word) despite being formed from a 
+	"For the purposes of scoring Qu counts as two letters: squid would score two points (for a five-letter word) despite being formed from a 
 	chain of only four cubes."
 
 	Rules and scoring taken from Wikipedia.
