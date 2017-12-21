@@ -1,5 +1,5 @@
 
-/* GR-1: random number generator(s) */
+/* GR-1: random number generator(s) -- (C) Tasty Chips Electronics */
 
 #if !defined(RANDOM_H)
 #define RANDOM_H

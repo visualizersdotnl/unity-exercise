@@ -19,6 +19,8 @@
 
 int main(int argC, char **arguments)
 {
+	initialize_random_generator();
+
 #ifndef USE_UNITY_REF_GRID
 
 	if (nullptr == arguments[1] || nullptr == arguments[2])
@@ -40,7 +42,7 @@ int main(int argC, char **arguments)
 		for (unsigned iX = 0; iX < xSize; ++iX, ++iBoard)
 		{
 //			const int random = iBoard % 26;
-			const int random = rand() % 26;
+			const int random = mt_rand32() % 26;
 			const char character = 'a' + random;
 			*write++ = character;
 

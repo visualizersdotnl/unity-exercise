@@ -1,5 +1,5 @@
 
-/* GR-1: random number generator(s) */
+/* GR-1: random number generator(s) -- (C) Tasty Chips Electronics  */
 
 #include "random.h"
 // #include <time.h>
