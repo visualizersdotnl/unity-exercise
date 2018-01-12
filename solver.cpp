@@ -93,7 +93,9 @@ struct DictionaryNode
 		return false == word.empty();
 	}
 
+	// FIXME: I can eliminate this, and store 2 bits to determine if it's a word and if there's a 'Qu' in it.
 	std::string word;
+
 	std::map<char, DictionaryNode> children;
 	unsigned prefixCount;
 };
@@ -284,10 +286,11 @@ public:
 		char** words = const_cast<char**>(m_results.Words); // After all I own this data.
 		for (const std::string& word : m_wordsFound)
 		{
-			// Uses full word to get the correct score.
-			m_results.Score += GetWordScore(word);
-
 			const size_t length = word.length();
+
+			// Uses full word to get the correct score.
+			m_results.Score += GetWordScore(length);
+
 			*words = new char[length+1];
 			strcpy(*words++, word.c_str());
 		}
@@ -306,10 +309,9 @@ private:
 		return m_board[index];
 	}
 
-	inline unsigned GetWordScore(const std::string& word) const
+	inline unsigned GetWordScore(size_t length) const
 	{
 		const unsigned LUT[] = { 1, 1, 2, 3, 5, 11 };
-		size_t length = word.length();
 		if (length > 8) length = 8;
 		return LUT[length-3];
 	}
