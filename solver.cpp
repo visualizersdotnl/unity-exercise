@@ -425,11 +425,12 @@ private:
 			if (0 == node->prefixCount)
 			{
 				parent->children.erase(iNode);
+				return;
 			}
 		}
 
-		// Recurse if necessary (i.e. more letters to look for).
-		if (false == node->children.empty())
+		// Recurse if necessary (i.e. more words to look for).
+		if (node->prefixCount > 0)
 		{
 			// Before recursion, mark this board position as evaluated.
 			Board(iBoard) |= kTileVisitedBit;
