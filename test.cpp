@@ -1,7 +1,7 @@
 
 // #define USE_UNITY_REF_GRID
-#define PRINT_WORDS
-#define PRINT_GRID
+// #define PRINT_WORDS
+// #define PRINT_GRID
 
 // To even out the timing results a little, since clock() isn't the sharpest of knives.
 // WARNING: multiple queries causes leaks (no FreeWords() calls made except on the last set).

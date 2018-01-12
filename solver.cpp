@@ -1,4 +1,3 @@
-
 /*
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
 	Please take a minute to read this piece of text.
@@ -22,7 +21,7 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- https://fgiesen.wordpress.com/2011/01/17/texture-tiling-and-swizzling/
+		- Fix Morton mess (most importantly non-power-of-2 grids and 32-bit support).
 
 	Notes:
 		- Compile with full optimization (-O3 for ex.) for best performance.
@@ -54,7 +53,7 @@
 #define _CRT_SECURE_NO_WARNINGS 
 
 // Cache-coherency swizzling: yes or no?
-#define DO_NOT_SWIZZLE
+// #define DO_NOT_SWIZZLE
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -65,12 +64,26 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <unordered_map>
+#include <set>
 #include <mutex>
 
 #include "api.h"
 
-#define debug_print printf
-// inline void debug_print(const char* format, ...) {}
+// FIXME: 32-bit support, clean up the Morton mess, use 32-bit header!
+#include "MZC2D64.h"
+
+// #define debug_print printf
+inline void debug_print(const char* format, ...) {}
+
+// I'm flagging tiles of my sanitized copy of the board to prevent reuse of letters in a word, and I'm flagging the edges.
+const unsigned kEdgeBitX0      = (1 << 7);
+const unsigned kEdgeBitX1      = (1 << 8);
+const unsigned kEdgeBitY0      = (1 << 9);
+const unsigned kEdgeBitY1      = (1 << 10);
+const unsigned kTileVisitedBit = (1 << 11);
+const unsigned kTileEdgeMask   = kEdgeBitX0|kEdgeBitX1|kEdgeBitY0|kEdgeBitY1;
+const unsigned kTileFlagMask   = kEdgeBitX0|kEdgeBitX1|kEdgeBitY0|kEdgeBitY1|kTileVisitedBit;
 
 // We'll be using a word tree built out of these simple nodes.
 struct DictionaryNode
@@ -82,6 +95,7 @@ struct DictionaryNode
 
 	std::string word;
 	std::map<char, DictionaryNode> children;
+	unsigned prefixCount;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
@@ -125,10 +139,10 @@ static void AddWordToDictionary(const std::string& word, size_t& longestWord, si
 		current = &current->children[letter];
 
 		// Handle 'Qu' rule.
-		if ('q' == letter)
+		if ('Q' == letter)
 		{
 			auto next = iLetter+1;
-			if (next == word.end() || *next != 'u') 
+			if (next == word.end() || *next != 'U') 
 			{
 				debug_print("Skipped word due to 'Qu' rule: %s\n", word.c_str());
 
@@ -137,10 +151,12 @@ static void AddWordToDictionary(const std::string& word, size_t& longestWord, si
 			}
 			else
 			{
-				// Skip over 'u'.
+				// Skip over 'U'.
 				++iLetter;
 			}
 		}
+
+		++current->prefixCount;
 	}
 
 	current->word = word;
@@ -174,7 +190,7 @@ void LoadDictionary(const char* path)
 		if (0 != isalpha((unsigned char) character))
 		{
 			// Boggle tiles are simply A-Z, where Q means 'Qu'.
-			word += tolower(character);
+			word += toupper(character);
 		}
 		else
 		{
@@ -198,19 +214,17 @@ void FreeDictionary()
 	DictionaryLock lock;
 	s_dictTree.word.clear();
 	s_dictTree.children.clear();
+	s_dictTree.prefixCount = 0;
 }
 
 // This class contains the actual solver and it's entire context, including a local copy of the dictionary.
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
-// I'm flagging tiles of my sanitized copy of the board to prevent reuse of letters in a word.
-const unsigned kTileVisitedBit = 128;
-
 class Query
 {
 public:
-	Query(Results& results, char* sanitized, unsigned width, unsigned height) :
+	Query(Results& results, int* sanitized, unsigned width, unsigned height) :
 		m_results(results)
 ,		m_board(sanitized)
 ,		m_width(width)
@@ -233,6 +247,7 @@ public:
 
 		m_wordsFound.clear();
 
+#if defined(DO_NOT_SWIZZLE)
 		if (false == m_tree.children.empty())
 		{
 			for (unsigned iY = 0; iY < m_height; ++iY)
@@ -243,6 +258,23 @@ public:
 				}
 			}
 		}
+#else
+		if (false == m_tree.children.empty())
+		{
+			unsigned mortonY = ullMC2Dencode(0, 0);
+			for (unsigned iY = 0; iY < m_height; ++iY)
+			{
+				unsigned morton2D = mortonY;
+				for (unsigned iX = 0; iX < m_width; ++iX)
+				{
+					TraverseBoard(morton2D, &m_tree);
+					morton2D = ullMC2Dxplusv(morton2D, 1);
+				}
+
+				mortonY = ullMC2Dyplusv(mortonY, 1);
+			}
+		}
+#endif
 
 		// Copy words to Results structure and calculate the score.
 		m_results.Count = (unsigned) m_wordsFound.size();
@@ -250,7 +282,7 @@ public:
 		m_results.Score = 0;
 		
 		char** words = const_cast<char**>(m_results.Words); // After all I own this data.
-		for (const std::string& word:m_wordsFound)
+		for (const std::string& word : m_wordsFound)
 		{
 			// Uses full word to get the correct score.
 			m_results.Score += GetWordScore(word);
@@ -269,13 +301,9 @@ private:
 		m_tree = s_dictTree;
 	}
 
-	inline char& Board(unsigned index)
+	inline int& Board(unsigned index)
 	{
-#if defined(DO_NOT_SWIZZLE)
 		return m_board[index];
-#else
-		return m_board[index];
-#endif
 	}
 
 	inline unsigned GetWordScore(const std::string& word) const
@@ -286,18 +314,23 @@ private:
 		return LUT[length-3];
 	}
 
+#if defined(DO_NOT_SWIZZLE)
+
+	// NOTE: this path isn't really optimized anymore.
+	// An idea can be to use it for smaller boards.
+
 	inline void TraverseBoard(unsigned iY, unsigned iX, DictionaryNode* parent)
 	{
 		const unsigned iBoard = iY*m_width + iX;
+		const int tile = Board(iBoard);
 
-		const char letter = Board(iBoard);
-
-		// Using the MSB of the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
-		if (letter & kTileVisitedBit)
+		// Using a bit on the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
+		if (tile & kTileVisitedBit)
 		{
 			return;
 		}
 
+		const char letter = tile & ~kTileFlagMask;
 		auto iNode = parent->children.find(letter);
 		if (iNode == parent->children.end())
 		{
@@ -306,7 +339,7 @@ private:
 		}
 
 		DictionaryNode* node = &iNode->second;
-		if (node->IsWord())
+		if (true == node->IsWord())
 		{
 			// Found a word.
 			m_wordsFound.push_back(node->word);
@@ -324,9 +357,6 @@ private:
 
 			const unsigned boundY = m_height-1;
 			const unsigned boundX = m_width-1;
-
-			// Left and right won't kill the cache rightaway, not on bigger boards either.
-			// But still, this needs swizzling.
 
 			if (iX > 0)
 			{
@@ -360,10 +390,95 @@ private:
 			Board(iBoard) &= ~kTileVisitedBit;
 		}
 	}
+#else
+	inline void TraverseBoard(unsigned mortonCode, DictionaryNode* parent)
+	{
+		const unsigned iBoard = mortonCode;
+		const int tile = Board(iBoard);
 
+		// Using a bit on the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
+		if (tile & kTileVisitedBit)
+		{
+			return;
+		}
+
+		const char letter = tile & ~kTileFlagMask;
+		auto iNode = parent->children.find(letter);
+		if (iNode == parent->children.end())
+		{
+			// This letter doesn't yield anything from this point onward.
+			return;
+		}
+
+		DictionaryNode* node = &iNode->second;
+		if (true == node->IsWord())
+		{
+			// Found a word.
+			m_wordsFound.push_back(node->word);
+//			debug_print("Word found: %s\n", node->word.c_str());
+
+			// In this run we don't want to find this word again, so wipe it.
+			node->word.clear();
+
+			// And get rid of the child node if necessary.
+			--node->prefixCount;
+			if (0 == node->prefixCount)
+			{
+				parent->children.erase(iNode);
+			}
+		}
+
+		// Recurse if necessary (i.e. more letters to look for).
+		if (false == node->children.empty())
+		{
+			// Before recursion, mark this board position as evaluated.
+			Board(iBoard) |= kTileVisitedBit;
+//			++recursion;
+
+			const bool edgeX0 = tile & kEdgeBitX0;
+			const bool edgeX1 = tile & kEdgeBitX1;
+
+			// Top row.
+			if (0 == (tile & kEdgeBitY0))
+			{
+				const unsigned mortonY = ullMC2Dyminusv(mortonCode, 1);
+				TraverseBoard(mortonY, node);
+				if (!edgeX0) TraverseBoard(ullMC2Dxminusv(mortonY, 1), node);
+				if (!edgeX1) TraverseBoard(ullMC2Dxplusv(mortonY, 1), node);
+			}
+
+			// Bottom row.
+			if (0 == (tile & kEdgeBitY1))
+			{
+				const unsigned mortonY = ullMC2Dyplusv(mortonCode, 1);
+				TraverseBoard(mortonY, node); 
+				if (!edgeX0) TraverseBoard(ullMC2Dxminusv(mortonY, 1), node); 
+				if (!edgeX1) TraverseBoard(ullMC2Dxplusv(mortonY, 1), node); 
+			}
+
+			if (!edgeX0)
+			{
+				// Left.
+				const unsigned mortonX0 = ullMC2Dxminusv(mortonCode, 1);
+				TraverseBoard(mortonX0, node);
+			}
+
+			if (!edgeX1)
+			{
+				// Right.
+				const unsigned mortonX1 = ullMC2Dxplusv(mortonCode, 1);
+				TraverseBoard(mortonX1, node);
+			}
+
+			// Open up this position on the board again.
+			Board(iBoard) &= ~kTileVisitedBit;
+//			--recursion;
+		}
+	}
+#endif
 
 	Results& m_results;
-	char* const m_board;
+	int* const m_board;
 	const unsigned m_width, m_height;
 	const size_t m_gridSize;
 
@@ -388,23 +503,56 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		const unsigned gridSize = width*height;
 
 #if defined(DO_NOT_SWIZZLE)
-		std::unique_ptr<char[]> sanitized(new char[gridSize]);
-		for (unsigned iTile = 0; iTile < gridSize; ++iTile)
+		std::unique_ptr<int[]> sanitized(new int[gridSize]);
+
+		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			const char letter = *board++;
-			if (0 != isalpha((unsigned char) letter))
+			const int yEdgeBit = (iY == 0) ? kEdgeBitY0 : (iY == height-1) ? kEdgeBitY1 : 0;
+			for (unsigned iX = 0; iX < width; ++iX)
 			{
-				sanitized[iTile] = tolower(letter);
-			}
-			else
-			{
-				// Invalid character: skip query.
-				return results;
+				const int xEdgeBit = (iX == 0) ? kEdgeBitX0 : (iX == width-1) ? kEdgeBitX1 : 0;
+				const char letter = *board++;
+				if (0 != isalpha((unsigned char) letter))
+				{
+					int sanity = toupper(letter);
+					sanity |= yEdgeBit | xEdgeBit;
+					sanitized[iY*width + iX] = sanity;
+				}
+				else
+				{
+					// Invalid character: skip query.
+					return results;
+				}
 			}
 		}
 #elif !defined (DO_NOT_SWIZZLE)
-		std::unique_ptr<char[]> sanitized(new char[gridSize]);
-		memcpy(sanitized.get(), board, gridSize);		
+		debug_print("Grid swizzle (cache optimization) enabled.\n");
+
+		std::unique_ptr<int[]> sanitized(new int[gridSize]);
+
+		for (unsigned iY = 0; iY < height; ++iY)
+		{
+			const int yEdgeBit = (iY == 0) ? kEdgeBitY0 : (iY == height-1) ? kEdgeBitY1 : 0;
+			for (unsigned iX = 0; iX < width; ++iX)
+			{
+				const int xEdgeBit = (iX == 0) ? kEdgeBitX0 : (iX == width-1) ? kEdgeBitX1 : 0;
+				const char letter = *board++;
+				if (0 != isalpha((unsigned char) letter))
+				{
+					int sanity = toupper(letter);
+					sanity |= yEdgeBit|xEdgeBit;
+
+					// FIXME: this write is out of order, and could be faster, look at Fabian Giesen's article.
+					const unsigned mortonCode = ullMC2Dencode(iX, iY);
+					sanitized[mortonCode] = sanity;
+				}
+				else
+				{
+					// Invalid character: skip query.
+					return results;
+				}
+			}
+		}
 #endif
 
 		Query query(results, sanitized.get(), width, height);
