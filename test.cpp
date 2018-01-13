@@ -5,7 +5,7 @@
 
 // To even out the timing results a little, since clock() isn't the sharpest of knives.
 // WARNING: multiple queries causes leaks (no FreeWords() calls made except on the last set).
-#define NUM_QUERIES 1
+#define NUM_QUERIES 4
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -19,6 +19,8 @@
 
 int main(int argC, char **arguments)
 {
+	if (NUM_QUERIES > 1) printf("Running multiple queries (%u), which means there'll be some lazy leaks :-)\n", NUM_QUERIES);
+
 	initialize_random_generator();
 
 #ifndef USE_UNITY_REF_GRID
@@ -94,7 +96,8 @@ int main(int argC, char **arguments)
 	FreeWords(results);
 	FreeDictionary();
 
-	printf("\nSolver ran %u times for avg. %.2f second(s), %.4f sec. per tile.\n", (unsigned) NUM_QUERIES, (end-start)/CLOCKS_PER_SEC/NUM_QUERIES, gridSize/(end-start));
+	float avgTime = (end-start)/CLOCKS_PER_SEC/NUM_QUERIES;
+	printf("\nSolver ran %u times for avg. %.2f second(s), %.8f sec. per tile.\n", (unsigned) NUM_QUERIES, avgTime, avgTime/gridSize);
 	// ^^ Reports a false positive in Valgrind on OSX.
 
 	return 0;

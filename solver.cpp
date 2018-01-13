@@ -1,5 +1,6 @@
 /*
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
+	Updated thereafter :-)
 	Please take a minute to read this piece of text.
 
 	Rules:
@@ -22,6 +23,9 @@
 
 	To do:
 		- Fix Morton mess (most importantly non-power-of-2 grids and 32-bit support).
+		- FIXMEs
+		- What's with this dynamic programming deal? Seems like I could use early outs.
+		- Cache-wise I perform favorably now, my tile cost decreasing (or steadying at least) with bigger grids.
 
 	Notes:
 		- Compile with full optimization (-O3 for ex.) for best performance.
@@ -64,8 +68,8 @@
 #include <vector>
 #include <string>
 #include <map>
-#include <unordered_map>
-#include <set>
+// #include <unordered_map>
+// #include <set>
 #include <mutex>
 
 #include "api.h"
@@ -291,6 +295,7 @@ public:
 			// Uses full word to get the correct score.
 			m_results.Score += GetWordScore(length);
 
+			// FIXME: this takes a fucking second or more..
 			*words = new char[length+1];
 			strcpy(*words++, word.c_str());
 		}
@@ -360,18 +365,6 @@ private:
 			const unsigned boundY = m_height-1;
 			const unsigned boundX = m_width-1;
 
-			if (iX > 0)
-			{
-				// Left.
-				TraverseBoard(iY, iX-1, node);
-			}
-
-			if (iX < boundX)
-			{
-				// Right.
-				TraverseBoard(iY, iX+1, node);
-			}
-
 			// Top row.
 			if (iY > 0) 
 			{
@@ -386,6 +379,18 @@ private:
 				TraverseBoard(iY+1, iX, node); 
 				if (iX > 0) TraverseBoard(iY+1, iX-1, node); 
 				if (iX < boundX) TraverseBoard(iY+1, iX+1, node); 
+			}
+
+			if (iX > 0)
+			{
+				// Left.
+				TraverseBoard(iY, iX-1, node);
+			}
+
+			if (iX < boundX)
+			{
+				// Right.
+				TraverseBoard(iY, iX+1, node);
 			}
 
 			// Open up this position on the board again.
@@ -444,19 +449,19 @@ private:
 			// Top row.
 			if (0 == (tile & kEdgeBitY0))
 			{
-				const unsigned mortonY = ullMC2Dyminusv(mortonCode, 1);
-				TraverseBoard(mortonY, node);
-				if (!edgeX0) TraverseBoard(ullMC2Dxminusv(mortonY, 1), node);
-				if (!edgeX1) TraverseBoard(ullMC2Dxplusv(mortonY, 1), node);
+				const unsigned mortonY0 = ullMC2Dyminusv(mortonCode, 1);
+				TraverseBoard(mortonY0, node);
+				if (!edgeX0) TraverseBoard(ullMC2Dxminusv(mortonY0, 1), node);
+				if (!edgeX1) TraverseBoard(ullMC2Dxplusv(mortonY0, 1), node);
 			}
 
 			// Bottom row.
 			if (0 == (tile & kEdgeBitY1))
 			{
-				const unsigned mortonY = ullMC2Dyplusv(mortonCode, 1);
-				TraverseBoard(mortonY, node); 
-				if (!edgeX0) TraverseBoard(ullMC2Dxminusv(mortonY, 1), node); 
-				if (!edgeX1) TraverseBoard(ullMC2Dxplusv(mortonY, 1), node); 
+				const unsigned mortonY1 = ullMC2Dyplusv(mortonCode, 1);
+				TraverseBoard(mortonY1, node); 
+				if (!edgeX0) TraverseBoard(ullMC2Dxminusv(mortonY1, 1), node); 
+				if (!edgeX1) TraverseBoard(ullMC2Dxplusv(mortonY1, 1), node); 
 			}
 
 			if (!edgeX0)
@@ -502,7 +507,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
 		// Yes: sanitize it (check for illegal input and force all to lowercase).
-		// TODO: and swizzle it.
 		const unsigned gridSize = width*height;
 
 #if defined(DO_NOT_SWIZZLE)
@@ -510,15 +514,15 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			const int yEdgeBit = (iY == 0) ? kEdgeBitY0 : (iY == height-1) ? kEdgeBitY1 : 0;
+//			const int yEdgeBit = (iY == 0) ? kEdgeBitY0 : (iY == height-1) ? kEdgeBitY1 : 0;
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
-				const int xEdgeBit = (iX == 0) ? kEdgeBitX0 : (iX == width-1) ? kEdgeBitX1 : 0;
+//				const int xEdgeBit = (iX == 0) ? kEdgeBitX0 : (iX == width-1) ? kEdgeBitX1 : 0;
 				const char letter = *board++;
 				if (0 != isalpha((unsigned char) letter))
 				{
 					int sanity = toupper(letter);
-					sanity |= yEdgeBit | xEdgeBit;
+//					sanity |= yEdgeBit | xEdgeBit;
 					sanitized[iY*width + iX] = sanity;
 				}
 				else
@@ -545,7 +549,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 					int sanity = toupper(letter);
 					sanity |= yEdgeBit|xEdgeBit;
 
-					// FIXME: this write is out of order, and could be faster, look at Fabian Giesen's article.
+					// FIXME: this RW pattern can be faster, look at Fabian Giesen's article.
 					const unsigned mortonCode = ullMC2Dencode(iX, iY);
 					sanitized[mortonCode] = sanity;
 				}
