@@ -22,13 +22,14 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- Per-thread visited array?
+		- Per-thread visited array? Keep it?
 		- Review threading strategy (tree balance), grid splits.
 		- Fix Morton mess (most importantly non-power-of-2 grids and 32-bit support).
 		- Clean up the mess in general (uint64_t).
 		- Better early-outs!
 		- FIXMEs
 		- Platform testing.
+		- More Valgrinding.
 
 	Notes:
 		- Compile with full optimization (-O3 for ex.) for best performance.
@@ -85,13 +86,13 @@
 // FIXME: 32-bit support, clean up the Morton mess, use 32-bit header!
 #include "MZC2D64.h"
 
-#define debug_print printf
-// inline void debug_print(const char* format, ...) {}
+// #define debug_print printf
+inline void debug_print(const char* format, ...) {}
 
 const unsigned kAlphaRange = ('Z'-'A')+1;
 
 // FIXME: this is of course a bit primitive, best look for available cores.
-const unsigned kNumThreads = 2;
+const unsigned kNumThreads = 1;
 
 // I flag edge tiles.
 const unsigned kEdgeBitX0  = (1 << 8);
@@ -285,15 +286,20 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
+// typedef std::vector<std::atomic<int>> Board;
+typedef std::vector<int> Board;
+
 class Query
 {
 public:
-	Query(Results& results, std::vector<std::atomic<int>>& sanitized, unsigned width, unsigned height) :
+	Query(Results& results, Board& sanitized, unsigned width, unsigned height) :
 		m_results(results)
 ,		m_board(sanitized)
 ,		m_width(width)
 ,		m_height(height)
-,		m_gridSize(width*height) {}
+,		m_gridSize(width*height) 
+	{
+	}
 
 	~Query() {}
 
@@ -304,13 +310,20 @@ private:
 		ThreadContext(unsigned iThread, Query* instance, DictionaryNode* parent) :
 		iThread(iThread)
 ,		instance(instance)
-,		parent(parent) {}
+,		parent(parent)
+,		visited(new bool[instance->m_gridSize]) 
+		{
+			memset(visited.get(), 0, instance->m_gridSize*sizeof(bool));
+		}
+
+		~ThreadContext() {}
 
 		// FIXME: references!
 		const unsigned iThread;
 		Query* instance; // FIXME: what do I really want to know?
 		DictionaryNode* parent;
 		std::vector<std::string> wordsFound;
+		std::unique_ptr<bool[]> visited;
 	};
 
 public:
@@ -401,7 +414,7 @@ private:
 #else
 		if (false == parent->children.empty())
 		{
-			if (context->iThread & 1)
+			if (1) // (context->iThread & 1)
 			{
 				uint64_t mortonY = ullMC2Dencode(0, 0);
 				for (unsigned iY = 0; iY < height; ++iY)
@@ -452,13 +465,12 @@ private:
 
 #if defined(DO_NOT_SWIZZLE)
 
-	// NOTE: this path isn't really optimized anymore.
-	// An idea can be to use it for smaller boards.
+	// NOTE: this is not kept up to date momentarily.
 
 	inline static void TraverseBoard(ThreadContext* context, unsigned iY, unsigned iX, DictionaryNode* parent)
 	{
 		// This is safe since we won't be fiddling with data except thread-specific bits.
-		std::vector<std::atomic<int>>& board = context->instance->m_board;
+		Board& board = context->instance->m_board;
 
 		const unsigned width = context->instance->m_width;
 		const unsigned height = context->instance->m_height;
@@ -536,18 +548,24 @@ private:
 #else
 	inline static void TraverseBoard(ThreadContext* context, uint64_t mortonCode, DictionaryNode* parent)
 	{
-		// This is safe since we won't be fiddling with data except thread-specific bits.
-		std::vector<std::atomic<int>>& board = context->instance->m_board;
-
 		const uint64_t iBoard = mortonCode;
+
+		bool& visited = context->visited[iBoard];
+		if (true == visited)
+			return;
+
+		// This is safe since we won't be fiddling with data except thread-specific bits, maybe.
+		Board& board = context->instance->m_board;
 		const int tile = board[iBoard];
 
+/*
 		// Using a bit on the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
 		const unsigned kTileVisitedBit = TileVisitedFlag(context->iThread);
 		if (tile & kTileVisitedBit)
 		{
 			return;
 		}
+*/
 
 		const char letter = tile & kTileLetterMask;
 		auto iNode = parent->children.find(letter);
@@ -572,7 +590,8 @@ private:
 		if (false == node->children.empty())
 		{
 			// Before recursion, mark this board position as evaluated.
-			board[iBoard] |= kTileVisitedBit;
+//			board[iBoard] |= kTileVisitedBit;
+			visited = true;
 
 			const bool edgeX0 = tile & kEdgeBitX0;
 			const bool edgeX1 = tile & kEdgeBitX1;
@@ -610,13 +629,14 @@ private:
 			}
 
 			// Open up this position on the board again.
-			board[iBoard] &= ~kTileVisitedBit;
+//			board[iBoard] &= ~kTileVisitedBit;
+			visited = false;
 		}
 	}
 #endif
 
 	Results& m_results;
-	std::vector<std::atomic<int>>& m_board;
+	Board& m_board;
 	const unsigned m_width, m_height;
 	const size_t m_gridSize;
 
@@ -636,10 +656,9 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	{
 		// Yes: sanitize it (check for illegal input and force all to lowercase).
 		const unsigned gridSize = width*height;
+		Board sanitized(gridSize);
 
 #if defined(DO_NOT_SWIZZLE)
-		std::vector<std::atomic<int>> sanitized(gridSize);
-
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
 			const int yEdgeBit = (iY == 0) ? kEdgeBitY0 : (iY == height-1) ? kEdgeBitY1 : 0;
@@ -664,8 +683,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		// FIXME: this RW pattern can be faster, look at Ryg's article.
 
 		debug_print("Grid swizzle (cache optimization) enabled.\n");
-
-		std::vector<std::atomic<int>> sanitized(gridSize);
 
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
