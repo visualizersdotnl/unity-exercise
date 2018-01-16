@@ -307,10 +307,9 @@ private:
 	class ThreadContext
 	{
 	public:
-		ThreadContext(unsigned iThread, Query* instance, DictionaryNode* parent) :
+		ThreadContext(unsigned iThread, Query* instance) :
 		iThread(iThread)
 ,		instance(instance)
-,		parent(parent)
 ,		visited(new bool[instance->m_gridSize]) 
 		{
 			memset(visited.get(), 0, instance->m_gridSize*sizeof(bool));
@@ -321,7 +320,6 @@ private:
 		// FIXME: references!
 		const unsigned iThread;
 		Query* instance; // FIXME: what do I really want to know?
-		DictionaryNode* parent;
 		std::vector<std::string> wordsFound;
 		std::unique_ptr<bool[]> visited;
 	};
@@ -349,8 +347,8 @@ public:
 
 		for (unsigned iThread = 0; iThread < numThreads; ++iThread)
 		{
-			contexts.push_back(new ThreadContext(iThread, this, &m_trees[iThread]));
-			threads.push_back(new std::thread(ExecuteThread, contexts[iThread]));
+			contexts.push_back(new ThreadContext(iThread, this));
+			threads.push_back(new std::thread(ExecuteThread, contexts[iThread], &m_trees[iThread]));
 		}
 
 		for (auto* thread : threads)
@@ -391,14 +389,13 @@ public:
 	}
 
 private:
-	static void ExecuteThread(ThreadContext* context)
+	static void ExecuteThread(ThreadContext* context, DictionaryNode* parent)
 	{
 		// FIXME: ref.
 		Query& query = *context->instance;
 
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
-		DictionaryNode* parent = context->parent;
 
 #if defined(DO_NOT_SWIZZLE)
 		if (false == parent->children.empty())
@@ -414,7 +411,7 @@ private:
 #else
 		if (false == parent->children.empty())
 		{
-			if (1) // (context->iThread & 1)
+			if (0) // (context->iThread & 1)
 			{
 				uint64_t mortonY = ullMC2Dencode(0, 0);
 				for (unsigned iY = 0; iY < height; ++iY)
@@ -582,8 +579,17 @@ private:
 			context->wordsFound.push_back(node->word);
 //			debug_print("Word found: %s\n", node->word.c_str());
 
-			// In this run we don't want to find this word again, so wipe it.
-			node->word.clear();
+			if (true == node->children.empty())
+			{
+				// End of the line? Kill it.
+				parent->children.erase(iNode);
+				return;
+			}
+			else
+			{
+				// In this run we don't want to find this word again, so wipe it.
+				node->word.clear();
+			}
 		}
 
 		// Recurse if necessary (i.e. more words to look for).
