@@ -76,8 +76,8 @@
 // FIXME: 32-bit support, clean up the Morton mess, use 32-bit header!
 #include "MZC2D64.h"
 
-// #define debug_print printf
-inline void debug_print(const char* format, ...) {}
+#define debug_print printf
+// inline void debug_print(const char* format, ...) {}
 
 const unsigned kAlphaRange = ('Z'-'A')+1;
 
@@ -167,7 +167,7 @@ static void AddWordToDictionary(const std::string& word)
 	// Word not too short?
 	if (word.length() < 3)
 	{
-		debug_print("Skipped word because it's got less than 3 letters: %s\n", word.c_str());
+//		debug_print("Skipped word because it's got less than 3 letters: %s\n", word.c_str());
 		return;
 	}
 
@@ -191,7 +191,7 @@ static void AddWordToDictionary(const std::string& word)
 			auto next = iLetter+1;
 			if (next == word.end() || *next != 'U') 
 			{
-				debug_print("Skipped word due to 'Qu' rule: %s\n", word.c_str());
+//				debug_print("Skipped word due to 'Qu' rule: %s\n", word.c_str());
 
 				// This word can't be made with the boggle tiles due to the 'Qu' rule.
 				return;
@@ -355,8 +355,8 @@ public:
 				m_results.Score += GetWordScore(length);
 
 				// FIXME: this takes a fucking second or more..
-//				*words_cstr = new char[length+1];
-//				strcpy(*words_cstr++, word.c_str());
+				*words_cstr = new char[length+1];
+				strcpy(*words_cstr++, word.c_str());
 			}
 
 			delete context;
