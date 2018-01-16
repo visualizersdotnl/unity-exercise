@@ -22,14 +22,7 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- Per-thread visited array? Keep it?
-		- Review threading strategy (tree balance), grid splits.
-		- Fix Morton mess (most importantly non-power-of-2 grids and 32-bit support).
-		- Clean up the mess in general (uint64_t).
-		- Better early-outs!
-		- FIXMEs
-		- Platform testing.
-		- More Valgrinding.
+		- Fix everything.
 
 	Notes:
 		- Compile with full optimization (-O3 for ex.) for best performance.
@@ -60,9 +53,6 @@
 // Make VC++ 2015 shut up and walk in line.
 #define _CRT_SECURE_NO_WARNINGS 
 
-// Cache-coherency swizzling: yes or no?
-// #define DO_NOT_SWIZZLE
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -91,26 +81,19 @@ inline void debug_print(const char* format, ...) {}
 
 const unsigned kAlphaRange = ('Z'-'A')+1;
 
-// FIXME: this is of course a bit primitive, best look for available cores.
-const unsigned kNumThreads = 1;
+const unsigned kNumThreads = 1; // std::thread::hardware_concurrency();
 
-// I flag edge tiles.
-const unsigned kEdgeBitX0  = (1 << 8);
-const unsigned kEdgeBitX1  = (1 << 9);
-const unsigned kEdgeBitY0  = (1 << 10);
-const unsigned kEdgeBitY1  = (1 << 11);
+// To mask recursion bits.
+const unsigned kTileLetterMask = 128-1;
 
 // And, a bit per thread, the tiles I've visited during recursion.
-const unsigned kTileFlagOffs = 12;
+const unsigned kTileFlagBitOffs = 8;
 
-// The same board is used for all threads and this is the only bit that's written, that way the memory can be safely shared (for now).
+// An atomic vector is shared among threads, we need a bit per thread to properly recurse.
 inline unsigned TileVisitedFlag(unsigned iThread) 
 { 
-	return 1 << (kTileFlagOffs+iThread); 
+	return 1 << (kTileFlagBitOffs+iThread); 
 }
-
-// This one is only to be used to isolate the actual letter (FIXME: I use 7 bits, but I could easily do with less by subtracting an offset).
-const unsigned kTileLetterMask = 128-1;
 
 // Lookup table to distribute root nodes among threads (FIXME: very primitive).
 static std::vector<unsigned> s_letterThreadLUT;
@@ -154,16 +137,16 @@ public:
 		return false == word.empty();
 	}
 
-	// FIXME: I can eliminate this, and store 2 bits to determine if it's a word and if there's a 'Qu' in it.
+	// FIXME: not optimal either.
 	std::string word;
-
 	std::map<char, DictionaryNode> children;
-//	unsigned prefixCount;
 };
 
 // We keep one dictionary (in subsets) at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 static std::vector<DictionaryNode> s_dictTrees;
+static size_t s_longestWord;
+static size_t s_wordCount;
 
 // Scoped lock for all dictionary globals.
 class DictionaryLock
@@ -177,7 +160,7 @@ private:
 };
 
 // Input word must be uppercase!
-static void AddWordToDictionary(const std::string& word, size_t& longestWord, size_t& wordCount)
+static void AddWordToDictionary(const std::string& word)
 {
 	const size_t length = word.length();
 
@@ -188,10 +171,10 @@ static void AddWordToDictionary(const std::string& word, size_t& longestWord, si
 		return;
 	}
 
-	if (length > longestWord)
+	if (length > s_longestWord)
 	{
 		// Longest word thus far (just a print statistic).
-		longestWord = length;
+		s_longestWord = length;
 	}
 
 	// As a first strategy we'll split at the root, disregarding the balance (FIXME).
@@ -219,12 +202,10 @@ static void AddWordToDictionary(const std::string& word, size_t& longestWord, si
 				++iLetter;
 			}
 		}
-
-//		++current->prefixCount;
 	}
 
 	current->word = word;
-	++wordCount;
+	++s_wordCount;
 }
 
 void LoadDictionary(const char* path)
@@ -249,7 +230,6 @@ void LoadDictionary(const char* path)
 
 	int character;
 	std::string word;
-	size_t longestWord = 0, wordCount = 0;
 
 	do
 	{
@@ -264,7 +244,7 @@ void LoadDictionary(const char* path)
 			// We've hit EOF or a non-alphanumeric character.
 			if (false == word.empty()) // Got a word?
 			{
-				AddWordToDictionary(word, longestWord, wordCount);
+				AddWordToDictionary(word);
 				word.clear();
 			}
 		}
@@ -273,21 +253,23 @@ void LoadDictionary(const char* path)
 
 	fclose(file);
 
-	debug_print("Dictionary loaded. %zu words, longest being %zu characters\n", wordCount, longestWord);
+	debug_print("Dictionary loaded. %zu words, longest being %zu characters\n", s_wordCount, s_longestWord);
 }
 
 void FreeDictionary()
 {
 	DictionaryLock lock;
 	s_dictTrees.resize(kNumThreads, DictionaryNode());
+
+	s_wordCount = 0;
+	s_longestWord = 0;
 }
 
 // This class contains the actual solver and it's entire context, including a local copy of the dictionary.
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
-// typedef std::vector<std::atomic<int>> Board;
-typedef std::vector<int> Board;
+typedef std::vector<std::atomic<int>> Board;
 
 class Query
 {
@@ -310,18 +292,16 @@ private:
 		ThreadContext(unsigned iThread, Query* instance) :
 		iThread(iThread)
 ,		instance(instance)
-,		visited(new bool[instance->m_gridSize]) 
 		{
-			memset(visited.get(), 0, instance->m_gridSize*sizeof(bool));
+			wordsFound.reserve(s_wordCount/kNumThreads); // FIXME: smarter!
 		}
 
 		~ThreadContext() {}
 
-		// FIXME: references!
+		// FIXME: references?
 		const unsigned iThread;
 		Query* instance; // FIXME: what do I really want to know?
 		std::vector<std::string> wordsFound;
-		std::unique_ptr<bool[]> visited;
 	};
 
 public:
@@ -333,14 +313,10 @@ public:
 			FreeWords(m_results);
 		}
 
-		// Get a copy of the current dictionary.
-		// TraverseBoard() changes the local copy at runtime, so we need this in case of multiple Execute() calls.
-		GetLatestDictionary();
-
 		// Kick off threads.
 		const unsigned numThreads = kNumThreads;
 
-		std::vector<std::thread*> threads;
+		std::vector<std::thread> threads;
 		std::vector<ThreadContext*> contexts; // FIXME: can go into TLS.
 
 		debug_print("Kicking off %u threads.\n", numThreads);
@@ -348,13 +324,12 @@ public:
 		for (unsigned iThread = 0; iThread < numThreads; ++iThread)
 		{
 			contexts.push_back(new ThreadContext(iThread, this));
-			threads.push_back(new std::thread(ExecuteThread, contexts[iThread], &m_trees[iThread]));
+			threads.push_back(std::thread(ExecuteThread, contexts[iThread]));
 		}
 
-		for (auto* thread : threads)
+		for (auto& thread : threads)
 		{
-			thread->join();
-			delete thread;
+			thread.join();
 		}
 
 		m_results.Count = 0;
@@ -380,8 +355,8 @@ public:
 				m_results.Score += GetWordScore(length);
 
 				// FIXME: this takes a fucking second or more..
-				*words_cstr = new char[length+1];
-				strcpy(*words_cstr++, word.c_str());
+//				*words_cstr = new char[length+1];
+//				strcpy(*words_cstr++, word.c_str());
 			}
 
 			delete context;
@@ -389,70 +364,39 @@ public:
 	}
 
 private:
-	static void ExecuteThread(ThreadContext* context, DictionaryNode* parent)
+	static void ExecuteThread(ThreadContext* context)
 	{
+		// Grab a copy of the part of the dictionary we need.
+		DictionaryNode subDict;
+		{
+			DictionaryLock lock;
+			subDict = s_dictTrees[context->iThread];
+		}
+
 		// FIXME: ref.
 		Query& query = *context->instance;
 
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
 
-#if defined(DO_NOT_SWIZZLE)
-		if (false == parent->children.empty())
+		if (false == subDict.children.empty())
 		{
-			for (unsigned iY = 0; iY < height; ++iY)
+			uint64_t mortonX = ullMC2Dencode(0, 0);
+			for (unsigned iX = 0; iX < width; ++iX)
 			{
-				for (unsigned iX = 0; iX < width; ++iX)
-				{
-					TraverseBoard(context, iY, iX, parent);
-				}
-			}
-		}
-#else
-		if (false == parent->children.empty())
-		{
-			if (0) // (context->iThread & 1)
-			{
-				uint64_t mortonY = ullMC2Dencode(0, 0);
+				uint64_t morton2D = mortonX;
 				for (unsigned iY = 0; iY < height; ++iY)
 				{
-					uint64_t morton2D = mortonY;
-					for (unsigned iX = 0; iX < width; ++iX)
-					{
-						TraverseBoard(context, morton2D, parent);
-						morton2D = ullMC2Dxplusv(morton2D, 1);
-					}
-
-					mortonY = ullMC2Dyplusv(mortonY, 1);
+					TraverseBoard(context, morton2D, &subDict);
+					morton2D = ullMC2Dyplusv(morton2D, 1);
 				}
-			}
-			else
-			{
-				uint64_t mortonX = ullMC2Dencode(0, 0);
-				for (unsigned iX = 0; iX < width; ++iX)
-				{
-					uint64_t morton2D = mortonX;
-					for (unsigned iY = 0; iY < height; ++iY)
-					{
-						TraverseBoard(context, morton2D, parent);
-						morton2D = ullMC2Dyplusv(morton2D, 1);
-					}
 
-					mortonX = ullMC2Dxplusv(mortonX, 1);
-				}
+				mortonX = ullMC2Dxplusv(mortonX, 1);
 			}
 		}
-#endif
 	}
 
 private:
-
-	void GetLatestDictionary()
-	{
-		DictionaryLock lock;
-		m_trees = s_dictTrees;
-	}
-
 	inline unsigned GetWordScore(size_t length) const
 	{
 		const unsigned LUT[] = { 1, 1, 2, 3, 5, 11 };
@@ -460,111 +404,21 @@ private:
 		return LUT[length-3];
 	}
 
-#if defined(DO_NOT_SWIZZLE)
-
-	// NOTE: this is not kept up to date momentarily.
-
-	inline static void TraverseBoard(ThreadContext* context, unsigned iY, unsigned iX, DictionaryNode* parent)
-	{
-		// This is safe since we won't be fiddling with data except thread-specific bits.
-		Board& board = context->instance->m_board;
-
-		const unsigned width = context->instance->m_width;
-		const unsigned height = context->instance->m_height;
-
-		const unsigned iBoard = iY*width + iX;
-		const int tile = board[iBoard];
-
-		// Using a bit on the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
-		const unsigned kTileVisitedBit = TileVisitedFlag(context->iThread);
-		if (tile & kTileVisitedBit)
-		{
-			return;
-		}
-
-		const char letter = tile & kTileLetterMask;
-		auto iNode = parent->children.find(letter);
-		if (iNode == parent->children.end())
-		{
-			// This letter doesn't yield anything from this point onward.
-			return;
-		}
-
-		DictionaryNode* node = &iNode->second;
-		if (true == node->IsWord())
-		{
-			// Found a word.
-			context->wordsFound.push_back(node->word);
-//			debug_print("Word found: %s\n", node->word.c_str());
-
-			// In this run we don't want to find this word again, so wipe it.
-			node->word.clear();
-		}
-
-		// Recurse if necessary (i.e. more letters to look for).
-		if (false == node->children.empty())
-		{
-			// Before recursion, mark this board position as evaluated.
-			board[iBoard] |= kTileVisitedBit;
-
-			const unsigned boundY = height-1;
-			const unsigned boundX = width-1;
-
-			// Top row.
-			if (iY > 0) 
-			{
-				TraverseBoard(context, iY-1, iX, node);
-				if (iX > 0) TraverseBoard(context, iY-1, iX-1, node);
-				if (iX < boundX) TraverseBoard(context, iY-1, iX+1, node);
-			}
-
-			// Bottom row.
-			if (iY < boundY)
-			{
-				TraverseBoard(context, iY+1, iX, node); 
-				if (iX > 0) TraverseBoard(context, iY+1, iX-1, node); 
-				if (iX < boundX) TraverseBoard(context, iY+1, iX+1, node); 
-			}
-
-			if (iX > 0)
-			{
-				// Left.
-				TraverseBoard(context, iY, iX-1, node);
-			}
-
-			if (iX < boundX)
-			{
-				// Right.
-				TraverseBoard(context, iY, iX+1, node);
-			}
-
-			// Open up this position on the board again.
-			board[iBoard] &= ~kTileVisitedBit;
-		}
-	}
-#else
 	inline static void TraverseBoard(ThreadContext* context, uint64_t mortonCode, DictionaryNode* parent)
 	{
 		const uint64_t iBoard = mortonCode;
+		const unsigned visitBit = TileVisitedFlag(context->iThread);
 
-		bool& visited = context->visited[iBoard];
-		if (true == visited)
-			return;
-
-		// This is safe since we won't be fiddling with data except thread-specific bits, maybe.
 		Board& board = context->instance->m_board;
-		const int tile = board[iBoard];
-
-/*
-		// Using a bit on the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
-		const unsigned kTileVisitedBit = TileVisitedFlag(context->iThread);
-		if (tile & kTileVisitedBit)
+		const int tile = board[iBoard].load();
+		if (tile & visitBit)
 		{
+			// No time to waste.
+			// FIXME: can be faster.
 			return;
 		}
-*/
 
-		const char letter = tile & kTileLetterMask;
+		const int letter = tile & kTileLetterMask;
 		auto iNode = parent->children.find(letter);
 		if (iNode == parent->children.end())
 		{
@@ -596,57 +450,43 @@ private:
 		if (false == node->children.empty())
 		{
 			// Before recursion, mark this board position as evaluated.
-//			board[iBoard] |= kTileVisitedBit;
-			visited = true;
+			board[iBoard].fetch_or(visitBit);
 
-			const bool edgeX0 = tile & kEdgeBitX0;
-			const bool edgeX1 = tile & kEdgeBitX1;
+			static const int kNeighbours[8][2] = {
+				{ -1, -1 },
+				{  0, -1 },
+				{  1, -1 },
+				{ -1,  1 },
+				{  0,  1 },
+				{  1,  1 },
+				{ -1,  0 },
+				{  1,  0 }
+			};
 
-			// Top row.
-			if (0 == (tile & kEdgeBitY0))
+			for (unsigned iNeighbour = 0; iNeighbour < 8; ++iNeighbour)
 			{
-				const uint64_t mortonY0 = ullMC2Dyminusv(mortonCode, 1);
-				TraverseBoard(context, mortonY0, node);
-				if (!edgeX0) TraverseBoard(context, ullMC2Dxminusv(mortonY0, 1), node);
-				if (!edgeX1) TraverseBoard(context, ullMC2Dxplusv(mortonY0, 1), node);
-			}
+				// FIXME: optimize! The idea is to reduce code footprint.
+				const int X = kNeighbours[iNeighbour][0]; 
+				const int Y = kNeighbours[iNeighbour][1];
 
-			// Bottom row.
-			if (0 == (tile & kEdgeBitY1))
-			{
-				const uint64_t mortonY1 = ullMC2Dyplusv(mortonCode, 1);
-				TraverseBoard(context, mortonY1, node); 
-				if (!edgeX0) TraverseBoard(context, ullMC2Dxminusv(mortonY1, 1), node); 
-				if (!edgeX1) TraverseBoard(context, ullMC2Dxplusv(mortonY1, 1), node); 
-			}
-
-			if (!edgeX0)
-			{
-				// Left.
-				const uint64_t mortonX0 = ullMC2Dxminusv(mortonCode, 1);
-				TraverseBoard(context, mortonX0, node);
-			}
-
-			if (!edgeX1)
-			{
-				// Right.
-				const uint64_t mortonX1 = ullMC2Dxplusv(mortonCode, 1);
-				TraverseBoard(context, mortonX1, node);
+				const size_t gridSize = context->instance->m_gridSize;
+				uint64_t newMorton = (X >= 0) ? ullMC2Dxplusv(mortonCode, X) : ullMC2Dxminusv(mortonCode, -X);
+				newMorton = (Y >= 0) ? ullMC2Dyplusv(newMorton, Y) : ullMC2Dyminusv(newMorton, -Y);
+				if (newMorton < gridSize)
+				{
+					TraverseBoard(context, newMorton, node);
+				}
 			}
 
 			// Open up this position on the board again.
-//			board[iBoard] &= ~kTileVisitedBit;
-			visited = false;
+			board[iBoard].fetch_xor(visitBit);
 		}
 	}
-#endif
 
 	Results& m_results;
 	Board& m_board;
 	const unsigned m_width, m_height;
 	const size_t m_gridSize;
-
-	std::vector<DictionaryNode> m_trees;
 };
 
 Results FindWords(const char* board, unsigned width, unsigned height)
@@ -660,49 +500,19 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	// Board parameters check out?
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
-		// Yes: sanitize it (check for illegal input and force all to lowercase).
+		// Yes: sanitize it (check for illegal input and force all to uppercase).
 		const unsigned gridSize = width*height;
 		Board sanitized(gridSize);
 
-#if defined(DO_NOT_SWIZZLE)
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			const int yEdgeBit = (iY == 0) ? kEdgeBitY0 : (iY == height-1) ? kEdgeBitY1 : 0;
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
-				const int xEdgeBit = (iX == 0) ? kEdgeBitX0 : (iX == width-1) ? kEdgeBitX1 : 0;
 				const char letter = *board++;
 				if (0 != isalpha((unsigned char) letter))
 				{
-					int sanity = toupper(letter);
-					sanity |= yEdgeBit | xEdgeBit;
-					sanitized[iY*width + iX] = sanity;
-				}
-				else
-				{
-					// Invalid character: skip query.
-					return results;
-				}
-			}
-		}
-#elif !defined (DO_NOT_SWIZZLE)
-		// FIXME: this RW pattern can be faster, look at Ryg's article.
-
-		debug_print("Grid swizzle (cache optimization) enabled.\n");
-
-		for (unsigned iY = 0; iY < height; ++iY)
-		{
-			const int yEdgeBit = (iY == 0) ? kEdgeBitY0 : (iY == height-1) ? kEdgeBitY1 : 0;
-			for (unsigned iX = 0; iX < width; ++iX)
-			{
-				const int xEdgeBit = (iX == 0) ? kEdgeBitX0 : (iX == width-1) ? kEdgeBitX1 : 0;
-				const char letter = *board++;
-				if (0 != isalpha((unsigned char) letter))
-				{
-					int sanity = toupper(letter);
-					sanity |= yEdgeBit|xEdgeBit;
-
-					const uint64_t mortonCode = ullMC2Dencode(iX, iY);
+					const int sanity = toupper(letter);
+					const uint64_t mortonCode = ullMC2Dencode(iX, iY); // FIXME
 					sanitized[mortonCode] = sanity;
 				}
 				else
@@ -712,11 +522,9 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				}
 			}
 		}
-#endif
 
 		Query query(results, sanitized, width, height);
 		query.Execute();
-//		query.Execute(); // Leak test..
 	}
 
 	return results;

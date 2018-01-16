@@ -73,6 +73,7 @@ int main(int argC, char **arguments)
 
 	printf("- Loading dictionary...\n");
 	const char *dictPath = "dictionary.txt";
+//	const char *dictPath = "dictionary-bigger.txt";
 	LoadDictionary(dictPath);
 
 	printf("- Finding in %ux%u...\n", xSize, ySize);
