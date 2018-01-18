@@ -432,8 +432,6 @@ private:
 			subDict = s_dictTrees[iThread];
 		}
 
-		// TEST/FIXME: skip copy until I come up with a decent node.
-		// But smarter: manipulate the dictionaries, not the source data.
 //		DictionaryNode& subDict = s_dictTrees[context->iThread];
 
 		// FIXME: ref.
@@ -502,7 +500,7 @@ private:
 		if (true == node->IsWord())
 		{
 			// Found a word.
-			context->wordsFound.push_back(node->word);
+			context->wordsFound.emplace_back(node->word);
 //			debug_print("Word found: %s\n", node->word.c_str());
 
 			if (true == node->ClearWord())
@@ -517,25 +515,19 @@ private:
 		board[iBoard].fetch_or(visitBit);
 
 		// FIXME: optimize this crude loop!
-		static const int kNeighbours[8][2] = {
-			{ -1, -1 },
-			{  0, -1 },
-			{  1, -1 },
-			{ -1,  1 },
-			{  0,  1 },
-			{  1,  1 },
-			{ -1,  0 },
-			{  1,  0 }
-		};
-
 		bool nodeExhausted = false;
 
 		const size_t gridSize = context->instance->m_gridSize;
 
 		for (unsigned iNeighbour = 0; iNeighbour < 8; ++iNeighbour)
 		{
-			const int X = kNeighbours[iNeighbour][0]; 
-			const int Y = kNeighbours[iNeighbour][1];
+			static const int kNeighbours[16] = {
+				-1, -1, 0, -1, 1, -1,-1, 1, 0, 1, 1, 1, -1, 0, 1, 0
+			};
+
+			const unsigned index = iNeighbour<<1;
+			const int X = kNeighbours[index];
+			const int Y = kNeighbours[index+1];
 
 			uint64_t newMorton = (X >= 0) ? ullMC2Dxplusv(mortonCode, X) : ullMC2Dxminusv(mortonCode, -X);
 			newMorton = (Y >= 0) ? ullMC2Dyplusv(newMorton, Y) : ullMC2Dyminusv(newMorton, -Y);
