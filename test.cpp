@@ -5,7 +5,7 @@
 
 // To even out the timing results a little, since clock() isn't the sharpest of knives.
 // WARNING: multiple queries causes leaks (no FreeWords() calls made except on the last set).
-#define NUM_QUERIES 2
+#define NUM_QUERIES 1
 
 #include <stdlib.h>
 #include <stdio.h>

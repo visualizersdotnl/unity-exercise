@@ -22,12 +22,10 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- De dictionary de tijdelijke data op laten slaan, niet het grid! Ik verlies iets bij het kopieren, maar dat komt wel weer terug bij proper threaden.
 		- Fix everything non-power-of-2 grids.
+		- Why isn't it faster? Is std::map not the right approach after all?
 		- 32-bit.
-		- Write final word list at once.
-		- Is it still C++11?
-		- Assertions!
+		- Is ist still C++11?
 
 	Notes:
 		- Compile with full optimization (-O3 for ex.) for best performance.
@@ -40,7 +38,7 @@
 	I've done leak testing using Valgrind in OSX and I seem to be in the clear; there are some inconclusive and (hopefully) irrelevant
 	ones reported in the runtime library, but you shouldn't run into killer pileups.
 
-	About (dated, first version):
+	About:
 		This code style is influenced by my personal preference (today) and the scope of this project.
 		As a professional, I like to adapt and feel it's in everyone's interest to be consistent.
 
@@ -66,9 +64,8 @@
 #include <memory>
 #include <vector>
 #include <string>
-#include <iostream>
 #include <map>
-// #include <unordered_map>
+#include <unordered_map>
 // #include <set>
 // #include <list>
 #include <mutex>
@@ -87,8 +84,7 @@
 
 const unsigned kAlphaRange = ('Z'-'A')+1;
 
-const unsigned kNumThreads = 1;
-// const unsigned kNumThreads = std::thread::hardware_concurrency();
+const unsigned kNumThreads = 1; // std::thread::hardware_concurrency();
 
 // To mask recursion bits.
 const unsigned kTileLetterMask = 128-1;
@@ -107,73 +103,46 @@ static std::vector<unsigned> s_letterThreadLUT;
 
 static void CreateLetterLUT()
 {
-	for (unsigned iLetter = 0; iLetter < kAlphaRange; ++iLetter)
+	const unsigned quotient = kAlphaRange/kNumThreads;
+
+	for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 	{
-		const unsigned iThread = iLetter % kNumThreads;
-		s_letterThreadLUT.push_back(iThread);
+		// FIXME: make this a range fill with a clearer head.
+		for (unsigned iQ = 0; iQ < quotient; ++iQ)
+		{
+			s_letterThreadLUT.push_back(iThread);
+		}
 	}
 
-	for (auto index : s_letterThreadLUT) debug_print("Letter LUT: %u\n", index);
-	debug_print("Letter LUT size %zu\n", s_letterThreadLUT.size());
+	// Add remainder to last thread.
+	unsigned remainder = kAlphaRange%kNumThreads;
+	while (remainder--)
+	{
+		s_letterThreadLUT.push_back(kNumThreads-1);
+	}
+
+//	for (auto index : s_letterThreadLUT) debug_print("Letter LUT: %u\n", index);
+//	debug_print("Letter LUT size %zu\n", s_letterThreadLUT.size());
 }
 
 inline unsigned LetterToIndex(char letter)
 {
 	const unsigned index = letter - 'A';
-	return index;
-}
-
-inline unsigned LetterToThreadIndex(char letter)
-{
-	return s_letterThreadLUT[LetterToIndex(letter)];
+	return s_letterThreadLUT[index];
 }
 
 // We'll be using a word tree built out of these simple nodes.
-// FIXME: more functions less direct access?
 class DictionaryNode
 {
 public:
-	DictionaryNode() :
-		prefixCount(0) 
-	{
-	}
-
-	~DictionaryNode() {} // FIXME: delete?
-
 	inline bool IsWord() const
 	{
 		return false == word.empty();
 	}
 
-	// Return value indicates if node is now a dead end.
-	inline bool RemoveChild(unsigned index)
-	{
-//		assert(0 != prefixCount);
-//		assert(index < std::array.size());
-//		assert(nullptr != children[index]);
-
-		children[index].reset();
-
-		// This means this node leads to one less actual word.
-		return 0 == --prefixCount;
-	}
-
-	// Return value indicates if node is now a dead end.
-	inline bool ClearWord()
-	{
-//		assert(true == IsWord());
-
-		word.clear();
-		--prefixCount;
-
-		return 0 == prefixCount;
-	}
-
-	std::string word; // Full word without 'Qu'.
-	std::array<std::shared_ptr<DictionaryNode>, kAlphaRange> children;
-
-	// Word(s) this node leads up to.
-	unsigned prefixCount;
+	// FIXME: not optimal either.
+	std::string word;
+	std::map<char, DictionaryNode> children;
 };
 
 // We keep one dictionary (in subsets) at a time, but it's access is protected by a mutex, just to be safe.
@@ -193,41 +162,18 @@ private:
 	std::lock_guard<std::mutex> m_lock;
 };
 
-// Tells us if a word adheres to the rules.
-inline bool IsWordValid(const std::string& word)
+// Input word must be uppercase!
+static void AddWordToDictionary(const std::string& word)
 {
 	const size_t length = word.length();
 
 	// Word not too short?
 	if (word.length() < 3)
 	{
-		debug_print("Invalid word because it's got less than 3 letters: %s\n", word.c_str());
-		return false;
-	}
-
-	// Check if it violates the 'Qu' rule.
-	auto iQ = word.find('Q');
-	if (std::string::npos != iQ)
-	{
-		auto next = word.begin() + iQ+1;
-		if (next == word.end() || *next != 'U')
-		{
-			debug_print("Invalid word due to 'Qu' rule: %s\n", word.c_str());
-			return false;
-		}
-	}
-
-	return true;
-}
-
-// Input word must be uppercase!
-static void AddWordToDictionary(const std::string& word)
-{
-	// Word of any use given the Boggle rules?
-	if (false == IsWordValid(word))
+//		debug_print("Skipped word because it's got less than 3 letters: %s\n", word.c_str());
 		return;
+	}
 
-	const size_t length = word.length();
 	if (length > s_longestWord)
 	{
 		// Longest word thus far (just a print statistic).
@@ -235,29 +181,29 @@ static void AddWordToDictionary(const std::string& word)
 	}
 
 	// As a first strategy we'll split at the root, disregarding the balance (FIXME).
-	DictionaryNode* current = &s_dictTrees[LetterToThreadIndex(word[0])];
-	++current->prefixCount;
+	DictionaryNode* current = &s_dictTrees[LetterToIndex(word[0])];
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
 		const char letter = *iLetter;
-
-		// Get, or instantiate, child node.
-		auto& child = current->children[LetterToIndex(letter)];
-		if (nullptr == child)
-		{
-			child = std::make_shared<DictionaryNode>();
-		}
-
-		current = child.get();
-		++current->prefixCount;
+		current = &current->children[letter];
 
 		// Handle 'Qu' rule.
 		if ('Q' == letter)
 		{
-			// Verified to be 'Qu' by IsWordValid().
-			// Skip over 'U'.
-			++iLetter;
+			auto next = iLetter+1;
+			if (next == word.end() || *next != 'U') 
+			{
+//				debug_print("Skipped word due to 'Qu' rule: %s\n", word.c_str());
+
+				// This word can't be made with the boggle tiles due to the 'Qu' rule.
+				return;
+			}
+			else
+			{
+				// Skip over 'U'.
+				++iLetter;
+			}
 		}
 	}
 
@@ -316,7 +262,6 @@ void LoadDictionary(const char* path)
 void FreeDictionary()
 {
 	DictionaryLock lock;
-
 	s_dictTrees.resize(kNumThreads, DictionaryNode());
 
 	s_wordCount = 0;
@@ -383,7 +328,7 @@ public:
 		{
 			auto context = std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this));
 			contexts.push_back(std::move(context));
-			threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
+			threads.push_back(std::thread(ExecuteThread, contexts[iThread].get()));
 		}
 
 		for (auto& thread : threads)
@@ -423,18 +368,12 @@ public:
 private:
 	static void ExecuteThread(ThreadContext* context)
 	{
-		const unsigned iThread = context->iThread;
-
 		// Grab a copy of the part of the dictionary we need.
 		DictionaryNode subDict;
 		{
 			DictionaryLock lock;
-			subDict = s_dictTrees[iThread];
+			subDict = s_dictTrees[context->iThread];
 		}
-
-		// TEST/FIXME: skip copy until I come up with a decent node.
-		// But smarter: manipulate the dictionaries, not the source data.
-//		DictionaryNode& subDict = s_dictTrees[context->iThread];
 
 		// FIXME: ref.
 		Query& query = *context->instance;
@@ -442,7 +381,7 @@ private:
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
 
-		if (0 != subDict.prefixCount)
+		if (false == subDict.children.empty())
 		{
 			uint64_t mortonX = ullMC2Dencode(0, 0);
 			for (unsigned iX = 0; iX < width; ++iX)
@@ -450,13 +389,7 @@ private:
 				uint64_t morton2D = mortonX;
 				for (unsigned iY = 0; iY < height; ++iY)
 				{
-					if (1 == TraverseBoard(context, morton2D, &subDict))
-					{
-						// We just ran out of words.
-						debug_print("Dictionary exhausted for thread %u.\n", iThread);
-						return;
-					}
-
+					TraverseBoard(context, morton2D, &subDict);
 					morton2D = ullMC2Dyplusv(morton2D, 1);
 				}
 
@@ -473,97 +406,82 @@ private:
 		return LUT[length-3];
 	}
 
-	// Return value indicates if child node can be eliminated from parent.
-	inline static unsigned TraverseBoard(ThreadContext* context, uint64_t mortonCode, DictionaryNode* parent)
+	inline static void TraverseBoard(ThreadContext* context, uint64_t mortonCode, DictionaryNode* parent)
 	{
 		const uint64_t iBoard = mortonCode;
 		const unsigned visitBit = TileVisitedFlag(context->iThread);
 
 		auto& board = context->instance->m_board;
 		const int tile = board[iBoard].load(std::memory_order_consume); // FIXME?
-
 		if (tile & visitBit)
 		{
-			// Can't reuse a tile to form a word (Boggle rule).
-			return 0;
+			// No time to waste.
+			// FIXME: can be faster.
+			return;
 		}
 
 		const int letter = tile & kTileLetterMask;
-		const unsigned iChild = LetterToIndex(letter);
-
-		DictionaryNode* node = parent->children[iChild].get();
-//		assert(0 != node->prefixCount);
-		if (nullptr == node)
+		auto iNode = parent->children.find(letter);
+		if (iNode == parent->children.end())
 		{
-			// This letter isn't part of a word.
-			return 0;
+			// This letter doesn't yield anything from this point onward.
+			return;
 		}
 
+		DictionaryNode* node = &iNode->second;
 		if (true == node->IsWord())
 		{
 			// Found a word.
 			context->wordsFound.push_back(node->word);
 //			debug_print("Word found: %s\n", node->word.c_str());
 
-			if (true == node->ClearWord())
+			if (true == node->children.empty())
 			{
-				// Node exhausted. Remove from parent.
-				return 1;	
+				// End of the line? Kill it.
+				parent->children.erase(iNode);
+				return;
+			}
+			else
+			{
+				// In this run we don't want to find this word again, so wipe it.
+				node->word.clear();
 			}
 		}
 
-		// Recurse, as we've got a node that might be going somewhewre.
-		// Before recursion, mark this board position as evaluated.
-		board[iBoard].fetch_or(visitBit);
-
-		// FIXME: optimize this crude loop!
-		static const int kNeighbours[8][2] = {
-			{ -1, -1 },
-			{  0, -1 },
-			{  1, -1 },
-			{ -1,  1 },
-			{  0,  1 },
-			{  1,  1 },
-			{ -1,  0 },
-			{  1,  0 }
-		};
-
-		bool nodeExhausted = false;
-
-		const size_t gridSize = context->instance->m_gridSize;
-
-		for (unsigned iNeighbour = 0; iNeighbour < 8; ++iNeighbour)
+		// Recurse if necessary (i.e. more words to look for).
+		if (false == node->children.empty())
 		{
-			const int X = kNeighbours[iNeighbour][0]; 
-			const int Y = kNeighbours[iNeighbour][1];
+			// Before recursion, mark this board position as evaluated.
+			board[iBoard].fetch_or(visitBit);
 
-			uint64_t newMorton = (X >= 0) ? ullMC2Dxplusv(mortonCode, X) : ullMC2Dxminusv(mortonCode, -X);
-			newMorton = (Y >= 0) ? ullMC2Dyplusv(newMorton, Y) : ullMC2Dyminusv(newMorton, -Y);
-			if (newMorton < gridSize)
+			static const int kNeighbours[8][2] = {
+				{ -1, -1 },
+				{  0, -1 },
+				{  1, -1 },
+				{ -1,  1 },
+				{  0,  1 },
+				{  1,  1 },
+				{ -1,  0 },
+				{  1,  0 }
+			};
+
+			const size_t gridSize = context->instance->m_gridSize;
+			for (unsigned iNeighbour = 0; iNeighbour < 8; ++iNeighbour)
 			{
-				const int resolve = TraverseBoard(context, newMorton, node);
-				node->prefixCount -= resolve;
-				if (0 == node->prefixCount)
+				// FIXME: optimize! The idea is to reduce code footprint.
+				const int X = kNeighbours[iNeighbour][0]; 
+				const int Y = kNeighbours[iNeighbour][1];
+
+				uint64_t newMorton = (X >= 0) ? ullMC2Dxplusv(mortonCode, X) : ullMC2Dxminusv(mortonCode, -X);
+				newMorton = (Y >= 0) ? ullMC2Dyplusv(newMorton, Y) : ullMC2Dyminusv(newMorton, -Y);
+				if (newMorton < gridSize)
 				{
-					// Dead end: stop recursing.
-					nodeExhausted = true;
-					break;
+					TraverseBoard(context, newMorton, node);
 				}
 			}
-		}
 
-		// Open up this position on the board again.
-		board[iBoard].fetch_xor(visitBit);
-
-		if (false == nodeExhausted)
-		{
-			// Not a dead end.
-			return 0;
-		}
-		else
-		{
-			// If node is now a dead end, it'll be removed from the parent.
-			return parent->RemoveChild(iChild);
+			// Open up this position on the board again.
+			board[iBoard].fetch_xor(visitBit);
 		}
 	}
 
