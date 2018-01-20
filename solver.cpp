@@ -22,7 +22,7 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- Use of multiple threads must be smarter, faster: tighter (aligned) memory, better dict. tree, et cetera.
+		- Use of multiple threads must be smarter, faster: tighter (aligned) memory, better dict. tree, per-thread dictionary lock, et cetera.
 		- Also: prefix detection.
 		- Write final word list at once (or at least allocate the memory for them at once), or defer that to the thread too.
 		- Fix everything non-power-of-2 grids: Morton shit really worth it?
@@ -161,6 +161,7 @@ static size_t s_longestWord;
 static size_t s_wordCount;
 
 // Scoped lock for all dictionary globals.
+// FIXME: locks for every thread so they won't fight on initial copy?
 class DictionaryLock
 {
 public:
@@ -393,7 +394,7 @@ public:
 				// Uses full word to get the correct score.
 				m_results.Score += GetWordScore(length);
 
-				// FIXME: this takes a fucking second or more..
+				// FIXME: this takes a fucking second or more.. At least allocate it all at once.
 				*words_cstr = new char[length+1];
 				strcpy(*words_cstr++, word.c_str());
 			}
