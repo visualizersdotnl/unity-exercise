@@ -1,9 +1,2 @@
 
-
-- Windows perf.: niet nader onderzocht.
-- Threading: limited testing.
-
-Fouten @ submission:
-
-- In de test is de alphabet range verkeerd; gelukkig maakt dat niet uit.
-- Cosmetische dingetjes.
+...

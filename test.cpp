@@ -35,7 +35,7 @@ int main(int argC, char **arguments)
 	const unsigned ySize = atoi(arguments[2]);
 	const unsigned gridSize = xSize*ySize;
 	
-	srand(42);
+//	srand(42);
 	std::unique_ptr<char[]> board(new char[gridSize]);
 	char* write = board.get();
 
@@ -45,7 +45,7 @@ int main(int argC, char **arguments)
 		{
 //			const int random = iBoard % 26;
 			const int random = mt_randu32() % 26;
-			const char character = 'a' + random;
+			const char character = 'A' + random;
 			*write++ = character;
 
 #ifdef PRINT_GRID
@@ -66,7 +66,7 @@ int main(int argC, char **arguments)
 	const unsigned ySize = 3;
 	const unsigned gridSize = xSize*ySize;
 	std::unique_ptr<char[]> board(new char[gridSize]);
-	const char* reference = "dzxeaiqut";
+	const char* reference = "DZXEAIQUT"; // "dzxeaiqut";
 	memcpy(board.get(), reference, gridSize*sizeof(char));
 
 #endif
@@ -78,6 +78,7 @@ int main(int argC, char **arguments)
 
 	printf("- Finding in %ux%u...\n", xSize, ySize);
 
+	// FIXME: use precision timer.
 	const double start = clock();
 
 	Results results;
