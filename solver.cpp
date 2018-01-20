@@ -476,6 +476,7 @@ private:
 		if (nullptr == node)
 		{
 			// This letter isn't part of a word.
+			// FIXME: prefix detection would catch this?
 			return 0;
 		}
 
@@ -496,8 +497,7 @@ private:
 		// Before recursion, mark this board position as evaluated.
 		board[iBoard] = 0;
 
-		// FIXME: optimize this crude loop!
-		bool nodeExhausted = false;
+		// FIXME: optimize this crude loop, unroll?
 
 		const size_t gridSize = context.instance->m_gridSize;
 
@@ -519,6 +519,7 @@ private:
 			const int X = neighbour[0];
 			const int Y = neighbour[1];
 
+			// FIXMEl thiss hurts.
 			uint64_t newMorton = (X >= 0) ? ullMC2Dxplusv(mortonCode, X) : ullMC2Dxminusv(mortonCode, -X);
 			newMorton = (Y >= 0) ? ullMC2Dyplusv(newMorton, Y) : ullMC2Dyminusv(newMorton, -Y);
 			if (newMorton < gridSize)
@@ -527,9 +528,8 @@ private:
 				node->prefixCount -= resolve;
 				if (0 == node->prefixCount)
 				{
-					// Dead end: stop recursing.
-					nodeExhausted = true;
-					break;
+					board[iBoard] = letter;
+					return parent->RemoveChild(iChild);
 				}
 			}
 		}
@@ -537,17 +537,8 @@ private:
 		// Open up this position on the board again.
 		board[iBoard] = letter;
 
-		// FIXME: eliminate branch, move up?
-		if (false == nodeExhausted)
-		{
-			// Not a dead end.
-			return 0;
-		}
-		else
-		{
-			// If node is now a dead end, it'll be removed from the parent.
-			return parent->RemoveChild(iChild);
-		}
+		// Not a dead end.
+		return 0;
 	}
 
 	Results& m_results;
