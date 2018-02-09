@@ -22,6 +22,7 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
+		- FIX: tree leaks, copy..
 		- Kill dead end recursion (prefix detection), always recursing at least 3 times to find a word is costly.
 		- Tighter allocation (sequential, swap pointers for indices), per-thread dictionary lock.
 		- Lighter Trie?
