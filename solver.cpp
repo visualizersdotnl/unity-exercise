@@ -551,7 +551,7 @@ private:
 				continue;
 			}
 
-			const int letterAdj = board[newMorton]; // adjMorton
+			const int letterAdj = board[newMorton];
 			if (0 != letterAdj && nullptr != node->GetChild(letterAdj))
 			{
 				// FIXME: child meteen doorgeven?
@@ -582,6 +582,8 @@ private:
 
 Results FindWords(const char* board, unsigned width, unsigned height)
 {
+	debug_print("Using debug prints, takes approx. a second off the performance.\n");
+	
 	Results results;
 	results.Words = nullptr;
 	results.Count = 0;
