@@ -1,6 +1,8 @@
 /*
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
+	
 	Updated thereafter :-)
+	
 	Please take a minute to read this piece of text.
 
 	Rules:
@@ -23,9 +25,9 @@
 
 	To do:
 		- FIX: tree leaks, copy..
-		- Kill dead end recursion (prefix detection), always recursing at least 3 times to find a word is costly.
-		- Tighter allocation (sequential, swap pointers for indices), per-thread dictionary lock.
-		- Lighter Trie?
+		- Kill recursion of dead ends.
+		- Pass on letter in Traverse() function instead of loading it twice (good vantage point to build a prefix hash maybe).
+		- Tighter (sequential) allocation of nodes.
 		- Write final word list at once (or at least allocate the memory for them at once), or defer that to the thread too.
 		- Fix everything non-power-of-2 grids: Morton shit really worth it?
 		- Fix 32-bit.
