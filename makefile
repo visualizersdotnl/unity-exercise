@@ -6,6 +6,7 @@ all:
 #	Optimized.
 #	g++ -o boggle test.cpp solver.cpp random.cpp -std=c++11 -O3 -pg
 	g++ -o boggle test.cpp solver.cpp random.cpp -std=c++11 -O3 -march=native
+	g++ -o boggle_sub test.cpp solver_submitted.cpp random.cpp -std=c++11 -O3 -march=native
 
 #	Debug (Valgrind).
 #	g++ -o boggle test.cpp solver.cpp random.cpp -std=c++11 -O0 -g

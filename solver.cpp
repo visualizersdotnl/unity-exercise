@@ -22,14 +22,17 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- Use of multiple threads must be smarter, faster: tighter (aligned) memory, better dict. tree, per-thread dictionary lock, et cetera.
-		- Also: prefix detection.
+		- alles is stuk
+		- Kill dead end recursion (prefix detection), always recursing at least 3 times to find a word is costly.
+		- Tighter allocation (sequential, swap pointers for indices), per-thread dictionary lock.
+		- Lighter Trie?
 		- Write final word list at once (or at least allocate the memory for them at once), or defer that to the thread too.
 		- Fix everything non-power-of-2 grids: Morton shit really worth it?
-		- 32-bit.
+		- Fix 32-bit.
 		- Is it still C++11?
-		- Assertions!
 		- Fix class member (notation).
+		- Use more references where applicable.
+		- Assertions!
 
 	Notes:
 		- Compile with full optimization (-O3 for ex.) for best performance.
@@ -38,23 +41,10 @@
 		- All these functions can be called at any time from any thread as the single shared resource, the dictionary,
 		  is guarded by a mutex and no globals are used.
 		- If an invalid board is supplied (anything non-alphanumerical detected) the query is skipped, yielding zero results.
+		- Assertions aren't all over the place (yet).
 	
 	I've done leak testing using Valgrind in OSX and I seem to be in the clear; there are some inconclusive and (hopefully) irrelevant
 	ones reported in the runtime library, but you shouldn't run into killer pileups.
-
-	About (dated, first version):
-		This code style is influenced by my personal preference (today) and the scope of this project.
-		As a professional, I like to adapt and feel it's in everyone's interest to be consistent.
-
-		I might have been a tad more verbose with my comments than usual ;)
-
-		I've written this using the latest OSX, but it should compile out of the box on most platforms that adhere to
-		the C++11 standard; it does on Linux and Windows.
-
-		As for my approach: I wanted function, readability and portability. There are options worth considering that
-		could improve performance, but for now I feel confident this is sufficient.
-
-		There's a lot of pre and post query copying going on I'm not too happy about.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -78,85 +68,142 @@
 #include <atomic>
 #include <array>
 // #include <deque>
+#include <cassert>
 
 #include "api.h"
 
 // FIXME: 32-bit support, clean up the Morton mess, use 32-bit header!
 #include "MZC2D64.h"
 
-// #define debug_print printf
-inline void debug_print(const char* format, ...) {}
+// FIXME: this *is* slightly faster
+#define USE_MORTON
+
+#define debug_print printf
+// inline void debug_print(const char* format, ...) {}
 
 const unsigned kAlphaRange = ('Z'-'A')+1;
 
+// const unsigned kNumThreads = 1;
 const unsigned kNumThreads = 2; // My Core M has 2 cores, performance generally gets worse using more (like 4, which is the "threads").
 // const unsigned kNumThreads = std::thread::hardware_concurrency();
 
 inline unsigned LetterToIndex(char letter)
 {
-//	assert(...);
 	return letter - 'A';
 }
 
 inline unsigned LetterToThreadIndex(char letter)
 {
-//	assert(...);
-	return (letter - 'A')%kNumThreads;
+	return LetterToIndex(letter) % kNumThreads;
 }
 
 // We'll be using a word tree built out of these simple nodes.
-// FIXME: more functions less direct access?
+// FIXME: more functions less direct access, const-correctness.
+// FIXME: clarify the difference between a copy and an original
 class DictionaryNode
 {
 public:
 	DictionaryNode() :
-		prefixCount(0) 
+//		prefixCount(0) 
+//,		alphaBits(0)
+		alphaBits(0)
 	{
+		children.fill(nullptr);
 	}
 
 	~DictionaryNode() {}
 
 	inline bool IsWord() const
 	{
+		// FIXME: bit check?
 		return false == word.empty();
 	}
 
-	// Return value indicates if node is now a dead end.
-	inline bool RemoveChild(unsigned index)
+	// Just tell if there's any children left to recurse as per the official definition.
+	inline bool IsLeaf() const
 	{
-//		assert(0 != prefixCount);
-//		assert(index < std::array.size());
-//		assert(nullptr != children[index]);
+//		return 0 == prefixCount;
 
-		// Since this is likely a copy, it shouldn't trigger an actual delete.
-		children[index].reset();
+		// aint jack shit further == leaf
+	 	return 0 == alphaBits;
+	}
 
-		// This means this node leads to one less actual word.
-		return 0 == --prefixCount;
+	inline DictionaryNode* AddChild(char letter)
+	{
+		// This node leads to another word.
+//		++prefixCount;
+
+		const unsigned index = LetterToIndex(letter);
+
+		if (nullptr == children[index])
+		{
+			const unsigned bit = 1 << index;
+			alphaBits |= bit;
+
+			children[index] = new DictionaryNode();	
+		}
+
+		return children[index];
 	}
 
 	// Return value indicates if node is now a dead end.
-	inline bool ClearWord()
+	inline bool RemoveChild(char letter)
 	{
-//		assert(true == IsWord());
+		const unsigned index = LetterToIndex(letter);
 
+		// Clear the according bit; this operation is performed on a copy so there's no deletion necessary.
+		const unsigned bit = 1 << index;
+//		assert(alphaBits & bit);
+		alphaBits &= ~bit;
+
+		// FIXME
+//		assert(prefixCount > 0);
+
+		// well this isn't necessarily true?
+//		--prefixCount;
+
+//		if (prefixCount == -1) { printf("ja kut\n"); exit(-1); }
+
+//		return 0 == prefixCount; // && false == IsWord(); // FIXME: get away with IsWord() check because of traversal function
+
+		return 0 == alphaBits && false == IsWord();
+	}
+
+
+	inline DictionaryNode* GetChild(char letter)
+	{
+//		assert(0 != prefixCount); // Pulling from a dead node.
+
+		const unsigned index = LetterToIndex(letter);
+		const unsigned bit = 1 << index;
+		return (alphaBits & bit) ? children[index] : nullptr;	
+	}
+
+	// FIXME: get rid of it?
+	inline void ClearWord()
+	{
+		assert(true == IsWord());
 		word.clear();
-		--prefixCount;
-
-		return 0 == prefixCount;
 	}
 
-	std::string word; // Full word without 'Qu'. FIXME: get rid of it.
-	std::array<std::shared_ptr<DictionaryNode>, kAlphaRange> children;
+	// Full word without 'Qu'. 
+	// FIXME: get rid of it.
+	std::string word; 
 
-	// Word(s) this node leads up to.
-	// FIXME: glorified way of telling if the array still holds valid pointers.
-	unsigned prefixCount;
+	// FIXME: this is a problem, you change values pointed to, don't matter if you're not deleting them
+	std::array<DictionaryNode*, kAlphaRange> children;
+
+	unsigned alphaBits;
+
+	// Word(s) this node leads to.
+	// misschien heb je er toch nog wat aan ooit
+//	unsigned prefixCount;
 };
 
 // We keep one dictionary (in subsets) at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 static std::vector<DictionaryNode> s_dictTrees;
+// static std::array<DictionaryNode, kNumThreads> s_dictTrees;
 static size_t s_longestWord;
 static size_t s_wordCount;
 
@@ -178,7 +225,7 @@ inline bool IsWordValid(const std::string& word)
 	const size_t length = word.length();
 
 	// Word not too short?
-	if (word.length() < 3)
+	if (length < 3)
 	{
 		debug_print("Invalid word because it's got less than 3 letters: %s\n", word.c_str());
 		return false;
@@ -213,23 +260,20 @@ static void AddWordToDictionary(const std::string& word)
 		s_longestWord = length;
 	}
 
-	// As a first strategy we'll split at the root, disregarding the balance (FIXME).
-	DictionaryNode* current = &s_dictTrees[LetterToThreadIndex(word[0])];
-	++current->prefixCount;
+	// As a first strategy we'll split at the root.
+	const char firstLetter = word[0];
+
+	// fiksme
+	const unsigned iThread = LetterToThreadIndex(firstLetter);
+//	if (s_dictTrees.size() < iThread) assert(0); // ss_dictTrees.push_back(DictionaryNode());
+	DictionaryNode* current = &s_dictTrees[iThread];
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
 		const char letter = *iLetter;
 
-		// Get, or instantiate, child node.
-		auto& child = current->children[LetterToIndex(letter)];
-		if (nullptr == child)
-		{
-			child = std::make_shared<DictionaryNode>();
-		}
-
-		current = child.get();
-		++current->prefixCount;
+		// Get or create child node.
+		current = current->AddChild(letter);
 
 		// Handle 'Qu' rule.
 		if ('Q' == letter)
@@ -293,7 +337,9 @@ void FreeDictionary()
 {
 	DictionaryLock lock;
 
+//	s_dictTrees.clear();
 	s_dictTrees.resize(kNumThreads, DictionaryNode());
+//	s_dictTrees = std::array<DictionaryNode, kNumThreads>();
 
 	s_wordCount = 0;
 	s_longestWord = 0;
@@ -339,6 +385,11 @@ private:
 
 		std::unique_ptr<char[]> board;
 		std::vector<std::string> wordsFound;
+
+		// FIXME: debug.
+		unsigned deadEnd;
+
+		DictionaryNode* root;
 	};
 
 public:
@@ -404,8 +455,6 @@ public:
 private:
 	static void ExecuteThread(ThreadContext* context)
 	{
-//		assert(nullptr != context);
-
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
@@ -420,22 +469,37 @@ private:
 		DictionaryNode& subDict = s_dictTrees[iThread];
 
 
+		context->root = &subDict;
+
+
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
 
-		if (0 != subDict.prefixCount)
+		// FIXME: make debug option.
+		unsigned deadEnds = 0;
+
+		if (false == subDict.IsLeaf())
 		{
+#ifdef USE_MORTON
 			uint64_t mortonX = ullMC2Dencode(0, 0);
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
 				uint64_t morton2D = mortonX;
 				for (unsigned iY = 0; iY < height; ++iY)
 				{
-					if (1 == TraverseBoard(*context, morton2D, &subDict))
+					// FIXME: debug.
+					context->deadEnd = 0;
+
+					const bool stuck = TraverseBoard(*context, morton2D, &subDict);
+//					if (true == subDict.IsLeaf())
+//					{
+//						debug_print("Dictionary exhausted for thread %u.\n", iThread);
+//						break;
+//					}
+
+					if (0 == context->deadEnd)
 					{
-						// We just ran out of words.
-						debug_print("Dictionary exhausted for thread %u.\n", iThread);
-						return;
+						++deadEnds;
 					}
 
 					morton2D = ullMC2Dyplusv(morton2D, 1);
@@ -443,7 +507,31 @@ private:
 
 				mortonX = ullMC2Dxplusv(mortonX, 1);
 			}
+#else
+			for (unsigned iX = 0; iX < width; ++iX)
+			{
+				for (unsigned iY = 0; iY < height; ++iY)
+				{
+					// FIXME: debug.
+					context->deadEnd = 0;
+
+					bool stuck = TraverseBoard(*context, iX, iY, &subDict);
+s//					if (true == subDict.IsLeaf())
+//					{
+//						debug_print("Dictionary exhausted for thread %u.\n", iThread);
+//						break;
+//					}
+
+					if (0 == context->deadEnd)
+					{
+						++deadEnds;
+					}
+				}
+			}
+#endif
 		}
+
+		debug_print("Thread %u has %u dead ends in a %zu grid.\n", iThread, deadEnds, query.m_gridSize);
 	}
 
 private:
@@ -454,44 +542,55 @@ private:
 		return LUT[length-3];
 	}
 
+#ifdef USE_MORTON
+
 	// Return value indicates if child node can be eliminated from parent.
-	// FIXME: parent should be a reference.
-	inline static unsigned TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent)
+	inline static bool TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent)
 	{
 		const uint64_t iBoard = mortonCode;
+//		assert(mortonCode < context.instance->m_gridSize);
+//		if (iBoard >= context.instance->m_gridSize)
+//		{
+//			return false;
+//		}
 
 		auto& board = context.board;
 		const int tile = board[iBoard];
 		if (0 == tile)
 		{
 			// Can't reuse a tile to form a word (Boggle rule).
-			return 0;
+			return false;
 		}
 
 		const int letter = tile;
-		const unsigned iChild = LetterToIndex(letter);
 
-		DictionaryNode* node = parent->children[iChild].get();
-//		assert(0 != node->prefixCount);
+		DictionaryNode* node = parent->GetChild(letter);
 		if (nullptr == node)
 		{
-			// This letter isn't part of a word.
-			// FIXME: prefix detection would catch this?
-			return 0;
+			// Letter not found.
+			return false;
 		}
 
 		if (true == node->IsWord())
 		{
 			// Found a word.
 			context.wordsFound.emplace_back(node->word);
-//			debug_print("Word found: %s\n", node->word.c_str());
+//			debug_print("Word found: %s, prefixCount %u\n", node->word.c_str(), node->prefixCount);
+//			debug_print("Word found: %s, alphaBits %u\n", node->word.c_str(), node->alphaBits);
+			node->ClearWord();
 
-			if (true == node->ClearWord())
+			// FIXME: debug.
+			context.deadEnd = 1;
+
+			// Got any paths left?
+			if (true == node->IsLeaf())
 			{
-				// Node exhausted. Remove from parent.
-				return 1;	
+				// No, so inform the parent.
+				return parent->RemoveChild(letter);
 			}
 		}
+
+		assert(node->alphaBits != 0);
 
 		// Recurse, as we've got a node that might be going somewhewre.
 		// Before recursion, mark this board position as evaluated.
@@ -519,17 +618,147 @@ private:
 			const int X = neighbour[0];
 			const int Y = neighbour[1];
 
-			// FIXMEl thiss hurts.
+			// FIXME: this hurts.
 			uint64_t newMorton = (X >= 0) ? ullMC2Dxplusv(mortonCode, X) : ullMC2Dxminusv(mortonCode, -X);
 			newMorton = (Y >= 0) ? ullMC2Dyplusv(newMorton, Y) : ullMC2Dyminusv(newMorton, -Y);
+
+			if (newMorton >= gridSize)
+			{
+				continue;
+			}
+
+			const int letterAdj = board[newMorton]; // adjMorton
+			if (0 != letterAdj && nullptr != node->GetChild(letterAdj))
+			{
+				// FIXME: child meteen doorgeven?
+
+				// Traverse, and if we hit the wall go see if what we're left with is a leaf.
+//				node->prefixCount -= TraverseBoard(context, newMorton, node);
+				bool stuck = TraverseBoard(context, newMorton, node);
+//				if (node->prefixCount == -1) { printf("ja kut\n"); exit(-1); }
+				if (true == node->IsLeaf())
+				{
+					// Restore board tile.
+					board[iBoard] = letter;
+
+					// Remove this node from it's parent, it's a dead end.
+					return parent->RemoveChild(letter);
+				}
+			}
+
+/*
 			if (newMorton < gridSize)
 			{
-				const int resolve = TraverseBoard(context, newMorton, node);
-				node->prefixCount -= resolve;
-				if (0 == node->prefixCount)
+				// Traverse, and if we hit the wall go see if what we're left with is a leaf.
+				node->prefixCount -= TraverseBoard(context, newMorton, node);
+				if (true == node->IsLeaf())
 				{
+					// Restore board tile.
 					board[iBoard] = letter;
-					return parent->RemoveChild(iChild);
+
+					// Remove this node from it's parent, it's a dead end.
+					return parent->RemoveChild(letter);
+				}
+			}
+*/
+		}
+
+		// Open up this position on the board again.
+		board[iBoard] = letter;
+
+		// If this is a leaf we're done looking.
+		return node->IsLeaf();
+	}
+
+#else
+
+	// Return value indicates if child node can be eliminated from parent.
+	inline static bool TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* parent)
+	{
+		const uint64_t iBoard = iY*context.instance->m_width + iX;
+
+		auto& board = context.board;
+		const int tile = board[iBoard];
+		if (0 == tile)
+		{
+			// Can't reuse a tile to form a word (Boggle rule).
+			return false;
+		}
+
+		const int letter = tile;
+
+		DictionaryNode* node = parent->GetChild(letter);
+		if (nullptr == node)
+		{
+			// Letter not found.
+			return false;
+		}
+
+		if (true == node->IsWord())
+		{
+			// Found a word.
+			context.wordsFound.emplace_back(node->word);
+//			debug_print("Word found: %s\n", node->word.c_str());
+			node->ClearWord();
+
+			// FIXME: debug.
+			context.deadEnd = 1;
+
+			// Got any paths left?
+			if (true == node->IsLeaf())
+			{
+				// No, so inform the parent.
+				return parent->RemoveChild(letter);
+			}
+
+//			return node->IsLeaf();
+		}
+
+		// Recurse, as we've got a node that might be going somewhewre.
+		// Before recursion, mark this board position as evaluated.
+		board[iBoard] = 0;
+
+//		const size_t gridSize = context.instance->m_gridSize;
+
+		const int kNeighbours[8][2] = 
+		{
+			{ -1, -1 },
+			{  0, -1 },
+			{  1, -1 },
+			{ -1,  1 },
+			{  0,  1 },
+			{  1,  1 },
+			{ -1,  0 },
+			{  1,  0 }
+		};
+
+		for (unsigned iNeighbour = 0; iNeighbour < 8; ++iNeighbour)
+		{
+			auto& neighbour = kNeighbours[iNeighbour];
+			const unsigned nX = iX + neighbour[0];
+			const unsigned nY = iY + neighbour[1];
+
+			if (nX >= context.instance->m_width || nY >= context.instance->m_height)
+			{
+				continue;
+			}
+
+			// FIXME: can try to fetch here if we're looking for a specific word...
+
+			unsigned iBoardAdj = nY*context.instance->m_width + nX;
+			int letterAdj = board[iBoardAdj];
+			if (0 != letterAdj && nullptr != node->GetChild(letterAdj))
+			{
+				// Traverse, and if we hit the wall go see if what we're left with is a leaf.
+				bool stuck = TraverseBoard(context, nX, nY, node);
+//				if (node->prefixCount == -1) { printf("ja kut\n"); exit(-1); }
+				if (true == node->IsLeaf())
+				{
+					// Restore board tile.
+					board[iBoard] = letter;
+
+					// Remove this node from it's parent, it's a dead end.
+					return parent->RemoveChild(letter);
 				}
 			}
 		}
@@ -537,9 +766,11 @@ private:
 		// Open up this position on the board again.
 		board[iBoard] = letter;
 
-		// Not a dead end.
-		return 0;
+		// If this is a leaf we're done looking.
+		return node->IsLeaf();
 	}
+
+#endif
 
 	Results& m_results;
 	const char* m_sanitized;
@@ -572,7 +803,11 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				if (0 != isalpha((unsigned char) letter))
 				{
 					const int sanity = toupper(letter);
+#ifdef USE_MORTON
 					sanitized[morton2D] = sanity;
+#else					
+					sanitized[iY*width + iX] = sanity;
+#endif
 				}
 				else
 				{
