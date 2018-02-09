@@ -79,9 +79,9 @@
 
 const unsigned kAlphaRange = ('Z'-'A')+1;
 
-const unsigned kNumThreads = 1;
+// const unsigned kNumThreads = 1;
 // const unsigned kNumThreads = 2; // My Core M has 2 cores, performance generally gets worse using more (like 4, which is the "threads").
-// const unsigned kNumThreads = std::thread::hardware_concurrency();
+const unsigned kNumThreads = std::thread::hardware_concurrency();
 
 inline unsigned LetterToIndex(char letter)
 {
@@ -135,15 +135,13 @@ public:
 	}
 
 	// Return value indicates if node is now a dead end.
-	inline bool RemoveChild(char letter)
+	inline void RemoveChild(char letter)
 	{
 		const unsigned index = LetterToIndex(letter);
 
 		// Clear the according bit; this operation is performed on a copy so there's no deletion necessary.
 		const unsigned bit = 1 << index;
 		alphaBits &= ~bit;
-
-		return 0 == alphaBits && false == IsWord();
 	}
 
 
@@ -354,7 +352,7 @@ private:
 		std::vector<std::string> wordsFound;
 
 		// FIXME: debug.
-		unsigned deadEnd;
+		unsigned noDeadEnd;
 
 		DictionaryNode* root;
 	};
@@ -413,8 +411,8 @@ public:
 				m_results.Score += GetWordScore(length);
 
 				// FIXME: this takes a fucking second or more.. At least allocate it all at once.
-//				*words_cstr = new char[length+1];
-//				strcpy(*words_cstr++, word.c_str());
+				*words_cstr = new char[length+1];
+				strcpy(*words_cstr++, word.c_str());
 			}
 		}
 	}
@@ -454,16 +452,20 @@ private:
 				for (unsigned iY = 0; iY < height; ++iY)
 				{
 					// FIXME: debug.
-					context->deadEnd = 0;
+					context->noDeadEnd = 0;
 
-					TraverseBoard(*context, morton2D, &subDict);
+					if (nullptr != subDict.GetChild(context->board[morton2D]))
+					{
+						TraverseBoard(*context, morton2D, &subDict);
+					}
+
 //					if (true == subDict.IsLeaf())
 //					{
 //						debug_print("Dictionary exhausted for thread %u.\n", iThread);
 //						break;
 //					}
 
-					if (0 == context->deadEnd)
+					if (0 == context->noDeadEnd)
 					{
 						++deadEnds;
 					}
@@ -495,11 +497,6 @@ private:
 		const int letter = tile;
 
 		DictionaryNode* node = parent->GetChild(letter);
-		if (nullptr == node)
-		{
-			// Letter not found.
-			return;
-		}
 
 		if (true == node->IsWord())
 		{
@@ -508,7 +505,7 @@ private:
 			node->ClearWord();
 
 			// FIXME: debug.
-			context.deadEnd = 1;
+			context.noDeadEnd = 1;
 
 			if (node->IsLeaf()) 
 			{
@@ -568,7 +565,6 @@ private:
 
 					// Remove this node from it's parent, it's a dead end.
 					parent->RemoveChild(letter);
-
 					return;
 				}
 			}
