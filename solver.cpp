@@ -82,7 +82,6 @@ inline void debug_print(const char* format, ...) {}
 
 const unsigned kNumThreads = std::thread::hardware_concurrency();
 const unsigned kAlphaRange = ('Z'-'A')+1;
-const unsigned kWordBit = 1 << (kAlphaRange+1);
 
 inline unsigned LetterToIndex(char letter)
 {
@@ -107,11 +106,12 @@ public:
 
 	~DictionaryNode() 
 	{
+		// Should delete nodes, but rather do it with a pool.
 	}
 
 	inline bool IsWord() const
 	{
-		return 0 != (alphaBits & kWordBit);
+		return -1 != wordIdx;
 	}
 
 	inline bool IsLeaf() const
@@ -133,7 +133,6 @@ public:
 		}
 
 		return children[index];
-//		return &children[index];
 	}
 
 	// Return value indicates if node is now a dead end.
@@ -158,14 +157,13 @@ public:
 		const unsigned index = LetterToIndex(letter);
 		const unsigned mask = (alphaBits>>index) & 1;
 		return (DictionaryNode*) (reinterpret_cast<uintptr_t>(children[index]) * mask);
-//		return (DictionaryNode*) (reinterpret_cast<uintptr_t>(&children[index]) * mask);
 	}
 
 	// FIXME: better func. name
 	inline void ClearWord()
 	{
 //		assert(true == IsWord());
-		alphaBits &= ~kWordBit;
+		wordIdx = -1;
 	}
 
 	// Full word without 'Qu'. 
@@ -268,7 +266,6 @@ static void AddWordToDictionary(const std::string& word)
 
 //	current->word = word;
 	current->wordIdx = s_wordCount;
-	current->alphaBits |= kWordBit;
 	++s_wordCount;
 }
 
@@ -372,8 +369,8 @@ private:
 		std::vector<unsigned> wordsFound;
 		unsigned score;
 
-		// FIXME: debug.
-		unsigned noDeadEnd;
+		// DEBUG
+		unsigned deadCount;
 	};
 
 public:
@@ -459,8 +456,8 @@ private:
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
 
-		// FIXME: make debug option.
-		unsigned deadEnds = 0;
+		// DEBUG
+		unsigned deadPaths = 0, highestDeadCount = 0;
 
 		if (false == subDict.IsLeaf())
 		{
@@ -470,14 +467,14 @@ private:
 				uint64_t morton2D = mortonX;
 				for (unsigned iY = 0; iY < height; ++iY)
 				{
-					// FIXME: debug.
-					context->noDeadEnd = 0;
+					// DEBUG
+					context->deadCount = 0;
 
 					const char letter = context->board[morton2D];
-					auto* child = subDict.GetChild(letter);
-
-					if (nullptr != child)
-						TraverseBoard(*context, morton2D, &subDict, child);
+					if (true == subDict.HasChild(letter))
+					{
+						TraverseBoard(*context, morton2D, &subDict, letter);
+					}
 
 
 //					if (true == subDict.IsLeaf())
@@ -486,9 +483,12 @@ private:
 //						break;
 //					}
 
-					if (0 == context->noDeadEnd)
+					// DEBUG
+					const unsigned deadCount = context->deadCount;
+					if (deadCount > 0)
 					{
-						++deadEnds;
+						++deadPaths;
+						highestDeadCount = std::max(highestDeadCount, deadCount);
 					}
 
 					morton2D = ullMC2Dyplusv(morton2D, 1);
@@ -498,7 +498,8 @@ private:
 			}
 		}
 
-		debug_print("Thread %u has %u dead ends in a %zu grid.\n", iThread, deadEnds, query.m_gridSize);
+		const float deadPct = ((float)deadPaths/query.m_gridSize)*100.f;
+		debug_print("Thread %u has %u dead paths in a %zu grid (%.2f percent, highest dead traversal count %u).\n", iThread, deadPaths, query.m_gridSize, deadPct, highestDeadCount);
 	}
 
 private:
@@ -509,11 +510,12 @@ private:
 		return LUT[length-3];
 	}
 
-	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent, DictionaryNode* node)
+	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent, char letter)
 	{
-		auto& board = context.board;
-		const int tile = board[mortonCode];
-		const int letter = tile;
+		// DEBUG
+		context.deadCount++;
+
+		DictionaryNode* node = parent->GetChild(letter); // FIXME: should always be checked, assert
 
 		if (true == node->IsWord())
 		{
@@ -525,8 +527,8 @@ private:
 			context.score += GetWordScore(word.length());
 			node->ClearWord(); // FIXME: name et cetera
 
-			// FIXME: debug.
-			context.noDeadEnd = 1;
+			// DEBUG
+			context.deadCount = 0;
 
 			if (node->IsLeaf()) 
 			{
@@ -535,55 +537,42 @@ private:
 			}
 		}
 
+		auto& board = context.board;
+
 		// Recurse, as we've got a node that might be going somewhewre.
 		// Before recursion, mark this board position as evaluated.
 		board[mortonCode] = 0;
 
-		// FIXME: optimize this crude loop, unroll?
-
 		const size_t gridSize = context.instance->m_gridSize;
 
-		const int kNeighbours[8][2] = 
-		{
-			{ -1, -1 },
-			{  0, -1 },
-			{  1, -1 },
-			{ -1,  1 },
-			{  0,  1 },
-			{  1,  1 },
-			{ -1,  0 },
-			{  1,  0 }
-		};
+		unsigned neighbourMortons[8];
+		neighbourMortons[0] = ullMC2Dxminusv(mortonCode, 1);
+		neighbourMortons[1] = ullMC2Dxplusv(mortonCode, 1);
+		neighbourMortons[2] = ullMC2Dyminusv(neighbourMortons[0], 1);
+		neighbourMortons[3] = ullMC2Dyminusv(mortonCode, 1);
+		neighbourMortons[4] = ullMC2Dyminusv(neighbourMortons[1], 1);
+		neighbourMortons[5] = ullMC2Dyplusv(neighbourMortons[0], 1);
+		neighbourMortons[6] = ullMC2Dyplusv(mortonCode, 1);
+		neighbourMortons[7] = ullMC2Dyplusv(neighbourMortons[1], 1);
 
 		for (unsigned iNeighbour = 0; iNeighbour < 8; ++iNeighbour)
 		{
-			auto& neighbour = kNeighbours[iNeighbour];
-			const int X = neighbour[0];
-			const int Y = neighbour[1];
-
-			// FIXME: this hurts.
-			uint64_t newMorton = (X >= 0) ? ullMC2Dxplusv(mortonCode, X) : ullMC2Dxminusv(mortonCode, -X);
-			newMorton = (Y >= 0) ? ullMC2Dyplusv(newMorton, Y) : ullMC2Dyminusv(newMorton, -Y);
-
-			if (newMorton >= gridSize)
+			const unsigned newMorton = neighbourMortons[iNeighbour];
+			if (newMorton < gridSize) // Within bounds?
 			{
-				continue;
-			}
-
-			const int letterAdj = board[newMorton];
-			if (0 != letterAdj && true == node->HasChild(letterAdj))
-			{
-				// FIXME: child meteen doorgeven?
-
-				// Traverse, and if we hit the wall go see if what we're left with is a leaf.
-				TraverseBoard(context, newMorton, node, node->GetChild(letterAdj));
-				if (true == node->IsLeaf())
+				const int letterAdj = board[newMorton];
+				if (0 != letterAdj && true == node->HasChild(letterAdj))
 				{
-					// Remove this node from it's parent, it's a dead end.
-					parent->RemoveChild(letter);
+					// Traverse, and if we hit the wall go see if what we're left with is a leaf.
+					TraverseBoard(context, newMorton, node, letterAdj);
+					if (true == node->IsLeaf())
+					{
+						// Remove this node from it's parent, it's a dead end.
+						parent->RemoveChild(letter);
 
-					// Stop recursing.
-					break;
+						// Stop recursing.
+						break;
+					}
 				}
 			}
 		}
@@ -600,7 +589,7 @@ private:
 
 Results FindWords(const char* board, unsigned width, unsigned height)
 {
-	debug_print("Using debug prints, takes approx. a second off the performance.\n");
+	debug_print("Using debug prints, takes a little off the performance.\n");
 	
 	Results results;
 	results.Words = nullptr;
