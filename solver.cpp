@@ -25,10 +25,8 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- I made a mess of the dictionary lock, referencing the list in the results.
 		- I break the tree, don't even copy it, but perhaps get the pointers from a pool, use indices, and dump the stuff afterwards.
 		- !! Kill recursion of dead ends.
-		- Tighter (sequential) allocation of nodes.
 		- Fix everything non-power-of-2 grids: Morton shit really worth it?
 		- Fix 32-bit.
 		- Is it still C++11?
@@ -93,7 +91,6 @@ inline unsigned LetterToThreadIndex(char letter)
 	return LetterToIndex(letter)%kNumThreads;
 }
 
-
 // We'll be using a word tree built out of these simple nodes.
 // FIXME: clarify the difference between a copy and an original
 class DictionaryNode
@@ -126,12 +123,12 @@ public:
 
 		if (0 == (alphaBits & bit))
 		{
-			alphaBits |= bit;
 
 			// FIXME: seq. pool
 			children[index] = new DictionaryNode();	
 		}
 
+		alphaBits |= bit;
 		return children[index];
 	}
 
@@ -155,7 +152,7 @@ public:
 	inline DictionaryNode* GetChild(char letter) const
 	{
 		const unsigned index = LetterToIndex(letter);
-		const unsigned mask = (alphaBits>>index) & 1;
+		const unsigned mask = HasChild(letter);
 		return (DictionaryNode*) (reinterpret_cast<uintptr_t>(children[index]) * mask);
 	}
 
@@ -166,25 +163,17 @@ public:
 		wordIdx = -1;
 	}
 
-	// Full word without 'Qu'. 
-	// FIXME: ref. to list of words
-//	std::string word; 
-
 	unsigned wordIdx;
 	unsigned alphaBits;
 
 	// FIXME: this is a problem, you change values pointed to, don't matter if you're not deleting them
 	DictionaryNode* children[kAlphaRange];
-//	DictionaryNode children[kAlphaRange];
 };
 
 // We keep one dictionary (in subsets) at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 static std::vector<DictionaryNode> s_dictTrees;
-
-// FIXME: read-only, but should be locked along with anything else
 static std::vector<std::string> s_dictionary;
-
 static size_t s_longestWord;
 static size_t s_wordCount;
 
@@ -263,8 +252,6 @@ static void AddWordToDictionary(const std::string& word)
 	}
 
 	s_dictionary.push_back(word);
-
-//	current->word = word;
 	current->wordIdx = s_wordCount;
 	++s_wordCount;
 }
@@ -365,7 +352,6 @@ private:
 		const Query* instance; // FIXME: what do I really want to know?
 
 		std::unique_ptr<char[]> board;
-//		std::vector<std::string> wordsFound;
 		std::vector<unsigned> wordsFound;
 		unsigned score;
 
@@ -381,6 +367,9 @@ public:
 		{
 			FreeWords(m_results);
 		}
+
+		// Lock dictionary; this is a step back from my previous solution, but it gives me a little leeway to do less copying.
+		DictionaryLock lock;
 
 		// Kick off threads.
 		const unsigned numThreads = kNumThreads;
@@ -402,8 +391,6 @@ public:
 			thread.join();
 		}
 
-		// FIXME: threads can handle all below.
-
 		m_results.Count = 0;
 		m_results.Score = 0;
 		for (auto& context : contexts)
@@ -416,24 +403,20 @@ public:
 		}
 
 		// Copy words to Results structure.
+		// FIXME: threads can handle all below.
 		m_results.Words = new char*[m_results.Count];
 		
-		const char** words_cstr = const_cast<const char**>(m_results.Words); // After all I own this data.
+		char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
 		for (auto& context : contexts)
 		{
 			for (auto wordIdx : context->wordsFound)
 			{
-//				const std::string& word = s_dictionary[wordIdx]; // FIXME: lock
-//				const size_t length = word.length();
+				auto& word = s_dictionary[wordIdx];
+				const size_t length = word.length();
 
-				// FIXME: this takes a fucking second or more.. At least allocate it all at once.
-//				*words_cstr = new char[length+1];
-//				strcpy(*words_cstr++, word.c_str());
-
-				// FIXME: man, this is ugly
-				*words_cstr = s_dictionary[wordIdx].c_str();
-//				*words_cstr = const_cast<char*>(s_dictionary[wordIdx].c_str());
-				++words_cstr;
+				// FIXME: can precalculate this, allocate 1 chunk, split it up
+				*words_cstr = new char[length+1];
+				strcpy(*words_cstr++, word.c_str());
 			}
 		}
 	}
@@ -444,14 +427,10 @@ private:
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
-		// Grab a copy of the part of the dictionary we need.
-//		DictionaryNode subDict;
-//		{
-//			DictionaryLock lock;
-//			subDict = s_dictTrees[iThread];
-//		}
-
 		DictionaryNode& subDict = s_dictTrees[iThread];
+
+		// FIXME
+//		subDict = s_dictTrees[iThread];
 
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -637,13 +616,13 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 void FreeWords(Results results)
 {
-//	if (0 != results.Count && nullptr != results.Words)
-//	{
-//		for (unsigned iWord = 0; iWord < results.Count; ++iWord)
-//		{
-//			delete[] results.Words[iWord];
-//		}
-//	}
+	if (0 != results.Count && nullptr != results.Words)
+	{
+		for (unsigned iWord = 0; iWord < results.Count; ++iWord)
+		{
+			delete[] results.Words[iWord];
+		}
+	}
 
 	delete[] results.Words;
 	results.Words = nullptr;
