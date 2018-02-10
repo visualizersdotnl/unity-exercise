@@ -25,6 +25,7 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
+		- Make alpha range 1 smaller.
 		- I break the tree, don't even copy it, but perhaps get the pointers from a pool, use indices, and dump the stuff afterwards.
 		  + Split tree up in static and dynamic part.
 		- !! Kill recursion of dead ends.
@@ -81,6 +82,7 @@ inline void debug_print(const char* format, ...) {}
 
 const unsigned kNumThreads = std::thread::hardware_concurrency();
 const unsigned kAlphaRange = ('Z'-'A')+1;
+const unsigned kVisitedFlag = ~0x7f;
 
 inline unsigned LetterToIndex(char letter)
 {
@@ -104,7 +106,7 @@ public:
 
 	~DictionaryNode() 
 	{
-		// Should delete nodes, but rather do it with a pool.
+		// FIXME
 	}
 
 	inline bool IsWord() const
@@ -124,8 +126,7 @@ public:
 
 		if (0 == (alphaBits & bit))
 		{
-
-			// FIXME: seq. pool
+			// FIXME: seq. pool?
 			children[index] = new DictionaryNode();	
 		}
 
@@ -134,26 +135,25 @@ public:
 	}
 
 	// Return value indicates if node is now a dead end.
-	inline void RemoveChild(char letter)
+	inline void RemoveChild(unsigned index)
 	{
-		const unsigned index = LetterToIndex(letter);
-
 		// Clear the according bit; this operation is performed on a copy so there's no deletion necessary.
 		const unsigned bit = 1 << index;
 		alphaBits &= ~bit;
 	}
 
-	inline bool HasChild(char letter) const
+	inline bool HasChild(unsigned index) const
 	{
-		const unsigned index = LetterToIndex(letter);
+//		asssert(index < kAlphaRange);
+//		const unsigned index = LetterToIndex(letter);
 		const unsigned bit = 1 << index;
 		return 0 != (alphaBits & bit);
 	}
 
-	inline DictionaryNode* GetChild(char letter) const
+	inline DictionaryNode* GetChild(unsigned index) const
 	{
-		const unsigned index = LetterToIndex(letter);
-		const unsigned mask = HasChild(letter);
+//		const unsigned index = LetterToIndex(letter);
+		const unsigned mask = HasChild(index); // (letter);
 		return (DictionaryNode*) (reinterpret_cast<uintptr_t>(children[index]) * mask);
 	}
 
@@ -450,10 +450,10 @@ private:
 					// DEBUG
 					context->deadCount = 0;
 
-					const char letter = context->board[morton2D];
-					if (true == subDict.HasChild(letter))
+					const unsigned index = context->board[morton2D];
+					if (true == subDict.HasChild(index))
 					{
-						TraverseBoard(*context, morton2D, &subDict, letter);
+						TraverseBoard(*context, morton2D, &subDict, index);
 					}
 
 
@@ -490,12 +490,12 @@ private:
 		return LUT[length-3];
 	}
 
-	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent, char letter)
+	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent, unsigned index)
 	{
 		// DEBUG
 		context.deadCount++;
 
-		DictionaryNode* node = parent->GetChild(letter); // FIXME: should always be checked, assert
+		DictionaryNode* node = parent->GetChild(index); // FIXME: assert
 
 		if (true == node->IsWord())
 		{
@@ -512,7 +512,7 @@ private:
 
 			if (node->IsLeaf()) 
 			{
-				parent->RemoveChild(letter);
+				parent->RemoveChild(index);
 				return;
 			}
 		}
@@ -521,7 +521,7 @@ private:
 
 		// Recurse, as we've got a node that might be going somewhewre.
 		// Before recursion, mark this board position as evaluated.
-		board[mortonCode] = 0;
+		board[mortonCode] |= kVisitedFlag;
 
 		const size_t gridSize = context.instance->m_gridSize;
 
@@ -540,15 +540,18 @@ private:
 			const unsigned newMorton = neighbourMortons[iNeighbour];
 			if (newMorton < gridSize) // Within bounds?
 			{
-				const int letterAdj = board[newMorton];
-				if (0 != letterAdj && true == node->HasChild(letterAdj))
+				const unsigned nbTile = board[newMorton];
+				const unsigned visited = nbTile & kVisitedFlag;
+				const unsigned nbIndex = nbTile & ~kVisitedFlag;
+
+				if (0 == visited && true == node->HasChild(nbIndex))
 				{
 					// Traverse, and if we hit the wall go see if what we're left with is a leaf.
-					TraverseBoard(context, newMorton, node, letterAdj);
+					TraverseBoard(context, newMorton, node, nbIndex);
 					if (true == node->IsLeaf())
 					{
 						// Remove this node from it's parent, it's a dead end.
-						parent->RemoveChild(letter);
+						parent->RemoveChild(index);
 
 						// Stop recursing.
 						break;
@@ -558,7 +561,7 @@ private:
 		}
 
 		// Open up this position on the board again.
-		board[mortonCode] = letter;
+		board[mortonCode] &= ~kVisitedFlag;
 	}
 
 	Results& m_results;
@@ -593,7 +596,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				const char letter = *board++;
 				if (0 != isalpha((unsigned char) letter))
 				{
-					const int sanity = toupper(letter);
+					const unsigned sanity = LetterToIndex(toupper(letter));
 					sanitized[morton2D] = sanity;
 				}
 				else
