@@ -2,6 +2,7 @@
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
 	
 	Updated thereafter :-)
+	Now in broken state, but shit fast.
 	
 	Please take a minute to read this piece of text.
 
@@ -24,11 +25,10 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- FIX: tree leaks, copy..
-		- Kill recursion of dead ends.
-		- Pass on letter in Traverse() function instead of loading it twice (good vantage point to build a prefix hash maybe).
+		- I made a mess of the dictionary lock, referencing the list in the results.
+		- I break the tree, don't even copy it, but perhaps get the pointers from a pool, use indices, and dump the stuff afterwards.
+		- !! Kill recursion of dead ends.
 		- Tighter (sequential) allocation of nodes.
-		- Write final word list at once (or at least allocate the memory for them at once), or defer that to the thread too.
 		- Fix everything non-power-of-2 grids: Morton shit really worth it?
 		- Fix 32-bit.
 		- Is it still C++11?
@@ -77,14 +77,12 @@
 // FIXME: 32-bit support, clean up the Morton mess, use 32-bit header!
 #include "MZC2D64.h"
 
-#define debug_print printf
-// inline void debug_print(const char* format, ...) {}
+// #define debug_print printf
+inline void debug_print(const char* format, ...) {}
 
-const unsigned kAlphaRange = ('Z'-'A')+1;
-
-// const unsigned kNumThreads = 1;
-// const unsigned kNumThreads = 2; // My Core M has 2 cores, performance generally gets worse using more (like 4, which is the "threads").
 const unsigned kNumThreads = std::thread::hardware_concurrency();
+const unsigned kAlphaRange = ('Z'-'A')+1;
+const unsigned kWordBit = 1 << (kAlphaRange+1);
 
 inline unsigned LetterToIndex(char letter)
 {
@@ -93,30 +91,29 @@ inline unsigned LetterToIndex(char letter)
 
 inline unsigned LetterToThreadIndex(char letter)
 {
-	return LetterToIndex(letter) % kNumThreads;
+	return LetterToIndex(letter)%kNumThreads;
 }
 
+
 // We'll be using a word tree built out of these simple nodes.
-// FIXME: more functions less direct access, const-correctness.
 // FIXME: clarify the difference between a copy and an original
 class DictionaryNode
 {
 public:
 	DictionaryNode() :
-		alphaBits(0)
+		alphaBits(0), wordIdx(-1)
 	{
-		children.fill(nullptr);
 	}
 
-	~DictionaryNode() {}
+	~DictionaryNode() 
+	{
+	}
 
 	inline bool IsWord() const
 	{
-		// FIXME: bit check?
-		return false == word.empty();
+		return 0 != (alphaBits & kWordBit);
 	}
 
-	// Just tell if there's any children left to recurse as per the official definition.
 	inline bool IsLeaf() const
 	{
 	 	return 0 == alphaBits;
@@ -125,16 +122,18 @@ public:
 	inline DictionaryNode* AddChild(char letter)
 	{
 		const unsigned index = LetterToIndex(letter);
+		const unsigned bit = 1 << index;
 
-		if (nullptr == children[index])
+		if (0 == (alphaBits & bit))
 		{
-			const unsigned bit = 1 << index;
 			alphaBits |= bit;
 
+			// FIXME: seq. pool
 			children[index] = new DictionaryNode();	
 		}
 
 		return children[index];
+//		return &children[index];
 	}
 
 	// Return value indicates if node is now a dead end.
@@ -147,35 +146,47 @@ public:
 		alphaBits &= ~bit;
 	}
 
-
-	inline DictionaryNode* GetChild(char letter)
+	inline bool HasChild(char letter) const
 	{
 		const unsigned index = LetterToIndex(letter);
 		const unsigned bit = 1 << index;
-		return (alphaBits & bit) ? children[index] : nullptr;	
+		return 0 != (alphaBits & bit);
 	}
 
-	// FIXME: get rid of it?
+	inline DictionaryNode* GetChild(char letter) const
+	{
+		const unsigned index = LetterToIndex(letter);
+		const unsigned mask = (alphaBits>>index) & 1;
+		return (DictionaryNode*) (reinterpret_cast<uintptr_t>(children[index]) * mask);
+//		return (DictionaryNode*) (reinterpret_cast<uintptr_t>(&children[index]) * mask);
+	}
+
+	// FIXME: better func. name
 	inline void ClearWord()
 	{
-		assert(true == IsWord());
-		word.clear();
+//		assert(true == IsWord());
+		alphaBits &= ~kWordBit;
 	}
 
 	// Full word without 'Qu'. 
-	// FIXME: get rid of it.
-	std::string word; 
+	// FIXME: ref. to list of words
+//	std::string word; 
+
+	unsigned wordIdx;
+	unsigned alphaBits;
 
 	// FIXME: this is a problem, you change values pointed to, don't matter if you're not deleting them
-	std::array<DictionaryNode*, kAlphaRange> children;
-
-	unsigned alphaBits;
+	DictionaryNode* children[kAlphaRange];
+//	DictionaryNode children[kAlphaRange];
 };
 
 // We keep one dictionary (in subsets) at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 static std::vector<DictionaryNode> s_dictTrees;
-// static std::array<DictionaryNode, kNumThreads> s_dictTrees;
+
+// FIXME: read-only, but should be locked along with anything else
+static std::vector<std::string> s_dictionary;
+
 static size_t s_longestWord;
 static size_t s_wordCount;
 
@@ -253,7 +264,11 @@ static void AddWordToDictionary(const std::string& word)
 		}
 	}
 
-	current->word = word;
+	s_dictionary.push_back(word);
+
+//	current->word = word;
+	current->wordIdx = s_wordCount;
+	current->alphaBits |= kWordBit;
 	++s_wordCount;
 }
 
@@ -306,8 +321,8 @@ void FreeDictionary()
 {
 	DictionaryLock lock;
 
-	s_dictTrees.clear();
 	s_dictTrees.resize(kNumThreads, DictionaryNode());
+	s_dictionary.clear();
 
 	s_wordCount = 0;
 	s_longestWord = 0;
@@ -340,10 +355,11 @@ private:
 		iThread(iThread)
 ,		instance(instance)
 ,		board(new char[instance->m_gridSize])
+,		score(0)
 		{
 //			assert(nullptr != instance);
 			memcpy(board.get(), instance->m_sanitized, instance->m_gridSize);
-			wordsFound.reserve(s_wordCount);
+			wordsFound.reserve(s_wordCount/kNumThreads);
 		}
 
 		~ThreadContext() {}
@@ -352,12 +368,12 @@ private:
 		const Query* instance; // FIXME: what do I really want to know?
 
 		std::unique_ptr<char[]> board;
-		std::vector<std::string> wordsFound;
+//		std::vector<std::string> wordsFound;
+		std::vector<unsigned> wordsFound;
+		unsigned score;
 
 		// FIXME: debug.
 		unsigned noDeadEnd;
-
-		DictionaryNode* root;
 	};
 
 public:
@@ -392,30 +408,35 @@ public:
 		// FIXME: threads can handle all below.
 
 		m_results.Count = 0;
+		m_results.Score = 0;
 		for (auto& context : contexts)
 		{
 			const unsigned count = (unsigned) context->wordsFound.size();
+			const unsigned score = context->score;
 			m_results.Count += count;
-			debug_print("Thread %u joined with %u words.\n", context->iThread, count);
+			m_results.Score += score;
+			debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, count, score);
 		}
 
-		// Copy words to Results structure and calculate the score.
+		// Copy words to Results structure.
 		m_results.Words = new char*[m_results.Count];
-		m_results.Score = 0;
 		
-		char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
+		const char** words_cstr = const_cast<const char**>(m_results.Words); // After all I own this data.
 		for (auto& context : contexts)
 		{
-			for (auto& word : context->wordsFound)
+			for (auto wordIdx : context->wordsFound)
 			{
-				const size_t length = word.length();
-
-				// Uses full word to get the correct score.
-				m_results.Score += GetWordScore(length);
+//				const std::string& word = s_dictionary[wordIdx]; // FIXME: lock
+//				const size_t length = word.length();
 
 				// FIXME: this takes a fucking second or more.. At least allocate it all at once.
-				*words_cstr = new char[length+1];
-				strcpy(*words_cstr++, word.c_str());
+//				*words_cstr = new char[length+1];
+//				strcpy(*words_cstr++, word.c_str());
+
+				// FIXME: man, this is ugly
+				*words_cstr = s_dictionary[wordIdx].c_str();
+//				*words_cstr = const_cast<char*>(s_dictionary[wordIdx].c_str());
+				++words_cstr;
 			}
 		}
 	}
@@ -426,19 +447,14 @@ private:
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
-		// FIXME
 		// Grab a copy of the part of the dictionary we need.
 //		DictionaryNode subDict;
-		{
+//		{
 //			DictionaryLock lock;
 //			subDict = s_dictTrees[iThread];
-		}
+//		}
 
 		DictionaryNode& subDict = s_dictTrees[iThread];
-
-
-		context->root = &subDict;
-
 
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -457,10 +473,12 @@ private:
 					// FIXME: debug.
 					context->noDeadEnd = 0;
 
-					if (nullptr != subDict.GetChild(context->board[morton2D]))
-					{
-						TraverseBoard(*context, morton2D, &subDict);
-					}
+					const char letter = context->board[morton2D];
+					auto* child = subDict.GetChild(letter);
+
+					if (nullptr != child)
+						TraverseBoard(*context, morton2D, &subDict, child);
+
 
 //					if (true == subDict.IsLeaf())
 //					{
@@ -484,28 +502,28 @@ private:
 	}
 
 private:
-	inline unsigned GetWordScore(size_t length) const
+	inline static unsigned GetWordScore(size_t length) // const
 	{
 		const unsigned LUT[] = { 1, 1, 2, 3, 5, 11 };
 		if (length > 8) length = 8;
 		return LUT[length-3];
 	}
 
-	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent)
+	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent, DictionaryNode* node)
 	{
-		const uint64_t iBoard = mortonCode;
-
 		auto& board = context.board;
-		const int tile = board[iBoard];
+		const int tile = board[mortonCode];
 		const int letter = tile;
-
-		DictionaryNode* node = parent->GetChild(letter);
 
 		if (true == node->IsWord())
 		{
 			// Found a word.
-			context.wordsFound.emplace_back(node->word);
-			node->ClearWord();
+//			context.wordsFound.emplace_back(node->word);
+			const unsigned wordIdx = node->wordIdx;
+			context.wordsFound.emplace_back(wordIdx);
+			const std::string& word = s_dictionary[wordIdx]; // FIXME: lock
+			context.score += GetWordScore(word.length());
+			node->ClearWord(); // FIXME: name et cetera
 
 			// FIXME: debug.
 			context.noDeadEnd = 1;
@@ -517,11 +535,9 @@ private:
 			}
 		}
 
-		assert(node->alphaBits != 0);
-
 		// Recurse, as we've got a node that might be going somewhewre.
 		// Before recursion, mark this board position as evaluated.
-		board[iBoard] = 0;
+		board[mortonCode] = 0;
 
 		// FIXME: optimize this crude loop, unroll?
 
@@ -555,26 +571,25 @@ private:
 			}
 
 			const int letterAdj = board[newMorton];
-			if (0 != letterAdj && nullptr != node->GetChild(letterAdj))
+			if (0 != letterAdj && true == node->HasChild(letterAdj))
 			{
 				// FIXME: child meteen doorgeven?
 
 				// Traverse, and if we hit the wall go see if what we're left with is a leaf.
-				TraverseBoard(context, newMorton, node);
+				TraverseBoard(context, newMorton, node, node->GetChild(letterAdj));
 				if (true == node->IsLeaf())
 				{
-					// Restore board tile.
-					board[iBoard] = letter;
-
 					// Remove this node from it's parent, it's a dead end.
 					parent->RemoveChild(letter);
-					return;
+
+					// Stop recursing.
+					break;
 				}
 			}
 		}
 
 		// Open up this position on the board again.
-		board[iBoard] = letter;
+		board[mortonCode] = letter;
 	}
 
 	Results& m_results;
@@ -611,7 +626,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				{
 					const int sanity = toupper(letter);
 					sanitized[morton2D] = sanity;
-//					sanitized[iY*width + iX] = sanity;
 				}
 				else
 				{
@@ -634,13 +648,13 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 void FreeWords(Results results)
 {
-	if (0 != results.Count && nullptr != results.Words)
-	{
-		for (unsigned iWord = 0; iWord < results.Count; ++iWord)
-		{
-			delete[] results.Words[iWord];
-		}
-	}
+//	if (0 != results.Count && nullptr != results.Words)
+//	{
+//		for (unsigned iWord = 0; iWord < results.Count; ++iWord)
+//		{
+//			delete[] results.Words[iWord];
+//		}
+//	}
 
 	delete[] results.Words;
 	results.Words = nullptr;
