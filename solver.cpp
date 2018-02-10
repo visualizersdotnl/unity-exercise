@@ -26,6 +26,7 @@
 
 	To do:
 		- I break the tree, don't even copy it, but perhaps get the pointers from a pool, use indices, and dump the stuff afterwards.
+		  + Split tree up in static and dynamic part.
 		- !! Kill recursion of dead ends.
 		- Fix everything non-power-of-2 grids: Morton shit really worth it?
 		- Fix 32-bit.
