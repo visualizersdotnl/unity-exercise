@@ -25,10 +25,8 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- Make alpha range 1 smaller.
-		- I break the tree, don't even copy it, but perhaps get the pointers from a pool, use indices, and dump the stuff afterwards.
-		  + Split tree up in static and dynamic part.
-		- !! Kill recursion of dead ends.
+		- Fix tree (leaks, reuse).
+		- Kill recursion of dead ends.
 		- Fix everything non-power-of-2 grids: Morton shit really worth it?
 		- Fix 32-bit.
 		- Is it still C++11?
@@ -77,8 +75,8 @@
 // FIXME: 32-bit support, clean up the Morton mess, use 32-bit header!
 #include "MZC2D64.h"
 
-// #define debug_print printf
-inline void debug_print(const char* format, ...) {}
+#define debug_print printf
+// inline void debug_print(const char* format, ...) {}
 
 const unsigned kNumThreads = std::thread::hardware_concurrency();
 const unsigned kAlphaRange = ('Z'-'A')+1;
@@ -144,23 +142,21 @@ public:
 
 	inline bool HasChild(unsigned index) const
 	{
-//		asssert(index < kAlphaRange);
-//		const unsigned index = LetterToIndex(letter);
+		assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
 		return 0 != (alphaBits & bit);
 	}
 
 	inline DictionaryNode* GetChild(unsigned index) const
 	{
-//		const unsigned index = LetterToIndex(letter);
-		const unsigned mask = HasChild(index); // (letter);
+		const unsigned mask = HasChild(index);
 		return (DictionaryNode*) (reinterpret_cast<uintptr_t>(children[index]) * mask);
 	}
 
 	// FIXME: better func. name
 	inline void ClearWord()
 	{
-//		assert(true == IsWord());
+		assert(true == IsWord());
 		wordIdx = -1;
 	}
 
@@ -203,15 +199,17 @@ inline bool IsWordValid(const std::string& word)
 	}
 
 	// Check if it violates the 'Qu' rule.
-	auto iQ = word.find('Q');
+	auto iQ = word.find_first_of('Q');
 	if (std::string::npos != iQ)
 	{
-		auto next = word.begin() + iQ+1;
-		if (next == word.end() || *next != 'U')
+		auto next = iQ+1;
+		if (next == length || word[next] != 'U')
 		{
 			debug_print("Invalid word due to 'Qu' rule: %s\n", word.c_str());
 			return false;
 		}
+
+		iQ = word.substr(iQ).find_first_of('Q');
 	}
 
 	return true;
@@ -341,10 +339,13 @@ private:
 ,		instance(instance)
 ,		board(new char[instance->m_gridSize])
 ,		score(0)
+,		reqStrBufLen(0)
 		{
-//			assert(nullptr != instance);
+			assert(nullptr != instance);
 			memcpy(board.get(), instance->m_sanitized, instance->m_gridSize);
-			wordsFound.reserve(s_wordCount/kNumThreads);
+
+			// FIXME: I could calculate this correctly
+			wordsFound.reserve(s_wordCount/kNumThreads); 
 		}
 
 		~ThreadContext() {}
@@ -355,6 +356,7 @@ private:
 		std::unique_ptr<char[]> board;
 		std::vector<unsigned> wordsFound;
 		unsigned score;
+		size_t reqStrBufLen;
 
 		// DEBUG
 		unsigned deadCount;
@@ -392,32 +394,39 @@ public:
 			thread.join();
 		}
 
-		m_results.Count = 0;
-		m_results.Score = 0;
+		m_results.Count  = 0;
+		m_results.Score  = 0;
+		size_t strBufLen = 0;
+
 		for (auto& context : contexts)
 		{
-			const unsigned count = (unsigned) context->wordsFound.size();
+			const unsigned numWords = (unsigned) context->wordsFound.size();
 			const unsigned score = context->score;
-			m_results.Count += count;
+			m_results.Count += numWords;
 			m_results.Score += score;
-			debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, count, score);
+			strBufLen += context->reqStrBufLen;
+
+			debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, numWords, score);
 		}
 
 		// Copy words to Results structure.
-		// FIXME: threads can handle all below.
+		// FIXME: threads can handle all below, give or take a few tweaks.
+
 		m_results.Words = new char*[m_results.Count];
-		
+		char* resBuf = new char[strBufLen];
+ 		
 		char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
 		for (auto& context : contexts)
 		{
 			for (auto wordIdx : context->wordsFound)
 			{
 				auto& word = s_dictionary[wordIdx];
-				const size_t length = word.length();
 
-				// FIXME: can precalculate this, allocate 1 chunk, split it up
-				*words_cstr = new char[length+1];
+				*words_cstr = resBuf;
 				strcpy(*words_cstr++, word.c_str());
+
+				const size_t length = word.length();
+				resBuf += length+1;
 			}
 		}
 	}
@@ -428,9 +437,8 @@ private:
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
-		DictionaryNode& subDict = s_dictTrees[iThread];
-
 		// FIXME
+		DictionaryNode& subDict = s_dictTrees[iThread];
 //		subDict = s_dictTrees[iThread];
 
 		const unsigned width = query.m_width;
@@ -455,7 +463,6 @@ private:
 					{
 						TraverseBoard(*context, morton2D, &subDict, index);
 					}
-
 
 //					if (true == subDict.IsLeaf())
 //					{
@@ -495,17 +502,21 @@ private:
 		// DEBUG
 		context.deadCount++;
 
-		DictionaryNode* node = parent->GetChild(index); // FIXME: assert
+		DictionaryNode* node = parent->GetChild(index);
+		assert(nullptr != node);
 
 		if (true == node->IsWord())
 		{
 			// Found a word.
-//			context.wordsFound.emplace_back(node->word);
 			const unsigned wordIdx = node->wordIdx;
 			context.wordsFound.emplace_back(wordIdx);
-			const std::string& word = s_dictionary[wordIdx]; // FIXME: lock
-			context.score += GetWordScore(word.length());
-			node->ClearWord(); // FIXME: name et cetera
+			const std::string& word = s_dictionary[wordIdx];
+			const size_t length = word.length();
+			context.score += GetWordScore(length);
+			context.reqStrBufLen += length+1;
+
+			// FIXME: name et cetera
+			node->ClearWord(); 
 
 			// DEBUG
 			context.deadCount = 0;
@@ -622,10 +633,8 @@ void FreeWords(Results results)
 {
 	if (0 != results.Count && nullptr != results.Words)
 	{
-		for (unsigned iWord = 0; iWord < results.Count; ++iWord)
-		{
-			delete[] results.Words[iWord];
-		}
+		// Allocated a single buffer.
+		delete[] results.Words[0];
 	}
 
 	delete[] results.Words;

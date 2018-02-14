@@ -43,8 +43,12 @@ int main(int argC, char **arguments)
 	{
 		for (unsigned iX = 0; iX < xSize; ++iX, ++iBoard)
 		{
-//			const int random = iBoard % 26;
-			const int random = mt_randu32() % 26;
+			int random;
+			do
+			{
+				random = mt_randu32() % 26;
+			}
+			while (random == 'U' - 'A'); // No 'U'
 			const char character = 'A' + random;
 			*write++ = character;
 
@@ -72,14 +76,13 @@ int main(int argC, char **arguments)
 #endif
 
 	printf("- Loading dictionary...\n");
-//	const char *dictPath = "dictionary.txt";
-	const char *dictPath = "dictionary-bigger.txt";
+	const char *dictPath = "dictionary.txt";
+//	const char *dictPath = "dictionary-bigger.txt";
 	LoadDictionary(dictPath);
 
 	printf("- Finding in %ux%u...\n", xSize, ySize);
 
 	auto start = std::chrono::high_resolution_clock::now();
-//	const double start = clock();
 
 	Results results;
 	for (int i = 0; i < NUM_QUERIES; ++i)
@@ -87,8 +90,6 @@ int main(int argC, char **arguments)
 
 	auto end = std::chrono::high_resolution_clock::now();
 	auto timing = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-//	const double end = clock();
 
 	printf("-- Results --\n");
 	printf("Count: %u Score: %u\n", results.Count, results.Score);
@@ -100,10 +101,6 @@ int main(int argC, char **arguments)
 
 	FreeWords(results);
 	FreeDictionary();
-
-//	float avgTime = (end-start)/CLOCKS_PER_SEC/NUM_QUERIES;
-//	printf("\nSolver ran %u times for avg. %.2f second(s), %.8f sec. per tile.\n", (unsigned) NUM_QUERIES, avgTime, avgTime/gridSize);
-	// ^^ Reports a false positive in Valgrind on OSX.
 
 	float time = timing.count();
 	printf("\nSolver ran %u times for avg. %.2f MS or approx. %.2f second(s)\n", (unsigned) NUM_QUERIES, time, time*0.001f);

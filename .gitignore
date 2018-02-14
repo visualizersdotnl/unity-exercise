@@ -9,6 +9,10 @@ boggle
 boggle.dSYM/Contents/Resources/DWARF/boggle
 boggle.dSYM/Contents/Info.plist
 
+# -- Visual Studio Code --
+
+VSCode/
+
 # -- Windows --
 
 ## Ignore Visual Studio temporary files, build results, and
