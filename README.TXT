@@ -1,4 +1,6 @@
 
+** Out of date **
+
 Hi.
 
 Here's my boggle solver, the entire solver lives in solver.cpp; please read as most details are explained
