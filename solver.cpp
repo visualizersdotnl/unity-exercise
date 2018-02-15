@@ -167,6 +167,13 @@ public:
 	DictionaryNode* children[kAlphaRange];
 };
 
+class DictionaryPrefixNode
+{
+public:
+
+};
+
+
 // We keep one dictionary (in subsets) at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 static std::vector<DictionaryNode> s_dictTrees;
@@ -359,7 +366,8 @@ private:
 		size_t reqStrBufLen;
 
 		// DEBUG
-		unsigned deadCount;
+		unsigned maxDepth;
+		unsigned isDeadEnd;
 	};
 
 public:
@@ -445,7 +453,8 @@ private:
 		const unsigned height = query.m_height;
 
 		// DEBUG
-		unsigned deadPaths = 0, highestDeadCount = 0;
+		context->maxDepth = 0;
+		unsigned deadEnds = 0;
 
 		if (false == subDict.IsLeaf())
 		{
@@ -456,12 +465,13 @@ private:
 				for (unsigned iY = 0; iY < height; ++iY)
 				{
 					// DEBUG
-					context->deadCount = 0;
+					context->isDeadEnd = 1;
 
 					const unsigned index = context->board[morton2D];
+					unsigned depth = 0;
 					if (true == subDict.HasChild(index))
 					{
-						TraverseBoard(*context, morton2D, &subDict, index);
+						TraverseBoard(*context, morton2D, &subDict, index, depth);
 					}
 
 //					if (true == subDict.IsLeaf())
@@ -471,12 +481,7 @@ private:
 //					}
 
 					// DEBUG
-					const unsigned deadCount = context->deadCount;
-					if (deadCount > 0)
-					{
-						++deadPaths;
-						highestDeadCount = std::max(highestDeadCount, deadCount);
-					}
+					deadEnds += !context->isDeadEnd;
 
 					morton2D = ullMC2Dyplusv(morton2D, 1);
 				}
@@ -484,9 +489,9 @@ private:
 				mortonX = ullMC2Dxplusv(mortonX, 1);
 			}
 		}
-
-		const float deadPct = ((float)deadPaths/query.m_gridSize)*100.f;
-		debug_print("Thread %u has %u dead paths in a %zu grid (%.2f percent, highest dead traversal count %u).\n", iThread, deadPaths, query.m_gridSize, deadPct, highestDeadCount);
+		
+		const float deadPct = ((float)deadEnds/query.m_gridSize)*100.f;
+		debug_print("Thread %u has max. traversal depth %u, %u dead ends (%.2f percent).\n", iThread, context->maxDepth, deadEnds, deadPct);
 	}
 
 private:
@@ -497,11 +502,10 @@ private:
 		return LUT[length-3];
 	}
 
-	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent, unsigned index)
+	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent, unsigned index, unsigned& depth)
 	{
-		// DEBUG
-		context.deadCount++;
-
+		context.maxDepth = std::max(context.maxDepth, depth);
+		
 		DictionaryNode* node = parent->GetChild(index);
 		assert(nullptr != node);
 
@@ -519,7 +523,7 @@ private:
 			node->ClearWord(); 
 
 			// DEBUG
-			context.deadCount = 0;
+			context.isDeadEnd = 0;
 
 			if (node->IsLeaf()) 
 			{
@@ -527,6 +531,9 @@ private:
 				return;
 			}
 		}
+
+		++depth;
+//		if (++depth >= s_longestWord) return;
 
 		auto& board = context.board;
 
@@ -558,7 +565,7 @@ private:
 				if (0 == visited && true == node->HasChild(nbIndex))
 				{
 					// Traverse, and if we hit the wall go see if what we're left with is a leaf.
-					TraverseBoard(context, newMorton, node, nbIndex);
+					TraverseBoard(context, newMorton, node, nbIndex, depth);
 					if (true == node->IsLeaf())
 					{
 						// Remove this node from it's parent, it's a dead end.
@@ -570,6 +577,8 @@ private:
 				}
 			}
 		}
+
+		--depth;
 
 		// Open up this position on the board again.
 		board[mortonCode] &= ~kVisitedFlag;
