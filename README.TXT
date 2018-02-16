@@ -1,5 +1,5 @@
 
-** Out of date since solver_submitted.cpp **
+** Out of date since I submitted solver_submitted.cpp, please check solver.cpp for up-to-date information and issues. **
 
 Hi.
 

@@ -1,8 +1,8 @@
 /*
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
 	
-	Updated thereafter :-)
-	Now in broken state, but shit fast.
+	Updated late.
+	** Now in leaky state, but shit fast. **
 	
 	Please take a minute to read this piece of text.
 
@@ -26,13 +26,15 @@
 
 	To do:
 		- Fix tree (leaks, reuse).
-		- Kill recursion of dead ends.
+		- Memory coherency.
+		- Make detection of dead ends more efficient, even though it's a really low percentage we're dealing with.
 		- Fix everything non-power-of-2 grids: Morton shit really worth it?
-		- Fix 32-bit.
-		- Is it still C++11?
+		- Fix: 32-bit, test on Ubuntu & Windows, Valgrind it again.
+		- I'm not using SIMD (by choice, for now).
+
+	To do (low priority):
 		- Fix class member (notation).
 		- Use more references where applicable.
-		- Assertions!
 
 	Notes:
 		- Compile with full optimization (-O3 for ex.) for best performance.
@@ -41,10 +43,12 @@
 		- All these functions can be called at any time from any thread as the single shared resource, the dictionary,
 		  is guarded by a mutex and no globals are used.
 		- If an invalid board is supplied (anything non-alphanumerical detected) the query is skipped, yielding zero results.
-		- Assertions aren't all over the place (yet).
+		- My class design isn't really tight (functions and public member values galore), but for now that's fine.
 	
 	I've done leak testing using Valgrind in OSX and I seem to be in the clear; there are some inconclusive and (hopefully) irrelevant
 	ones reported in the runtime library, but you shouldn't run into killer pileups.
+
+	Lesson learned, that I knew all along: branching is terrible.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -65,8 +69,8 @@
 // #include <list>
 #include <mutex>
 #include <thread>
-#include <atomic>
-#include <array>
+// #include <atomic>
+// #include <array>
 // #include <deque>
 #include <cassert>
 
@@ -75,8 +79,14 @@
 // FIXME: 32-bit support, clean up the Morton mess, use 32-bit header!
 #include "MZC2D64.h"
 
-// #define debug_print printf
-inline void debug_print(const char* format, ...) {}
+// Undef. to skip dead end percentages and all prints and such.
+#define DEBUG_STATS
+
+#if defined(DEBUG_STATS)
+	#define debug_print printf
+#else
+	inline void debug_print(const char* format, ...) {}
+#endif
 
 const unsigned kNumThreads = std::thread::hardware_concurrency();
 const unsigned kAlphaRange = ('Z'-'A')+1;
@@ -179,9 +189,9 @@ public:
 static std::mutex s_dictMutex;
 static std::vector<DictionaryNode> s_dictTrees;
 static std::vector<std::string> s_dictionary;
-static unsigned* s_scoreLUT = nullptr;
 static size_t s_longestWord;
 static size_t s_wordCount;
+static std::vector<size_t> s_threadWordCount;
 
 // Scoped lock for all dictionary globals.
 // FIXME: locks for every thread so they won't fight on initial copy?
@@ -258,8 +268,11 @@ static void AddWordToDictionary(const std::string& word)
 		}
 	}
 
-	s_dictionary.push_back(word);
+	s_dictionary.emplace_back(word);
+
 	current->wordIdx = s_wordCount;
+
+	auto threadWordCount = ++s_threadWordCount[iThread];
 	++s_wordCount;
 }
 
@@ -315,10 +328,9 @@ void FreeDictionary()
 	s_dictTrees.resize(kNumThreads, DictionaryNode());
 	s_dictionary.clear();
 
-	delete[] s_scoreLUT;
-
-	s_wordCount = 0;
 	s_longestWord = 0;
+	s_wordCount = 0;
+	s_threadWordCount.resize(kNumThreads, 0);
 }
 
 // This class contains the actual solver and it's entire context, including a local copy of the dictionary.
@@ -354,8 +366,8 @@ private:
 			assert(nullptr != instance);
 			memcpy(board.get(), instance->m_sanitized, instance->m_gridSize);
 
-			// FIXME: I could calculate this correctly
-			wordsFound.reserve(s_wordCount/kNumThreads); 
+			// No intermediate allocations please.
+			wordsFound.reserve(s_threadWordCount[iThread]); 
 		}
 
 		~ThreadContext() {}
@@ -368,9 +380,10 @@ private:
 		unsigned score;
 		size_t reqStrBufLen;
 
-		// DEBUG
+#if defined(DEBUG_STATS)
 		unsigned maxDepth;
 		unsigned isDeadEnd;
+#endif
 	}; 
 
 public:
@@ -389,7 +402,6 @@ public:
 		// Kick off threads.
 		const unsigned numThreads = kNumThreads;
 
-		// FIXME: another container?
 		std::vector<std::thread> threads;
 		std::vector<std::unique_ptr<ThreadContext>> contexts; // FIXME: can go into TLS?
 
@@ -422,7 +434,7 @@ public:
 		}
 
 		// Copy words to Results structure.
-		// FIXME: threads can handle all below, give or take a few tweaks.
+		// I'd rather set pointers into the dictionary, but that would break the results as soon as a new dictionary is loaded.
 
 		m_results.Words = new char*[m_results.Count];
 		char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
@@ -454,9 +466,10 @@ private:
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
 
-		// DEBUG
+#if defined(DEBUG_STATS)
 		context->maxDepth = 0;
 		unsigned deadEnds = 0;
+#endif
 
 		if (false == subDict.IsVoid())
 		{
@@ -468,8 +481,9 @@ private:
 				uint64_t morton2D = mortonX;
 				for (unsigned iY = 0; iY < height; ++iY)
 				{
-					// DEBUG
+#if defined(DEBUG_STATS)
 					context->isDeadEnd = 1;
+#endif
 
 					const unsigned index = board[morton2D];
 					auto hasChild = subDict.HasChild(index);
@@ -478,6 +492,7 @@ private:
 						unsigned depth = 0;
 						TraverseBoard(*context, morton2D, /* child */ subDict.GetChild(index), depth);
 
+						// You'd say this would speed things up but it doesn't as it pollutes the loop further.
 //						if (true == child->IsVoid())
 //						{
 //							subDict.RemoveChild(index);
@@ -487,8 +502,9 @@ private:
 
 					}
 
-					// DEBUG
+#if defined(DEBUG_STATS)
 					deadEnds += !context->isDeadEnd;
+#endif
 
 					morton2D = ullMC2Dyplusv(morton2D, 1);
 				}
@@ -496,17 +512,23 @@ private:
 				mortonX = ullMC2Dxplusv(mortonX, 1);
 			}
 		}
+
+		// Sorting the indices into the full word list improves execution time a little.
+		auto& wordsFound = context->wordsFound;
+		std::sort(wordsFound.begin(), wordsFound.end());
 		
+#if defined(DEBUG_STATS)
 		const float deadPct = ((float)deadEnds/query.m_gridSize)*100.f;
 		debug_print("Thread %u has max. traversal depth %u, %u dead ends (%.2f percent).\n", iThread, context->maxDepth, deadEnds, deadPct);
+#endif
 	}
 
 private:
-	inline static unsigned GetWordScore(size_t length) // const
+	inline static unsigned GetWordScore(size_t length) /* const */
 	{
-		const unsigned LUT[] = { 1, 1, 2, 3, 5, 11 };
+		const unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
 		if (length > 8) length = 8;
-		return LUT[length-3];
+		return kLUT[length-3];
 	}
 
 	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* child, unsigned& depth)
@@ -514,36 +536,36 @@ private:
 		assert(nullptr != child);
 		assert(depth < s_longestWord);
 
+#if defined(DEBUG_STATS)
 		context.maxDepth = std::max(context.maxDepth, depth);
+#endif
 
-		if (depth >= 2)
+		// Note: checking if the depth is sufficient beforehand is costlier than just checking if the index is valid.
+		unsigned wordIdx = child->wordIdx;
+		if (-1 != wordIdx)
 		{
-			unsigned wordIdx = child->wordIdx;
-			if (-1 != wordIdx)
+			// Found a word.
+			const unsigned wordIdx = child->wordIdx;
+			context.wordsFound.emplace_back(wordIdx);
+			auto& word = s_dictionary[wordIdx];
+			const size_t length = word.length();
+			context.score += GetWordScore(length);
+			context.reqStrBufLen += length;
+
+			// FIXME: name et cetera
+			child->ClearWord(); 
+
+#if defined(DEBUG_STATS)
+			context.isDeadEnd = 0;
+#endif
+
+			if (child->IsVoid()) 
 			{
-				// Found a word.
-				const unsigned wordIdx = child->wordIdx;
-				context.wordsFound.emplace_back(wordIdx);
-				auto& word = s_dictionary[wordIdx];
-				const size_t length = word.length();
-				context.score += GetWordScore(length);
-				context.reqStrBufLen += length;
-
-				// FIXME: name et cetera
-				child->ClearWord(); 
-
-				// DEBUG
-				context.isDeadEnd = 0;
-
-				if (child->IsVoid()) 
-				{
-					return;
-				}
+				return;
 			}
 		}
 
 		++depth;
-//		if (++depth >= s_longestWord) return;
 
 		auto& board = context.board;
 		const size_t gridSize = context.instance->m_gridSize;
@@ -552,6 +574,8 @@ private:
 		// Before recursion, mark this board position as evaluated.
 		board[mortonCode] |= kVisitedFlag;
 
+		// FIXME: this can obviously be done smarter, but at least these functions don't do any conditional branching.
+		// For example, checking if the new morton index matches the previous one just incurs a penalty.
 		uint64_t mortonCodes[8];
 		mortonCodes[0] = ullMC2Dxminusv(mortonCode, 1);
 		mortonCodes[1] = ullMC2Dxplusv(mortonCode, 1);
