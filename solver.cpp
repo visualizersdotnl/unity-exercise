@@ -25,10 +25,11 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
+		- Detect leaks / Valgrind it!
 		- Fix everything non-power-of-2 grids: Morton shit really worth it?
 		- Memory coherency.
 		- Make detection of dead ends more efficient, even though it's a really low percentage we're dealing with.
-		- Fix: 32-bit, test on Ubuntu & Windows, Valgrind it again.
+		- Fix: 32-bit, test on Ubuntu & Windows.
 		- I'm not using SIMD (by choice, for now).
 
 	To do (low priority):
@@ -81,7 +82,7 @@
 #include "MZC2D64.h"
 
 // Undef. to skip dead end percentages and all prints and such.
-#define DEBUG_STATS
+// #define DEBUG_STATS
 
 #if defined(DEBUG_STATS)
 	#define debug_print printf
@@ -383,11 +384,18 @@ private:
 		ThreadContext(unsigned iThread, const Query* instance) :
 		iThread(iThread)
 ,		instance(instance)
-,		board(new char[instance->m_gridSize])
+,		board(nullptr)
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
+			// Minimal initialization, handle rest in thread.
 			assert(nullptr != instance);
+		}
+
+		// To be called when entering thread.
+		void OnThreadStart()
+		{
+			board = std::unique_ptr<char[]>(new char[instance->m_gridSize]);
 			memcpy(board.get(), instance->m_sanitized, instance->m_gridSize);
 
 			// No intermediate allocations please.
@@ -477,6 +485,8 @@ public:
 private:
 	static void ExecuteThread(ThreadContext* context)
 	{
+		context->OnThreadStart();
+
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
