@@ -75,12 +75,12 @@
 // FIXME: 32-bit support, clean up the Morton mess, use 32-bit header!
 #include "MZC2D64.h"
 
-#define debug_print printf
-// inline void debug_print(const char* format, ...) {}
+// #define debug_print printf
+inline void debug_print(const char* format, ...) {}
 
 const unsigned kNumThreads = std::thread::hardware_concurrency();
 const unsigned kAlphaRange = ('Z'-'A')+1;
-const unsigned kVisitedFlag = ~0x7f;
+const unsigned kVisitedFlag = 1<<7;
 
 inline unsigned LetterToIndex(char letter)
 {
@@ -112,9 +112,9 @@ public:
 		return -1 != wordIdx;
 	}
 
-	inline bool IsLeaf() const
+	inline bool IsVoid() const
 	{
-	 	return 0 == alphaBits;
+		return 0 == alphaBits;
 	}
 
 	inline DictionaryNode* AddChild(char letter)
@@ -140,6 +140,7 @@ public:
 		alphaBits &= ~bit;
 	}
 
+	// Always use this prior to GetChild(), it's decisively faster.
 	inline bool HasChild(unsigned index) const
 	{
 		assert(index < kAlphaRange);
@@ -174,10 +175,11 @@ public:
 };
 
 
-// We keep one dictionary (in subsets) at a time, but it's access is protected by a mutex, just to be safe.
+// We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 static std::vector<DictionaryNode> s_dictTrees;
 static std::vector<std::string> s_dictionary;
+static unsigned* s_scoreLUT = nullptr;
 static size_t s_longestWord;
 static size_t s_wordCount;
 
@@ -232,7 +234,6 @@ static void AddWordToDictionary(const std::string& word)
 	const size_t length = word.length();
 	if (length > s_longestWord)
 	{
-		// Longest word thus far (just a print statistic).
 		s_longestWord = length;
 	}
 
@@ -314,6 +315,8 @@ void FreeDictionary()
 	s_dictTrees.resize(kNumThreads, DictionaryNode());
 	s_dictionary.clear();
 
+	delete[] s_scoreLUT;
+
 	s_wordCount = 0;
 	s_longestWord = 0;
 }
@@ -368,7 +371,7 @@ private:
 		// DEBUG
 		unsigned maxDepth;
 		unsigned isDeadEnd;
-	};
+	}; 
 
 public:
 	void Execute()
@@ -379,7 +382,8 @@ public:
 			FreeWords(m_results);
 		}
 
-		// Lock dictionary; this is a step back from my previous solution, but it gives me a little leeway to do less copying.
+		// Lock dictionary for the entire run. 
+		// This is a step back from my previous solution, but it gives me a little leeway to do less copying.
 		DictionaryLock lock;
 
 		// Kick off threads.
@@ -412,7 +416,7 @@ public:
 			const unsigned score = context->score;
 			m_results.Count += numWords;
 			m_results.Score += score;
-			strBufLen += context->reqStrBufLen;
+			strBufLen += context->reqStrBufLen + numWords; // Add numWords for terminators.
 
 			debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, numWords, score);
 		}
@@ -421,18 +425,16 @@ public:
 		// FIXME: threads can handle all below, give or take a few tweaks.
 
 		m_results.Words = new char*[m_results.Count];
-		char* resBuf = new char[strBufLen];
- 		
 		char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
+		char* resBuf = new char[strBufLen];
+
 		for (auto& context : contexts)
 		{
 			for (auto wordIdx : context->wordsFound)
 			{
-				auto& word = s_dictionary[wordIdx];
-
 				*words_cstr = resBuf;
+				auto& word = s_dictionary[wordIdx];
 				strcpy(*words_cstr++, word.c_str());
-
 				const size_t length = word.length();
 				resBuf += length+1;
 			}
@@ -456,8 +458,10 @@ private:
 		context->maxDepth = 0;
 		unsigned deadEnds = 0;
 
-		if (false == subDict.IsLeaf())
+		if (false == subDict.IsVoid())
 		{
+			auto* board = context->board.get();
+
 			uint64_t mortonX = ullMC2Dencode(0, 0);
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
@@ -467,18 +471,21 @@ private:
 					// DEBUG
 					context->isDeadEnd = 1;
 
-					const unsigned index = context->board[morton2D];
-					unsigned depth = 0;
-					if (true == subDict.HasChild(index))
+					const unsigned index = board[morton2D];
+					auto hasChild = subDict.HasChild(index);
+					if (true == hasChild)
 					{
-						TraverseBoard(*context, morton2D, &subDict, index, depth);
-					}
+						unsigned depth = 0;
+						TraverseBoard(*context, morton2D, /* child */ subDict.GetChild(index), depth);
 
-//					if (true == subDict.IsLeaf())
-//					{
-//						debug_print("Dictionary exhausted for thread %u.\n", iThread);
-//						break;
-//					}
+//						if (true == child->IsVoid())
+//						{
+//							subDict.RemoveChild(index);
+//							if (true == subDict.IsVoid())
+//								break;
+//						}
+
+					}
 
 					// DEBUG
 					deadEnds += !context->isDeadEnd;
@@ -502,33 +509,36 @@ private:
 		return LUT[length-3];
 	}
 
-	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* parent, unsigned index, unsigned& depth)
+	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* child, unsigned& depth)
 	{
+		assert(nullptr != child);
+		assert(depth < s_longestWord);
+
 		context.maxDepth = std::max(context.maxDepth, depth);
-		
-		DictionaryNode* node = parent->GetChild(index);
-		assert(nullptr != node);
 
-		if (true == node->IsWord())
+		if (depth >= 2)
 		{
-			// Found a word.
-			const unsigned wordIdx = node->wordIdx;
-			context.wordsFound.emplace_back(wordIdx);
-			const std::string& word = s_dictionary[wordIdx];
-			const size_t length = word.length();
-			context.score += GetWordScore(length);
-			context.reqStrBufLen += length+1;
-
-			// FIXME: name et cetera
-			node->ClearWord(); 
-
-			// DEBUG
-			context.isDeadEnd = 0;
-
-			if (node->IsLeaf()) 
+			unsigned wordIdx = child->wordIdx;
+			if (-1 != wordIdx)
 			{
-				parent->RemoveChild(index);
-				return;
+				// Found a word.
+				const unsigned wordIdx = child->wordIdx;
+				context.wordsFound.emplace_back(wordIdx);
+				auto& word = s_dictionary[wordIdx];
+				const size_t length = word.length();
+				context.score += GetWordScore(length);
+				context.reqStrBufLen += length;
+
+				// FIXME: name et cetera
+				child->ClearWord(); 
+
+				// DEBUG
+				context.isDeadEnd = 0;
+
+				if (child->IsVoid()) 
+				{
+					return;
+				}
 			}
 		}
 
@@ -536,43 +546,46 @@ private:
 //		if (++depth >= s_longestWord) return;
 
 		auto& board = context.board;
+		const size_t gridSize = context.instance->m_gridSize;
 
 		// Recurse, as we've got a node that might be going somewhewre.
 		// Before recursion, mark this board position as evaluated.
 		board[mortonCode] |= kVisitedFlag;
 
-		const size_t gridSize = context.instance->m_gridSize;
+		uint64_t mortonCodes[8];
+		mortonCodes[0] = ullMC2Dxminusv(mortonCode, 1);
+		mortonCodes[1] = ullMC2Dxplusv(mortonCode, 1);
+		mortonCodes[2] = ullMC2Dyminusv(mortonCodes[0], 1);
+		mortonCodes[3] = ullMC2Dyminusv(mortonCode, 1);
+		mortonCodes[4] = ullMC2Dyminusv(mortonCodes[1], 1);
+		mortonCodes[5] = ullMC2Dyplusv(mortonCodes[0], 1);
+		mortonCodes[6] = ullMC2Dyplusv(mortonCode, 1);
+		mortonCodes[7] = ullMC2Dyplusv(mortonCodes[1], 1);
 
-		unsigned neighbourMortons[8];
-		neighbourMortons[0] = ullMC2Dxminusv(mortonCode, 1);
-		neighbourMortons[1] = ullMC2Dxplusv(mortonCode, 1);
-		neighbourMortons[2] = ullMC2Dyminusv(neighbourMortons[0], 1);
-		neighbourMortons[3] = ullMC2Dyminusv(mortonCode, 1);
-		neighbourMortons[4] = ullMC2Dyminusv(neighbourMortons[1], 1);
-		neighbourMortons[5] = ullMC2Dyplusv(neighbourMortons[0], 1);
-		neighbourMortons[6] = ullMC2Dyplusv(mortonCode, 1);
-		neighbourMortons[7] = ullMC2Dyplusv(neighbourMortons[1], 1);
-
-		for (unsigned iNeighbour = 0; iNeighbour < 8; ++iNeighbour)
+		for (unsigned iN = 0; iN < 8; ++iN)
 		{
-			const unsigned newMorton = neighbourMortons[iNeighbour];
-			if (newMorton < gridSize) // Within bounds?
+			const uint64_t newMorton = mortonCodes[iN];
+			if (newMorton < gridSize)
 			{
 				const unsigned nbTile = board[newMorton];
 				const unsigned visited = nbTile & kVisitedFlag;
-				const unsigned nbIndex = nbTile & ~kVisitedFlag;
 
-				if (0 == visited && true == node->HasChild(nbIndex))
+				if (0 == visited)
 				{
-					// Traverse, and if we hit the wall go see if what we're left with is a leaf.
-					TraverseBoard(context, newMorton, node, nbIndex, depth);
-					if (true == node->IsLeaf())
+					const unsigned nbIndex = nbTile & ~kVisitedFlag;
+					if (true == child->HasChild(nbIndex))
 					{
-						// Remove this node from it's parent, it's a dead end.
-						parent->RemoveChild(index);
+						// Traverse, and if we hit the wall go see if what we're left with his void.
+						auto* nbChild = child->GetChild(nbIndex);
+						TraverseBoard(context, newMorton, nbChild, depth);
+						if (true == nbChild->IsVoid())
+						{
+							child->RemoveChild(nbIndex);
 
-						// Stop recursing.
-						break;
+							if (true == child->IsVoid())
+								// Stop recursing.
+								break;
+						}
 					}
 				}
 			}
