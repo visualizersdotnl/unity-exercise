@@ -3,8 +3,7 @@
 // #define PRINT_WORDS
 // #define PRINT_GRID
 
-// WARNING: multiple queries causes leaks (no FreeWords() calls made except on the last set).
-#define NUM_QUERIES 1
+#define NUM_QUERIES 4
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -19,11 +18,11 @@
 
 int main(int argC, char **arguments)
 {
-	if (NUM_QUERIES > 1) printf("Running multiple queries (%u), which means there'll be some lazy leaks :-)\n", NUM_QUERIES);
-
 	initialize_random_generator();
 
 #ifndef USE_UNITY_REF_GRID
+
+	printf("Generating grid using Mersenne-Twister.\n");
 
 	if (nullptr == arguments[1] || nullptr == arguments[2])
 	{
@@ -33,6 +32,7 @@ int main(int argC, char **arguments)
 
 	const unsigned xSize = atoi(arguments[1]);
 	const unsigned ySize = atoi(arguments[2]);
+
 	const unsigned gridSize = xSize*ySize;
 	
 //	srand(42);
@@ -84,26 +84,29 @@ int main(int argC, char **arguments)
 
 	auto start = std::chrono::high_resolution_clock::now();
 
-	Results results;
-	for (int i = 0; i < NUM_QUERIES; ++i)
-		results = FindWords(board.get(), xSize, ySize);
+	Results results[NUM_QUERIES];
+	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
+		results[iQuery] = FindWords(board.get(), xSize, ySize);
 
 	auto end = std::chrono::high_resolution_clock::now();
 	auto timing = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
-	printf("-- Results --\n");
-	printf("Count: %u Score: %u\n", results.Count, results.Score);
+	printf("-- Results (first run) --\n");
+	printf("Count: %u Score: %u\n", results[0].Count, results[0].Score);
 
 #ifdef PRINT_WORDS
 	for (unsigned iWord = 0; iWord < results.Count; ++iWord) 
 		printf("%s\n", results.Words[iWord]);	
 #endif
 
-	FreeWords(results);
+	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
+		FreeWords(results[iQuery]);
+	
 	FreeDictionary();
 
-	float time = timing.count();
-	printf("\nSolver ran %u times for avg. %.2f MS or approx. %.2f second(s)\n", (unsigned) NUM_QUERIES, time, time*0.001f);
+	const float time = timing.count();
+	const float avgTime = time/NUM_QUERIES;
+	printf("\nSolver ran %u times for avg. %.2f MS or approx. %.2f second(s)\n", (unsigned) NUM_QUERIES, avgTime, avgTime*0.001f);
 
 	return 0;
 }

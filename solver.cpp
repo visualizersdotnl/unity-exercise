@@ -25,7 +25,6 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- Fix tree (leaks, reuse).
 		- Memory coherency.
 		- Make detection of dead ends more efficient, even though it's a really low percentage we're dealing with.
 		- Fix everything non-power-of-2 grids: Morton shit really worth it?
@@ -33,6 +32,8 @@
 		- I'm not using SIMD (by choice, for now).
 
 	To do (low priority):
+		- Building (or loading) my dictionary is slow, I'm fine with that as I focus on the solver.
+		- Sort root dictionary.
 		- Fix class member (notation).
 		- Use more references where applicable.
 
@@ -70,7 +71,7 @@
 #include <mutex>
 #include <thread>
 // #include <atomic>
-// #include <array>
+#include <array>
 // #include <deque>
 #include <cassert>
 
@@ -80,7 +81,7 @@
 #include "MZC2D64.h"
 
 // Undef. to skip dead end percentages and all prints and such.
-#define DEBUG_STATS
+// #define DEBUG_STATS
 
 #if defined(DEBUG_STATS)
 	#define debug_print printf
@@ -102,45 +103,49 @@ inline unsigned LetterToThreadIndex(char letter)
 	return LetterToIndex(letter)%kNumThreads;
 }
 
-// We'll be using a word tree built out of these simple nodes.
-// FIXME: clarify the difference between a copy and an original
 class DictionaryNode
 {
 public:
-	DictionaryNode() :
+	DictionaryNode(unsigned alphaBits = 0, unsigned wordIdx = -1) :
 		alphaBits(0), wordIdx(-1)
 	{
 	}
 
-	~DictionaryNode() 
+	DictionaryNode(const DictionaryNode& RHS)
 	{
-		// FIXME
+		alphaBits = RHS.alphaBits;
+		wordIdx = RHS.wordIdx;
+
+		for (unsigned index = 0; index < kAlphaRange; ++index)
+		{
+			if (true == RHS.HasChild(index))
+			{
+				auto* child = RHS.GetChild(index);
+				children[index] = std::unique_ptr<DictionaryNode>(new DictionaryNode(*child));
+			}
+		}
 	}
 
-	inline bool IsWord() const
-	{
-		return -1 != wordIdx;
-	}
+	~DictionaryNode() {}
 
-	inline bool IsVoid() const
-	{
-		return 0 == alphaBits;
-	}
-
-	inline DictionaryNode* AddChild(char letter)
+	// Only to be called during dictionary load.
+	DictionaryNode* AddChild(char letter)
 	{
 		const unsigned index = LetterToIndex(letter);
-		const unsigned bit = 1 << index;
 
-		if (0 == (alphaBits & bit))
+		if (false == HasChild(index))
 		{
 			// FIXME: seq. pool?
-			children[index] = new DictionaryNode();	
+			children[index] = std::unique_ptr<DictionaryNode>(new DictionaryNode());
+			const unsigned bit = 1 << index;
+			alphaBits |= bit;
 		}
 
-		alphaBits |= bit;
-		return children[index];
+		return children[index].get();
 	}
+
+	inline bool IsWord() const { return -1 != wordIdx;  }
+	inline bool IsVoid() const { return 0 == alphaBits; }
 
 	// Return value indicates if node is now a dead end.
 	inline void RemoveChild(unsigned index)
@@ -160,8 +165,8 @@ public:
 
 	inline DictionaryNode* GetChild(unsigned index) const
 	{
-		const unsigned mask = HasChild(index);
-		return (DictionaryNode*) (reinterpret_cast<uintptr_t>(children[index]) * mask);
+		assert(true == HasChild(index));
+		return children[index].get();
 	}
 
 	// FIXME: better func. name
@@ -171,24 +176,24 @@ public:
 		wordIdx = -1;
 	}
 
+	// Dirty as it is, I'm touching these here and there.
 	unsigned wordIdx;
 	unsigned alphaBits;
 
-	// FIXME: this is a problem, you change values pointed to, don't matter if you're not deleting them
-	DictionaryNode* children[kAlphaRange];
+private:
+	std::array<std::unique_ptr<DictionaryNode>, kAlphaRange> children;
 };
-
-class DictionaryPrefixNode
-{
-public:
-
-};
-
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
+
+// A root per thread.
 static std::vector<DictionaryNode> s_dictTrees;
+
+// Sequential dictionary of all full words (FIXME: yet unsorted).
 static std::vector<std::string> s_dictionary;
+
+// Counters, the latter being useful to reserve space.
 static size_t s_longestWord;
 static size_t s_wordCount;
 static std::vector<size_t> s_threadWordCount;
@@ -292,31 +297,35 @@ void LoadDictionary(const char* path)
 	}
 
 	DictionaryLock lock;
-
-	int character;
-	std::string word;
-
-	do
 	{
-		character = fgetc(file);
-		if (0 != isalpha((unsigned char) character))
+		int character;
+		std::string word;
+
+		do
 		{
-			// Boggle tiles are simply A-Z, where Q means 'Qu'.
-			word += toupper(character);
-		}
-		else
-		{
-			// We've hit EOF or a non-alphanumeric character.
-			if (false == word.empty()) // Got a word?
+			character = fgetc(file);
+			if (0 != isalpha((unsigned char) character))
 			{
-				AddWordToDictionary(word);
-				word.clear();
+				// Boggle tiles are simply A-Z, where Q means 'Qu'.
+				word += toupper(character);
+			}
+			else
+			{
+				// We've hit EOF or a non-alphanumeric character.
+				if (false == word.empty()) // Got a word?
+				{
+					AddWordToDictionary(word);
+					word.clear();
+				}
 			}
 		}
-	}
-	while (EOF != character);
+		while (EOF != character);
 
-	fclose(file);
+		fclose(file);
+
+		// Sort the original word list, as we'll be attempting access it in a sorted manner as well.
+		std::sort(s_dictionary.begin(), s_dictionary.end());
+	}
 
 	debug_print("Dictionary loaded. %zu words, longest being %zu characters\n", s_wordCount, s_longestWord);
 }
@@ -324,13 +333,14 @@ void LoadDictionary(const char* path)
 void FreeDictionary()
 {
 	DictionaryLock lock;
+	{
+		s_dictTrees.resize(kNumThreads, DictionaryNode());
+		s_dictionary.clear();
 
-	s_dictTrees.resize(kNumThreads, DictionaryNode());
-	s_dictionary.clear();
-
-	s_longestWord = 0;
-	s_wordCount = 0;
-	s_threadWordCount.resize(kNumThreads, 0);
+		s_longestWord = 0;
+		s_wordCount = 0;
+		s_threadWordCount.resize(kNumThreads, 0);
+	}
 }
 
 // This class contains the actual solver and it's entire context, including a local copy of the dictionary.
@@ -390,65 +400,62 @@ public:
 	void Execute()
 	{
 		// Just in case another Execute() call is made on the same context: avoid leaking.
-		if (nullptr != m_results.Words)
+		FreeWords(m_results);
+
+		// Bit of a step back from what it was, but as I'm picking words out of the global list now..
+		DictionaryLock dictLock;
 		{
-			FreeWords(m_results);
-		}
+			// Kick off threads.
+			const unsigned numThreads = kNumThreads;
 
-		// Lock dictionary for the entire run. 
-		// This is a step back from my previous solution, but it gives me a little leeway to do less copying.
-		DictionaryLock lock;
+			std::vector<std::thread> threads;
+			std::vector<std::unique_ptr<ThreadContext>> contexts; // FIXME: can go into TLS?
 
-		// Kick off threads.
-		const unsigned numThreads = kNumThreads;
+			debug_print("Kicking off %u threads.\n", numThreads);
 
-		std::vector<std::thread> threads;
-		std::vector<std::unique_ptr<ThreadContext>> contexts; // FIXME: can go into TLS?
-
-		debug_print("Kicking off %u threads.\n", numThreads);
-
-		for (unsigned iThread = 0; iThread < numThreads; ++iThread)
-		{
-			contexts.emplace_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
-			threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
-		}
-
-		for (auto& thread : threads)
-		{
-			thread.join();
-		}
-
-		m_results.Count  = 0;
-		m_results.Score  = 0;
-		size_t strBufLen = 0;
-
-		for (auto& context : contexts)
-		{
-			const unsigned numWords = (unsigned) context->wordsFound.size();
-			const unsigned score = context->score;
-			m_results.Count += numWords;
-			m_results.Score += score;
-			strBufLen += context->reqStrBufLen + numWords; // Add numWords for terminators.
-
-			debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, numWords, score);
-		}
-
-		// Copy words to Results structure.
-		// I'd rather set pointers into the dictionary, but that would break the results as soon as a new dictionary is loaded.
-
-		m_results.Words = new char*[m_results.Count];
-		char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
-		char* resBuf = new char[strBufLen];
-
-		for (auto& context : contexts)
-		{
-			for (auto wordIdx : context->wordsFound)
+			for (unsigned iThread = 0; iThread < numThreads; ++iThread)
 			{
-				*words_cstr = resBuf;
-				auto& word = s_dictionary[wordIdx];
-				strcpy(*words_cstr++, word.c_str());
-				const size_t length = word.length();
-				resBuf += length+1;
+				contexts.emplace_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
+				threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
+			}
+
+			for (auto& thread : threads)
+			{
+				thread.join();
+			}
+
+			m_results.Count  = 0;
+			m_results.Score  = 0;
+			size_t strBufLen = 0;
+
+			for (auto& context : contexts)
+			{
+				const unsigned numWords = (unsigned) context->wordsFound.size();
+				const unsigned score = context->score;
+				m_results.Count += numWords;
+				m_results.Score += score;
+				strBufLen += context->reqStrBufLen + numWords; // Add numWords for terminators.
+
+				debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, numWords, score);
+			}
+
+			// Copy words to Results structure.
+			// I'd rather set pointers into the dictionary, but that would break the results as soon as a new dictionary is loaded.
+
+			m_results.Words = new char*[m_results.Count];
+			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
+			char* resBuf = new char[strBufLen];
+
+			for (auto& context : contexts)
+			{
+				for (auto wordIdx : context->wordsFound)
+				{
+					*words_cstr = resBuf;
+					auto& word = s_dictionary[wordIdx];
+					strcpy(*words_cstr++, word.c_str());
+					const size_t length = word.length();
+					resBuf += length+1;
+				}
 			}
 		}
 	}
@@ -459,9 +466,8 @@ private:
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
-		// FIXME
-		DictionaryNode& subDict = s_dictTrees[iThread];
-//		subDict = s_dictTrees[iThread];
+		// Pull a deep copy.
+		DictionaryNode subDict = s_dictTrees[iThread];
 
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -519,7 +525,7 @@ private:
 		
 #if defined(DEBUG_STATS)
 		const float deadPct = ((float)deadEnds/query.m_gridSize)*100.f;
-		debug_print("Thread %u has max. traversal depth %u, %u dead ends (%.2f percent).\n", iThread, context->maxDepth, deadEnds, deadPct);
+		debug_print("Thread %u has max. traversal depth %u (longest %zu), %u dead ends (%.2f percent).\n", iThread, context->maxDepth, s_longestWord, deadEnds, deadPct);
 #endif
 	}
 
@@ -547,8 +553,7 @@ private:
 			// Found a word.
 			const unsigned wordIdx = child->wordIdx;
 			context.wordsFound.emplace_back(wordIdx);
-			auto& word = s_dictionary[wordIdx];
-			const size_t length = word.length();
+			const size_t length = s_dictionary[wordIdx].length();
 			context.score += GetWordScore(length);
 			context.reqStrBufLen += length;
 
