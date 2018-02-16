@@ -3,7 +3,7 @@
 // #define PRINT_WORDS
 // #define PRINT_GRID
 
-#define NUM_QUERIES 4
+#define NUM_QUERIES 1
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -95,8 +95,8 @@ int main(int argC, char **arguments)
 	printf("Count: %u Score: %u\n", results[0].Count, results[0].Score);
 
 #ifdef PRINT_WORDS
-	for (unsigned iWord = 0; iWord < results.Count; ++iWord) 
-		printf("%s\n", results.Words[iWord]);	
+	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 
+		printf("%s\n", results[0].Words[iWord]);	
 #endif
 
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)

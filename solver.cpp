@@ -25,9 +25,9 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
+		- Fix everything non-power-of-2 grids: Morton shit really worth it?
 		- Memory coherency.
 		- Make detection of dead ends more efficient, even though it's a really low percentage we're dealing with.
-		- Fix everything non-power-of-2 grids: Morton shit really worth it?
 		- Fix: 32-bit, test on Ubuntu & Windows, Valgrind it again.
 		- I'm not using SIMD (by choice, for now).
 
@@ -145,7 +145,7 @@ public:
 	}
 
 	inline bool IsWord() const { return -1 != wordIdx;  }
-	inline bool IsVoid() const { return 0 == alphaBits; }
+	inline bool IsVoid() const { return 0 == alphaBits && false == IsWord(); }
 
 	// Return value indicates if node is now a dead end.
 	inline void RemoveChild(unsigned index)
@@ -492,7 +492,7 @@ private:
 #endif
 
 					const unsigned index = board[morton2D];
-					auto hasChild = subDict.HasChild(index);
+					const bool hasChild = subDict.HasChild(index);
 					if (true == hasChild)
 					{
 						unsigned depth = 0;
