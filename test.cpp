@@ -3,7 +3,7 @@
 // #define PRINT_WORDS
 // #define PRINT_GRID
 
-#define NUM_QUERIES 1
+#define NUM_QUERIES 4
 
 #include <stdlib.h>
 #include <stdio.h>

@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/boggle",
-            "args": [128 128],
+            "args": [128, 128],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

@@ -106,22 +106,30 @@ inline unsigned LetterToThreadIndex(char letter)
 class DictionaryNode
 {
 public:
+/*
 	DictionaryNode(unsigned alphaBits = 0, unsigned wordIdx = -1) :
 		alphaBits(alphaBits), wordIdx(wordIdx)
 	{
-		children.resize(kAlphaRange);
 	}
+*/
 
-	DictionaryNode(const DictionaryNode& RHS) :
-		DictionaryNode(RHS.alphaBits, RHS.wordIdx)
+	DictionaryNode() : alphaBits(0), wordIdx(-1) {}
+
+//	DictionaryNode(const DictionaryNode& RHS) :
+//		DictionaryNode(RHS.alphaBits, RHS.wordIdx)
+	DictionaryNode(const DictionaryNode& RHS) 
 	{
+		alphaBits = RHS.alphaBits;
+		wordIdx   = RHS.wordIdx;
+
 		// Deep copy.
 		for (unsigned index = 0; index < kAlphaRange; ++index)
 		{
 			if (true == RHS.HasChild(index))
 			{
 				auto* child = RHS.GetChild(index);
-				children[index] = std::unique_ptr<DictionaryNode>(new DictionaryNode(*child));
+//				children[index] = std::unique_ptr<DictionaryNode>(new DictionaryNode(*child));
+				children[index] = new DictionaryNode(*child);
 			}
 		}
 	}
@@ -138,12 +146,14 @@ public:
 		if (false == HasChild(index))
 		{
 			// FIXME: seq. pool?
-			children[index] = std::unique_ptr<DictionaryNode>(new DictionaryNode());
+//			children[index] = std::unique_ptr<DictionaryNode>(new DictionaryNode());
+			children[index] = new DictionaryNode();
 			const unsigned bit = 1 << index;
 			alphaBits |= bit;
 		}
 
-		return children[index].get();
+//		return children[index].get();
+		return children[index];
 	}
 
 	inline bool IsWord() const { return -1 != wordIdx;  }
@@ -168,7 +178,8 @@ public:
 	inline DictionaryNode* GetChild(unsigned index) const
 	{
 		assert(true == HasChild(index));
-		return children[index].get();
+//		return children[index].get();
+		return children[index];
 	}
 
 	// FIXME: better func. name
@@ -183,7 +194,8 @@ public:
 	unsigned alphaBits;
 
 private:
-	std::vector<std::unique_ptr<DictionaryNode>> children;
+//	std::vector<std::unique_ptr<DictionaryNode>> children;
+	std::array<DictionaryNode*, kAlphaRange> children;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
