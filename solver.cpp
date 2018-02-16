@@ -81,7 +81,7 @@
 #include "MZC2D64.h"
 
 // Undef. to skip dead end percentages and all prints and such.
-// #define DEBUG_STATS
+#define DEBUG_STATS
 
 #if defined(DEBUG_STATS)
 	#define debug_print printf
@@ -107,15 +107,15 @@ class DictionaryNode
 {
 public:
 	DictionaryNode(unsigned alphaBits = 0, unsigned wordIdx = -1) :
-		alphaBits(0), wordIdx(-1)
+		alphaBits(alphaBits), wordIdx(wordIdx)
 	{
+		children.resize(kAlphaRange);
 	}
 
-	DictionaryNode(const DictionaryNode& RHS)
+	DictionaryNode(const DictionaryNode& RHS) :
+		DictionaryNode(RHS.alphaBits, RHS.wordIdx)
 	{
-		alphaBits = RHS.alphaBits;
-		wordIdx = RHS.wordIdx;
-
+		// Deep copy.
 		for (unsigned index = 0; index < kAlphaRange; ++index)
 		{
 			if (true == RHS.HasChild(index))
@@ -126,7 +126,9 @@ public:
 		}
 	}
 
-	~DictionaryNode() {}
+	~DictionaryNode() 
+	{
+	}
 
 	// Only to be called during dictionary load.
 	DictionaryNode* AddChild(char letter)
@@ -181,7 +183,7 @@ public:
 	unsigned alphaBits;
 
 private:
-	std::array<std::unique_ptr<DictionaryNode>, kAlphaRange> children;
+	std::vector<std::unique_ptr<DictionaryNode>> children;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
