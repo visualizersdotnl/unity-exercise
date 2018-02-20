@@ -34,7 +34,6 @@
 
 	To do (low priority):
 		- Building (or loading) my dictionary is slow, I'm fine with that as I focus on the solver.
-		- Sort root dictionary.
 		- Fix class member (notation).
 		- Use more references where applicable.
 
