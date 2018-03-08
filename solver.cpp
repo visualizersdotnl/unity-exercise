@@ -25,16 +25,18 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- Detect leaks / Valgrind it!
-		- Fix everything non-power-of-2 grids: Morton shit really worth it?
-		- Memory coherency.
+		- Use smaller (bit) grids to flag traversed tiles.
+		- Balance the workload between threads.
+		- Detect leaks (and fix the ones you obviously know you have in the nodes) using Valgrind.
+		- Look at cache coherency a bit more.
+		- Fix non-power-of-2 grids.
 		- Make detection of dead ends more efficient, even though it's a really low percentage we're dealing with.
-		- Fix: 32-bit, test on Ubuntu & Windows.
 		- I'm not using SIMD (by choice, for now).
 
 	To do (low priority):
 		- Building (or loading) my dictionary is slow, I'm fine with that as I focus on the solver.
-		- Fix class member (notation).
+		- Test on Ubuntu & Windows.
+		- Fix class members (notation).
 		- Use more references where applicable.
 
 	Notes:
@@ -77,8 +79,9 @@
 
 #include "api.h"
 
-// FIXME: 32-bit support, clean up the Morton mess, use 32-bit header!
-#include "MZC2D64.h"
+// 32-bit Morton ordering routines, they're good enough for the 64-bit build too and it saves some stack.
+// Long before 32 bits become too little I'll have problems.
+#include "MZC2D32.h"
 
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
@@ -91,13 +94,14 @@
 
 const unsigned kNumThreads = std::thread::hardware_concurrency();
 const unsigned kAlphaRange = ('Z'-'A')+1;
-const unsigned kVisitedFlag = 1<<7;
 
+// If you see 'letter' and 'index' used: all it means is that an index is 0-based.
 inline unsigned LetterToIndex(char letter)
 {
 	return letter - 'A';
 }
 
+// FIXME: this might be a tad too simplistic, or even inefficient.
 inline unsigned LetterToThreadIndex(char letter)
 {
 	return LetterToIndex(letter)%kNumThreads;
@@ -106,6 +110,8 @@ inline unsigned LetterToThreadIndex(char letter)
 class DictionaryNode
 {
 public:
+	DictionaryNode() : alphaBits(0), wordIdx(-1) {}
+
 /*
 	DictionaryNode(unsigned alphaBits = 0, unsigned wordIdx = -1) :
 		alphaBits(alphaBits), wordIdx(wordIdx)
@@ -113,10 +119,6 @@ public:
 	}
 */
 
-	DictionaryNode() : alphaBits(0), wordIdx(-1) {}
-
-//	DictionaryNode(const DictionaryNode& RHS) :
-//		DictionaryNode(RHS.alphaBits, RHS.wordIdx)
 	DictionaryNode(const DictionaryNode& RHS) 
 	{
 		alphaBits = RHS.alphaBits;
@@ -190,6 +192,7 @@ public:
 	}
 
 	// Dirty as it is, I'm touching these here and there.
+	// FIXME: wrap in operation methods on object.
 	unsigned wordIdx;
 	unsigned alphaBits;
 
@@ -383,7 +386,8 @@ private:
 		ThreadContext(unsigned iThread, const Query* instance) :
 		iThread(iThread)
 ,		instance(instance)
-,		board(nullptr)
+,		visited(nullptr)
+,		sanitized(instance->m_sanitized)
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
@@ -394,8 +398,8 @@ private:
 		// To be called when entering thread.
 		void OnThreadStart()
 		{
-			board = std::unique_ptr<char[]>(new char[instance->m_gridSize]);
-			memcpy(board.get(), instance->m_sanitized, instance->m_gridSize);
+			visited = std::unique_ptr<char[]>(new char[instance->m_gridSize]);
+			memset(visited.get(), 0, instance->m_gridSize*sizeof(char));
 
 			// No intermediate allocations please.
 			wordsFound.reserve(s_threadWordCount[iThread]); 
@@ -403,10 +407,13 @@ private:
 
 		~ThreadContext() {}
 
+		// In-put
 		const unsigned iThread;
-		const Query* instance; // FIXME: what do I really want to know?
+		const Query* instance;
+		std::unique_ptr<char[]> visited; // FIXME: optimize, stuff bits.
+		const char* sanitized;
 
-		std::unique_ptr<char[]> board;
+		// Out-put
 		std::vector<unsigned> wordsFound;
 		unsigned score;
 		size_t reqStrBufLen;
@@ -502,43 +509,42 @@ private:
 
 		if (false == subDict.IsVoid())
 		{
-			auto* board = context->board.get();
-
-			uint64_t mortonX = ullMC2Dencode(0, 0);
+			uint32_t mortonX = ulMC2Dencode(0, 0);
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
-				uint64_t morton2D = mortonX;
+				uint32_t morton2D = mortonX;
 				for (unsigned iY = 0; iY < height; ++iY)
 				{
 #if defined(DEBUG_STATS)
 					context->isDeadEnd = 1;
 #endif
 
-					const unsigned index = board[morton2D];
+					const unsigned index = query.m_sanitized[morton2D];
 					const bool hasChild = subDict.HasChild(index);
 					if (true == hasChild)
 					{
 						unsigned depth = 0;
 						TraverseBoard(*context, morton2D, /* child */ subDict.GetChild(index), depth);
 
-						// You'd say this would speed things up but it doesn't as it pollutes the loop further.
-//						if (true == child->IsVoid())
-//						{
-//							subDict.RemoveChild(index);
-//							if (true == subDict.IsVoid())
-//								break;
-//						}
-
+/* 
+						This doesn't help as it pollutes the loop with a costly branch.
+						if (true == child->IsVoid())
+						{
+							subDict.RemoveChild(index);
+							if (true == subDict.IsVoid())
+								break;
+						}
+*/
 					}
 
 #if defined(DEBUG_STATS)
 					deadEnds += !context->isDeadEnd;
 #endif
 
-					morton2D = ullMC2Dyplusv(morton2D, 1);
+					morton2D = ulMC2Dyplusv(morton2D, 1);
 				}
 
-				mortonX = ullMC2Dxplusv(mortonX, 1);
+				mortonX = ulMC2Dxplusv(mortonX, 1);
 			}
 		}
 
@@ -560,7 +566,7 @@ private:
 		return kLUT[length-3];
 	}
 
-	inline static void TraverseBoard(ThreadContext& context, uint64_t mortonCode, DictionaryNode* child, unsigned& depth)
+	inline static void TraverseBoard(ThreadContext& context, uint32_t mortonCode, DictionaryNode* child, unsigned& depth)
 	{
 		assert(nullptr != child);
 		assert(depth < s_longestWord);
@@ -595,36 +601,36 @@ private:
 
 		++depth;
 
-		auto& board = context.board;
 		const size_t gridSize = context.instance->m_gridSize;
 
 		// Recurse, as we've got a node that might be going somewhewre.
 		// Before recursion, mark this board position as evaluated.
-		board[mortonCode] |= kVisitedFlag;
+		auto& visited = context.visited;
+		visited[mortonCode] = 1; // FIXME: stuff it!
 
 		// FIXME: this can obviously be done smarter, but at least these functions don't do any conditional branching.
 		// For example, checking if the new morton index matches the previous one just incurs a penalty.
-		uint64_t mortonCodes[8];
-		mortonCodes[0] = ullMC2Dxminusv(mortonCode, 1);
-		mortonCodes[1] = ullMC2Dxplusv(mortonCode, 1);
-		mortonCodes[2] = ullMC2Dyminusv(mortonCodes[0], 1);
-		mortonCodes[3] = ullMC2Dyminusv(mortonCode, 1);
-		mortonCodes[4] = ullMC2Dyminusv(mortonCodes[1], 1);
-		mortonCodes[5] = ullMC2Dyplusv(mortonCodes[0], 1);
-		mortonCodes[6] = ullMC2Dyplusv(mortonCode, 1);
-		mortonCodes[7] = ullMC2Dyplusv(mortonCodes[1], 1);
+		uint32_t mortonCodes[8];
+		mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
+		mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
+		mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
+		mortonCodes[3] = ulMC2Dyminusv(mortonCode, 1);
+		mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
+		mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
+		mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1);
+		mortonCodes[7] = ulMC2Dyplusv(mortonCodes[1], 1);
 
 		for (unsigned iN = 0; iN < 8; ++iN)
 		{
-			const uint64_t newMorton = mortonCodes[iN];
+			const uint32_t newMorton = mortonCodes[iN];
 			if (newMorton < gridSize)
 			{
-				const unsigned nbTile = board[newMorton];
-				const unsigned visited = nbTile & kVisitedFlag;
+				const bool skipTile = visited[newMorton];
 
-				if (0 == visited)
+				if (false == skipTile)
 				{
-					const unsigned nbIndex = nbTile & ~kVisitedFlag;
+					auto* board = context.sanitized;
+					const unsigned nbIndex = board[newMorton];
 					if (true == child->HasChild(nbIndex))
 					{
 						// Traverse, and if we hit the wall go see if what we're left with his void.
@@ -646,7 +652,7 @@ private:
 		--depth;
 
 		// Open up this position on the board again.
-		board[mortonCode] &= ~kVisitedFlag;
+		visited[mortonCode] = 0;
 	}
 
 	Results& m_results;
@@ -665,6 +671,8 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	results.Score = 0;
 	results.UserData = nullptr; // Didn't need it in this implementation.
 
+	// FIXME: check if board fits in 32 bits.
+
 	// Board parameters check out?
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
@@ -672,10 +680,10 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		const unsigned gridSize = width*height;
 		std::unique_ptr<char[]> sanitized(new char[gridSize]);
 
-		uint64_t mortonX = ullMC2Dencode(0, 0);
+		uint32_t mortonX = ulMC2Dencode(0, 0);
 		for (unsigned iX = 0; iX < width; ++iX)
 		{
-			uint64_t morton2D = mortonX;
+			uint32_t morton2D = mortonX;
 			for (unsigned iY = 0; iY < height; ++iY)
 			{
 				const char letter = *board++;
@@ -690,10 +698,10 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 					return results;
 				}
 
-				morton2D = ullMC2Dyplusv(morton2D, 1);
+				morton2D = ulMC2Dyplusv(morton2D, 1);
 			}
 
-			mortonX = ullMC2Dxplusv(mortonX, 1);
+			mortonX = ulMC2Dxplusv(mortonX, 1);
 		}
 
 		Query query(results, sanitized.get(), width, height);

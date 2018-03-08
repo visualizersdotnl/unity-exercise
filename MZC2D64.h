@@ -1,5 +1,5 @@
 
-// Modified to explicitly inline.
+// Modified by me to explicitly inline.
 
 /*
 The MIT License(MIT)
