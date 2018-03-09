@@ -16,6 +16,11 @@
         "map": "cpp",
         "string": "cpp",
         "string_view": "cpp",
-        "vector": "cpp"
+        "vector": "cpp",
+        "atomic": "cpp",
+        "memory": "cpp",
+        "utility": "cpp",
+        "__functional_base": "cpp",
+        "algorithm": "cpp"
     }
 }

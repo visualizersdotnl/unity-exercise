@@ -25,19 +25,24 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
+		- Less use of iThread, something's off anyway.
 		- Use smaller (bit) grids to flag traversed tiles.
-		- Balance the workload between threads.
-		- Detect leaks (and fix the ones you obviously know you have in the nodes) using Valgrind.
 		- Look at cache coherency a bit more.
 		- Fix non-power-of-2 grids.
 		- Make detection of dead ends more efficient, even though it's a really low percentage we're dealing with.
 		- I'm not using SIMD (by choice, for now).
+		- Detect leaks (and fix the ones you obviously know you have in the nodes) using Valgrind.
 
 	To do (low priority):
 		- Building (or loading) my dictionary is slow, I'm fine with that as I focus on the solver.
 		- Test on Ubuntu & Windows.
 		- Fix class members (notation).
 		- Use more references where applicable.
+
+
+	There's this idea floating that if you have a hash and eliminate a part of the dict. tree that way
+	by special-casing the first 3 characters you're golden, but you're not if you do it right really.
+	Or it at the very least hardly helps.
 
 	Notes:
 		- Compile with full optimization (-O3 for ex.) for best performance.
@@ -82,6 +87,7 @@
 // 32-bit Morton ordering routines, they're good enough for the 64-bit build too and it saves some stack.
 // Long before 32 bits become too little I'll have problems.
 #include "MZC2D32.h"
+typedef uint32_t morton_t;
 
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
@@ -101,12 +107,14 @@ inline unsigned LetterToIndex(char letter)
 	return letter - 'A';
 }
 
-// FIXME: this might be a tad too simplistic, or even inefficient.
-inline unsigned LetterToThreadIndex(char letter)
-{
-	return LetterToIndex(letter)%kNumThreads;
-}
+// FIXME
+class DictionaryNode;
+inline unsigned AllocNode(unsigned iThread);
+inline unsigned CopyNode(const DictionaryNode& parent);
+inline DictionaryNode* GetNode(unsigned index, unsigned iThread);
+inline void ClearNodes(unsigned iThread);
 
+// FIXME: less pointers, less iThread!
 class DictionaryNode
 {
 public:
@@ -119,43 +127,40 @@ public:
 	}
 */
 
-	DictionaryNode(const DictionaryNode& RHS) 
+	static DictionaryNode DeepCopy(const DictionaryNode& parent, unsigned iThread)
 	{
-		alphaBits = RHS.alphaBits;
-		wordIdx   = RHS.wordIdx;
+		DictionaryNode node;
+		node.alphaBits = parent.alphaBits;
+		node.wordIdx   = parent.wordIdx;
 
-		// Deep copy.
 		for (unsigned index = 0; index < kAlphaRange; ++index)
 		{
-			if (true == RHS.HasChild(index))
+			if (true == parent.HasChild(index))
 			{
-				auto* child = RHS.GetChild(index);
-//				children[index] = std::unique_ptr<DictionaryNode>(new DictionaryNode(*child));
-				children[index] = new DictionaryNode(*child);
+				auto iNode = AllocNode(iThread);
+				*GetNode(iNode, iThread) = DeepCopy(*parent.GetChild(index, -1), iThread);
+				node.children[index] = iNode;
 			}
 		}
+
+		return node;
 	}
 
-	~DictionaryNode() 
-	{
-	}
+	~DictionaryNode() {}
 
-	// Only to be called during dictionary load.
+	// Only to be called during dictionary load, from the main thread.
 	DictionaryNode* AddChild(char letter)
 	{
 		const unsigned index = LetterToIndex(letter);
 
 		if (false == HasChild(index))
 		{
-			// FIXME: seq. pool?
-//			children[index] = std::unique_ptr<DictionaryNode>(new DictionaryNode());
-			children[index] = new DictionaryNode();
+			children[index] = AllocNode(-1);
 			const unsigned bit = 1 << index;
 			alphaBits |= bit;
 		}
 
-//		return children[index].get();
-		return children[index];
+		return GetNode(children[index], -1);
 	}
 
 	inline bool IsWord() const { return -1 != wordIdx;  }
@@ -177,11 +182,10 @@ public:
 		return 0 != (alphaBits & bit);
 	}
 
-	inline DictionaryNode* GetChild(unsigned index) const
+	inline DictionaryNode* GetChild(unsigned index, unsigned iThread) const
 	{
 		assert(true == HasChild(index));
-//		return children[index].get();
-		return children[index];
+		return GetNode(children[index], iThread);
 	}
 
 	// FIXME: better func. name
@@ -197,14 +201,42 @@ public:
 	unsigned alphaBits;
 
 private:
-//	std::vector<std::unique_ptr<DictionaryNode>> children;
-	std::array<DictionaryNode*, kAlphaRange> children;
+	std::array<unsigned, kAlphaRange> children;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 
-// A root per thread.
+// Nodes are allocated sequentially.
+static std::vector<std::vector<DictionaryNode>> s_dictNodes;
+inline unsigned AllocNode(unsigned iThread) {
+//	assert(iThread+1 < s_dictNodes.size());
+	auto& vector = s_dictNodes[iThread+1];
+	vector.emplace_back(DictionaryNode());
+	return vector.size()-1;
+}
+
+inline unsigned CopyNode(const DictionaryNode& parent, unsigned iThread) {
+//	assert(iThread+1 < s_dictNodes.size());
+	auto& vector = s_dictNodes[iThread+1];
+	vector.emplace_back(DictionaryNode(parent));
+	return vector.size()-1;
+}
+
+inline DictionaryNode* GetNode(unsigned index, unsigned iThread) {
+//	assert(iThread+1 < s_dictNodes.size());
+	auto& vector = s_dictNodes[iThread+1];
+	return &vector[index];
+}
+
+inline void PrepareNodes(unsigned iThread) {
+//	assert(iThread > 0 && iThread <= kNumThreads);
+	auto& vector = s_dictNodes[iThread+1];
+//	vector.resize(s_dictNodes[0].size());
+//	vector.clear();
+}
+
+// A root per thread (balancing it by word load doesn't necessarily work out due to mem. coherency).
 static std::vector<DictionaryNode> s_dictTrees;
 
 // Sequential dictionary of all full words (FIXME: yet unsorted).
@@ -213,10 +245,21 @@ static std::vector<std::string> s_dictionary;
 // Counters, the latter being useful to reserve space.
 static size_t s_longestWord;
 static size_t s_wordCount;
-static std::vector<size_t> s_threadWordCount;
+
+class ThreadInfo
+{
+public:
+	ThreadInfo() : 
+		load(0) {}
+
+	~ThreadInfo() {}
+
+	size_t load;
+};
+
+static std::vector<ThreadInfo> s_threadInfo;
 
 // Scoped lock for all dictionary globals.
-// FIXME: locks for every thread so they won't fight on initial copy?
 class DictionaryLock
 {
 public:
@@ -271,8 +314,28 @@ static void AddWordToDictionary(const std::string& word)
 
 	// As a first strategy we'll split at the root.
 	const char firstLetter = word[0];
-	const unsigned iThread = LetterToThreadIndex(firstLetter);
-	DictionaryNode* current = &s_dictTrees[iThread];
+
+	unsigned iDestThread = LetterToIndex(firstLetter)%kNumThreads;
+
+/*
+	// Crappy load balancing.
+	unsigned iDestThread = 0;
+	size_t maxLoad = 0;
+	for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
+	{
+		const size_t load = s_threadInfo[iThread].load;
+		if (load <= maxLoad)
+		{
+			iDestThread = iThread;
+		}
+		else
+		{
+			maxLoad = load;
+		}
+	}
+*/
+
+	DictionaryNode* current = &s_dictTrees[iDestThread];
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
@@ -294,7 +357,7 @@ static void AddWordToDictionary(const std::string& word)
 
 	current->wordIdx = s_wordCount;
 
-	auto threadWordCount = ++s_threadWordCount[iThread];
+	++s_threadInfo[iDestThread].load;
 	++s_wordCount;
 }
 
@@ -342,6 +405,16 @@ void LoadDictionary(const char* path)
 
 		// Sort the original word list, as we'll be attempting access it in a sorted manner as well.
 		std::sort(s_dictionary.begin(), s_dictionary.end());
+
+		// Check thread load total.
+		size_t count = 0;
+		for (auto& info : s_threadInfo)
+		{
+			count += info.load;
+		}
+		
+		if (count != s_wordCount)
+			debug_print("Thread word count %zu != total word count %zu!", count, s_wordCount);
 	}
 
 	debug_print("Dictionary loaded. %zu words, longest being %zu characters\n", s_wordCount, s_longestWord);
@@ -351,12 +424,15 @@ void FreeDictionary()
 {
 	DictionaryLock lock;
 	{
+		// FIXME
+		s_dictNodes.resize(kNumThreads+1);
+
 		s_dictTrees.resize(kNumThreads, DictionaryNode());
 		s_dictionary.clear();
 
 		s_longestWord = 0;
 		s_wordCount = 0;
-		s_threadWordCount.resize(kNumThreads, 0);
+		s_threadInfo.resize(kNumThreads, ThreadInfo());
 	}
 }
 
@@ -391,7 +467,7 @@ private:
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
-			// Minimal initialization, handle rest in thread.
+			// Minimal initialization, handle rest in OnThreadStart().
 			assert(nullptr != instance);
 		}
 
@@ -402,7 +478,7 @@ private:
 			memset(visited.get(), 0, instance->m_gridSize*sizeof(char));
 
 			// No intermediate allocations please.
-			wordsFound.reserve(s_threadWordCount[iThread]); 
+			wordsFound.reserve(s_threadInfo[iThread].load); 
 		}
 
 		~ThreadContext() {}
@@ -472,7 +548,7 @@ public:
 
 			m_results.Words = new char*[m_results.Count];
 			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
-			char* resBuf = new char[strBufLen];
+			char* resBuf = new char[strBufLen]; // Allocate sequential buffer.
 
 			for (auto& context : contexts)
 			{
@@ -497,22 +573,26 @@ private:
 		const unsigned iThread = context->iThread;
 
 		// Pull a deep copy.
-		DictionaryNode subDict = s_dictTrees[iThread];
+		PrepareNodes(iThread);
+		DictionaryNode subDict;
+		subDict = DictionaryNode::DeepCopy(s_dictTrees[iThread], iThread);
 
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
 
 #if defined(DEBUG_STATS)
+		debug_print("Thread %u has a load of %zu words.\n", iThread, s_threadInfo[iThread].load);
+
 		context->maxDepth = 0;
 		unsigned deadEnds = 0;
 #endif
 
 		if (false == subDict.IsVoid())
 		{
-			uint32_t mortonX = ulMC2Dencode(0, 0);
+			morton_t mortonX = ulMC2Dencode(0, 0);
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
-				uint32_t morton2D = mortonX;
+				morton_t morton2D = mortonX;
 				for (unsigned iY = 0; iY < height; ++iY)
 				{
 #if defined(DEBUG_STATS)
@@ -524,7 +604,7 @@ private:
 					if (true == hasChild)
 					{
 						unsigned depth = 0;
-						TraverseBoard(*context, morton2D, /* child */ subDict.GetChild(index), depth);
+						TraverseBoard(*context, morton2D, /* child */ subDict.GetChild(index, iThread), depth);
 
 /* 
 						This doesn't help as it pollutes the loop with a costly branch.
@@ -566,7 +646,7 @@ private:
 		return kLUT[length-3];
 	}
 
-	inline static void TraverseBoard(ThreadContext& context, uint32_t mortonCode, DictionaryNode* child, unsigned& depth)
+	inline static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child, unsigned& depth)
 	{
 		assert(nullptr != child);
 		assert(depth < s_longestWord);
@@ -608,9 +688,9 @@ private:
 		auto& visited = context.visited;
 		visited[mortonCode] = 1; // FIXME: stuff it!
 
-		// FIXME: this can obviously be done smarter, but at least these functions don't do any conditional branching.
-		// For example, checking if the new morton index matches the previous one just incurs a penalty.
-		uint32_t mortonCodes[8];
+		// FIXME: a lot of these calculations are needless as we're movingn a window, but it seems fine and we're not
+		// pushing the ALU so much that it'd warrant any branching or memory hits.
+		morton_t mortonCodes[8];
 		mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
 		mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
 		mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
@@ -622,7 +702,7 @@ private:
 
 		for (unsigned iN = 0; iN < 8; ++iN)
 		{
-			const uint32_t newMorton = mortonCodes[iN];
+			const morton_t newMorton = mortonCodes[iN];
 			if (newMorton < gridSize)
 			{
 				const bool skipTile = visited[newMorton];
@@ -634,7 +714,7 @@ private:
 					if (true == child->HasChild(nbIndex))
 					{
 						// Traverse, and if we hit the wall go see if what we're left with his void.
-						auto* nbChild = child->GetChild(nbIndex);
+						auto* nbChild = child->GetChild(nbIndex, context.iThread);
 						TraverseBoard(context, newMorton, nbChild, depth);
 						if (true == nbChild->IsVoid())
 						{
@@ -680,10 +760,10 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		const unsigned gridSize = width*height;
 		std::unique_ptr<char[]> sanitized(new char[gridSize]);
 
-		uint32_t mortonX = ulMC2Dencode(0, 0);
+		morton_t mortonX = ulMC2Dencode(0, 0);
 		for (unsigned iX = 0; iX < width; ++iX)
 		{
-			uint32_t morton2D = mortonX;
+			morton_t morton2D = mortonX;
 			for (unsigned iY = 0; iY < height; ++iY)
 			{
 				const char letter = *board++;

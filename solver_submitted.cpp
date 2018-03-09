@@ -66,8 +66,8 @@
 
 #include "api.h"
 
-#define debug_print printf
-// inline void debug_print(const char* format, ...) {}
+// #define debug_print printf
+inline void debug_print(const char* format, ...) {}
 
 // We'll be using a word tree built out of these simple nodes.
 struct DictionaryNode

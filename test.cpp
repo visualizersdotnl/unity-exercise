@@ -3,7 +3,7 @@
 // #define PRINT_WORDS
 // #define PRINT_GRID
 
-#define NUM_QUERIES 4
+#define NUM_QUERIES 2
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -80,7 +80,7 @@ int main(int argC, char **arguments)
 //	const char *dictPath = "dictionary-bigger.txt";
 	LoadDictionary(dictPath);
 
-	printf("- Finding in %ux%u...\n", xSize, ySize);
+	printf("- Finding in %ux%u... (%u iterations)\n", xSize, ySize, NUM_QUERIES);
 
 	auto start = std::chrono::high_resolution_clock::now();
 
