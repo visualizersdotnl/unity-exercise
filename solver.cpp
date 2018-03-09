@@ -110,7 +110,6 @@ inline unsigned LetterToIndex(char letter)
 // FIXME
 class DictionaryNode;
 inline unsigned AllocNode(unsigned iThread);
-inline unsigned CopyNode(const DictionaryNode& parent);
 inline DictionaryNode* GetNode(unsigned index, unsigned iThread);
 inline void ClearNodes(unsigned iThread);
 
@@ -127,6 +126,7 @@ public:
 	}
 */
 
+public:
 	static DictionaryNode DeepCopy(const DictionaryNode& parent, unsigned iThread)
 	{
 		DictionaryNode node;
@@ -213,13 +213,6 @@ inline unsigned AllocNode(unsigned iThread) {
 //	assert(iThread+1 < s_dictNodes.size());
 	auto& vector = s_dictNodes[iThread+1];
 	vector.emplace_back(DictionaryNode());
-	return vector.size()-1;
-}
-
-inline unsigned CopyNode(const DictionaryNode& parent, unsigned iThread) {
-//	assert(iThread+1 < s_dictNodes.size());
-	auto& vector = s_dictNodes[iThread+1];
-	vector.emplace_back(DictionaryNode(parent));
 	return vector.size()-1;
 }
 
