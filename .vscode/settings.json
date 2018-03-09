@@ -21,6 +21,7 @@
         "memory": "cpp",
         "utility": "cpp",
         "__functional_base": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "unordered_set": "cpp"
     }
 }

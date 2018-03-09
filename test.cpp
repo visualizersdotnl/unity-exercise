@@ -2,8 +2,9 @@
 // #define USE_UNITY_REF_GRID
 // #define PRINT_WORDS
 // #define PRINT_GRID
+// #define DUPE_CHECK
 
-#define NUM_QUERIES 4
+#define NUM_QUERIES 3
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -12,6 +13,9 @@
 
 #include <memory>
 #include <chrono>
+#include <vector>
+#include <unordered_set>
+#include <string>
 
 #include "api.h"
 #include "random.h"
@@ -66,6 +70,9 @@ int main(int argC, char **arguments)
 
 #else // USE_UNITY_REF_GRID
 
+	printf("Fix non-power-of-2 grids!\n");
+	exit(-1);
+
 	const unsigned xSize = 3;
 	const unsigned ySize = 3;
 	const unsigned gridSize = xSize*ySize;
@@ -97,6 +104,19 @@ int main(int argC, char **arguments)
 #ifdef PRINT_WORDS
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 
 		printf("%s\n", results[0].Words[iWord]);	
+#endif
+
+#ifdef DUPE_CHECK
+	std::unordered_set<std::string> words;
+	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord)
+	{
+		std::string word(results[0].Words[iWord]);
+		auto pair = words.insert(word);
+		if (false == pair.second)
+		{
+			printf("Word found twice: %s\n", word.c_str());
+		}
+	}
 #endif
 
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)

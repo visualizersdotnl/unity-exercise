@@ -1,8 +1,7 @@
 /*
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
 	
-	Updated late.
-	** Now in leaky state, but shit fast. **
+	** Updated later.
 	
 	Please take a minute to read this piece of text.
 
@@ -284,7 +283,7 @@ inline bool IsWordValid(const std::string& word)
 
 	// Check if it violates the 'Qu' rule.
 	auto iQ = word.find_first_of('Q');
-	if (std::string::npos != iQ)
+	while (std::string::npos != iQ)
 	{
 		auto next = iQ+1;
 		if (next == length || word[next] != 'U')
@@ -293,7 +292,7 @@ inline bool IsWordValid(const std::string& word)
 			return false;
 		}
 
-		iQ = word.substr(iQ).find_first_of('Q');
+		iQ = word.substr(next).find_first_of('Q');
 	}
 
 	return true;
@@ -318,7 +317,7 @@ static void AddWordToDictionary(const std::string& word)
 	unsigned iDestThread = LetterToIndex(firstLetter)%kNumThreads;
 
 /*
-	// Crappy load balancing.
+	// Crappy load balancing, does not take locality into account.
 	unsigned iDestThread = 0;
 	size_t maxLoad = 0;
 	for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
