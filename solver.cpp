@@ -564,7 +564,7 @@ public:
 		}
 #else
 			// Copy words to Results structure.
-			// The dirty way: patch pointers.
+			// The dirty way: set pointers.
 
 			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
 
@@ -811,7 +811,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			for (unsigned iY = 0; iY < height; ++iY)
 			{
 				const char letter = *board++;
-				const unsigned sanity = LetterToIndex(toupper(letter));
+				const unsigned sanity = letter - 'A'; // LetterToIndex(toupper(letter));
 				sanitized[morton2D] = sanity;
 
 				morton2D = ulMC2Dyplusv(morton2D, 1);
