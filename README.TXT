@@ -25,7 +25,7 @@ And it got some!
   -- I have to re-test this.
 
 * Look for DEBUG_STATS on top, disable it for speed, enable it for information.
-* Also look for NED_FLANDERS, if defined all safety measure mentioned are in effect.
+* Also look for NED_FLANDERS, if defined all safety measures mentioned are in effect.
 
 
 Cheers,
