@@ -85,7 +85,7 @@
 #include "api.h"
 
 // 32-bit Morton ordering routines, they're good enough for the 64-bit build too and it saves some stack.
-// Long before 32 bits become too little I'll have problems.
+// Long before 32 bits become too little I'll have problems of another nature.
 #include "MZC2D32.h"
 typedef uint32_t morton_t;
 
@@ -110,7 +110,7 @@ inline unsigned LetterToIndex(char letter)
 	return letter - 'A';
 }
 
-// FIXME
+// FIXME: come on, this is just messy Niels..
 class DictionaryNode;
 inline unsigned AllocNode(unsigned iThread);
 inline DictionaryNode* GetNode(unsigned index, unsigned iThread);
@@ -705,7 +705,7 @@ private:
 		auto& visited = context.visited;
 		visited[mortonCode] = 1; // FIXME: stuff it!
 
-		// FIXME: a lot of these calculations are needless as we're movingn a window, but it seems fine and we're not
+		// FIXME: a lot of these calculations are needless as we're moving a window, but it seems fine and we're not
 		// pushing the ALU so much that it'd warrant any branching or memory hits.
 		morton_t mortonCodes[8];
 		mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
