@@ -1,7 +1,6 @@
 /*
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
-	
-	** Updated later.
+	Then improved more than a few times later.
 	
 	Please take a minute to read this piece of text.
 
@@ -24,16 +23,17 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do:
-		- Less use of iThread, something's off anyway.
+		- Try using a specialized allocator instead of abusing std. containers for contiguous block allocation.
+		- Less use of iThread: can be eliminated by stashing the sub-dict. in the thread context?
 		- Use smaller (bit) grids to flag traversed tiles.
 		- Look at cache coherency a bit more.
-		- Fix non-power-of-2 grids.
+		- Fix non-power-of-2 grids: padding, or?
 		- Make detection of dead ends more efficient, even though it's a really low percentage we're dealing with.
 		- I'm not using SIMD (by choice, for now).
-		- Detect leaks (and fix the ones you obviously know you have in the nodes) using Valgrind.
+		- Re-Valgrind it.
 
 	To do (low priority):
-		- Building (or loading) my dictionary is slow, I'm fine with that as I focus on the solver.
+		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver.
 		- Test on Ubuntu & Windows.
 		- Fix class members (notation).
 		- Use more references where applicable.
@@ -51,6 +51,7 @@
 		  is guarded by a mutex and no globals are used.
 		- If an invalid board is supplied (anything non-alphanumerical detected) the query is skipped, yielding zero results.
 		- My class design isn't really tight (functions and public member values galore), but for now that's fine.
+		- Some of these stability claims only work if NED_FLANDERS (see below) is defined.
 	
 	I've done leak testing using Valgrind in OSX and I seem to be in the clear; there are some inconclusive and (hopefully) irrelevant
 	ones reported in the runtime library, but you shouldn't run into killer pileups.
@@ -209,7 +210,7 @@ private:
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 
-// Nodes are allocated sequentially.
+// Nodes are to be in contiguous memory.
 static std::vector<std::vector<DictionaryNode>> s_dictNodes;
 inline unsigned AllocNode(unsigned iThread) {
 //	assert(iThread+1 < s_dictNodes.size());
@@ -811,7 +812,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			for (unsigned iY = 0; iY < height; ++iY)
 			{
 				const char letter = *board++;
-				const unsigned sanity = letter - 'A'; // LetterToIndex(toupper(letter));
+				const unsigned sanity = LetterToIndex(toupper(letter));
 				sanitized[morton2D] = sanity;
 
 				morton2D = ulMC2Dyplusv(morton2D, 1);
@@ -830,13 +831,13 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 void FreeWords(Results results)
 {
+#ifdef NED_FLANDERS
 	if (0 != results.Count && nullptr != results.Words)
 	{
-#ifdef NED_FLANDERS
 		// Allocated a single buffer.
 		delete[] results.Words[0];
-#endif
 	}
+#endif
 
 	delete[] results.Words;
 	results.Words = nullptr;
