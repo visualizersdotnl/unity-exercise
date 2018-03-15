@@ -70,9 +70,6 @@ int main(int argC, char **arguments)
 
 #else // USE_UNITY_REF_GRID
 
-	printf("Fix non-power-of-2 grids!\n");
-	exit(-1);
-
 	const unsigned xSize = 3;
 	const unsigned ySize = 3;
 	const unsigned gridSize = xSize*ySize;

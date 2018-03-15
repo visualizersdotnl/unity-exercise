@@ -22,15 +22,16 @@
 
 	Rules and scoring taken from Wikipedia.
 
-	To do:
-		- Try using a specialized allocator instead of abusing std. containers for contiguous block allocation.
+	To do (high priority):
+		- Those huge grids to check if a tile is visited, per thread, are ridiculous, but my bit-packed version bugged, so it's out until
+		  further notice.
+		- I'm being dirty abusing std. containers for contiguous allocation now, and those deep copies, well..
+		  I could reasonable collapse the two integers in a node into 1 64-bit integer and make it an atomic type only!
 		- Less use of iThread: can be eliminated by stashing the sub-dict. in the thread context?
-		- Use smaller (bit) grids to flag traversed tiles.
-		- Look at cache coherency a bit more.
-		- Fix non-power-of-2 grids: padding, or?
+		- Re-Valgrind it!
+		- Look at cache coherency a bit more?
 		- Make detection of dead ends more efficient, even though it's a really low percentage we're dealing with.
 		- I'm not using SIMD (by choice, for now).
-		- Re-Valgrind it.
 
 	To do (low priority):
 		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver.
@@ -46,14 +47,16 @@
 	Notes:
 		- Compile with full optimization (-O3 for ex.) for best performance.
 		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
+		  ** I violate this to tell if this was compiled with or without NED_FLANDERS (see below).
 		- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
 		- All these functions can be called at any time from any thread as the single shared resource, the dictionary,
 		  is guarded by a mutex and no globals are used.
 		- If an invalid board is supplied (anything non-alphanumerical detected) the query is skipped, yielding zero results.
 		- My class design isn't really tight (functions and public member values galore), but for now that's fine.
-		- Some of these stability claims only work if NED_FLANDERS (see below) is defined.
+		
+		** Some of these stability claims only work if NED_FLANDERS (see below) is defined! **
 	
-	I've done leak testing using Valgrind in OSX and I seem to be in the clear; there are some inconclusive and (hopefully) irrelevant
+	I've done *initial* leak testing using Valgrind in OSX and I seem to be in the clear; there are some inconclusive and (hopefully) irrelevant
 	ones reported in the runtime library, but you shouldn't run into killer pileups.
 
 	Lesson learned, that I knew all along: branching is terrible.
@@ -101,8 +104,20 @@ typedef uint32_t morton_t;
 	inline void debug_print(const char* format, ...) {}
 #endif
 
+inline unsigned RoundPow2_32(unsigned value)
+{
+	--value;
+	value |= value >> 1;
+	value |= value >> 2;
+	value |= value >> 4;
+	value |= value >> 8;
+	value |= value >> 16;
+	return value+1;
+}
+
 const unsigned kNumThreads = std::thread::hardware_concurrency();
 const unsigned kAlphaRange = ('Z'-'A')+1;
+const unsigned kPaddingTile = 0xff;
 
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
 inline unsigned LetterToIndex(char letter)
@@ -313,12 +328,12 @@ static void AddWordToDictionary(const std::string& word)
 	}
 
 	// As a first strategy we'll split at the root.
+	// As it turns out this simple way of dividing the load works fairly well, but it's up for review (FIXME).
 	const char firstLetter = word[0];
-
-	unsigned iDestThread = LetterToIndex(firstLetter)%kNumThreads;
+	const unsigned iDestThread = LetterToIndex(firstLetter)%kNumThreads;
 
 /*
-	// Crappy load balancing, does not take locality into account.
+	// This balances the load but murders performance as it results in a lot more dead ends per traversal thread.
 	unsigned iDestThread = 0;
 	size_t maxLoad = 0;
 	for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
@@ -475,7 +490,8 @@ private:
 			visited = std::unique_ptr<char[]>(new char[gridSize]);
 			memset(visited.get(), 0, gridSize*sizeof(char));
 
-			// No intermediate allocations please.
+			// No intermediate allocations please, so just account for the full load.
+			// FIXME: this is obviously too much for big dictionary VS. small grid or vice versa.
 			wordsFound.reserve(s_threadInfo[iThread].load); 
 		}
 
@@ -485,7 +501,7 @@ private:
 		const Query* instance;
 		const unsigned iThread;
 		const size_t gridSize;
-		std::unique_ptr<char[]> visited; // FIXME: optimize, stuff bits.
+		std::unique_ptr<char[]> visited; // FIXME: optimize.
 		const char* sanitized;
 
 		// Out-put
@@ -703,7 +719,7 @@ private:
 		// Recurse, as we've got a node that might be going somewhewre.
 		// Before recursion, mark this board position as evaluated.
 		auto& visited = context.visited;
-		visited[mortonCode] = 1; // FIXME: stuff it!
+		visited[mortonCode] = 1;
 
 		// FIXME: a lot of these calculations are needless as we're moving a window, but it seems fine and we're not
 		// pushing the ALU so much that it'd warrant any branching or memory hits.
@@ -728,7 +744,7 @@ private:
 				{
 					auto* board = context.sanitized;
 					const unsigned nbIndex = board[newMorton];
-					if (true == child->HasChild(nbIndex))
+					if (kPaddingTile != nbIndex && true == child->HasChild(nbIndex))
 					{
 						// Traverse, and if we hit the wall go see if what we're left with his void.
 						auto* nbChild = child->GetChild(nbIndex, context.iThread);
@@ -761,6 +777,15 @@ private:
 Results FindWords(const char* board, unsigned width, unsigned height)
 {
 	debug_print("Using debug prints, takes a little off the performance.\n");
+
+#if !defined(NED_FLANDERS)
+	static bool warned = false;
+	if (false == warned)
+	{
+		printf("Built without the NED_FLANDERS define, so the safety measures are largely off.\n");
+		warned = true;
+	}
+#endif
 	
 	Results results;
 	results.Words = nullptr;
@@ -769,15 +794,25 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	results.UserData = nullptr; // Didn't need it in this implementation.
 
 	// FIXME: check if board fits in 32 bits.
+	// FIXME: this is a cheap fix, but keeping the Morton-arithmetic light during traversal is worth something.
+	const unsigned pow2Width = RoundPow2_32(width);
+	const unsigned pow2Height = RoundPow2_32(height);
+	debug_print("Rounding board dimensions to %u*%u.\n", pow2Width, pow2Height);
+//	const unsigned xPadding = pow2Width-width;
+//	const unsigned yPadding = pow2Height-height;
 
 	// Board parameters check out?
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
-#ifdef NED_FLANDERS
-		// Yes: sanitize it (check for illegal input and force all to uppercase).
-		const unsigned gridSize = width*height;
+		const unsigned gridSize = pow2Width*pow2Height;
 		std::unique_ptr<char[]> sanitized(new char[gridSize]);
 
+		// FIXME: easy way to set all padding tiles, won't notice it with boards that are large, but it'd be at least
+		//        better to do this with a write-combined memset().
+		memset(sanitized.get(), kPaddingTile, gridSize*sizeof(char));
+
+#ifdef NED_FLANDERS
+		// Sanitize that checks for illegal input and uppercases.
 		morton_t mortonX = ulMC2Dencode(0, 0);
 		for (unsigned iX = 0; iX < width; ++iX)
 		{
@@ -802,9 +837,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			mortonX = ulMC2Dxplusv(mortonX, 1);
 		}
 #else
-		const unsigned gridSize = width*height;
-		std::unique_ptr<char[]> sanitized(new char[gridSize]);
-
+		// Sanitize that just uppercases.
 		morton_t mortonX = ulMC2Dencode(0, 0);
 		for (unsigned iX = 0; iX < width; ++iX)
 		{
@@ -822,7 +855,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		}
 #endif
 
-		Query query(results, sanitized.get(), width, height);
+		Query query(results, sanitized.get(), pow2Width, pow2Height);
 		query.Execute();
 	}
 
