@@ -537,7 +537,7 @@ public:
 				const unsigned score = context->score;
 				m_results.Count += numWords;
 				m_results.Score += score;
-				strBufLen += context->reqStrBufLen + numWords; // Add numWords for terminators.
+				strBufLen += context->reqStrBufLen + numWords; // Add numWords for 0-string-terminator for each.
 
 				debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, numWords, score);
 			}
