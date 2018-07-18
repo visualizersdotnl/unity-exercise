@@ -23,13 +23,13 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do (high priority):
+		- >>- Fix crash bug <<-
 		- Those huge grids to check if a tile is visited, per thread, are ridiculous, but my bit-packed version bugged, so it's out until
 		  further notice.
 		- I'm being dirty abusing std. containers for contiguous allocation now, and those deep copies, well..
 		  I could reasonable collapse the two integers in a node into 1 64-bit integer and make it an atomic type only!
 		- Less use of iThread: can be eliminated by stashing the sub-dict. in the thread context?
-		- Re-Valgrind it!
-		- Look at cache coherency a bit more?
+		- Look at cache coherency a bit more.
 		- Make detection of dead ends more efficient, even though it's a really low percentage we're dealing with.
 		- I'm not using SIMD (by choice, for now).
 
