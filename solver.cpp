@@ -23,17 +23,15 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do (high priority):
-		- Insert decent contiguous allocation strategy.
-		- Check compile & run status on OSX & Linux.
-		- Those huge grids to check if a tile is visited, per thread, are ridiculous, but my bit-packed version bugged, so it's out until
-		  further notice.
-		  I could reasonable collapse the two integers in a node into 1 64-bit integer and make it an atomic type only!
-		- Look at cache coherency a bit more.
-		- I'm not using SIMD (by choice, for now).
+		- Optimize 'visited' array (use bits).
+		- Sequentially allocate main dictionary copy.
+		- Smaller nodes.
+		- FIXMEs.
+		- Profile some more!
 
 	To do (low priority):
+		- Check compile & run status on OSX & Linux.
 		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver.
-		- Test on Ubuntu & Windows.
 		- Fix class members (notation).
 		- Use more references where applicable.
 
@@ -159,20 +157,25 @@ inline unsigned LetterToIndex(char letter)
 	return letter - 'A';
 }
 
+// #include <intrin.h>
+
 class DictionaryNode
 {
 	friend /* static */ void AddWordToDictionary(const std::string& word);
 	friend /* static */ void FreeDictionary();
 
 public:
-	static DictionaryNode* ThreadCopy(const DictionaryNode* parent, SeqAlloc<DictionaryNode>& allocator)
+
+	static inline DictionaryNode* ThreadCopy(const DictionaryNode* parent, SeqAlloc<DictionaryNode>& allocator)
 	{
 		Assert(nullptr != parent);
 
 		DictionaryNode* node = allocator.New();
-		const unsigned alphaBits = node->alphaBits = parent->alphaBits;
+		unsigned alphaBits = node->alphaBits = parent->alphaBits;
 		node->wordIdx = parent->wordIdx;
 
+		// const unsigned range = 32 - _lzcnt_u32(alphaBits);
+		// for (unsigned index = 0; index < range; ++index)
 		for (unsigned index = 0; index < kAlphaRange; ++index)
 		{
 			const unsigned bit = 1 << index;
@@ -183,6 +186,7 @@ public:
 		}
 
 		return node;
+
 	}
 
 	DictionaryNode() : alphaBits(0), wordIdx(-1) {}
@@ -485,8 +489,8 @@ private:
 		// To be called when entering thread.
 		void OnThreadStart()
 		{
-			visited = std::unique_ptr<char[]>(new char[gridSize]);
-			memset(visited.get(), 0, gridSize*sizeof(char));
+			visited = std::unique_ptr<uint8_t[]>(new uint8_t[gridSize]);
+			memset(visited.get(), 0, gridSize*sizeof(uint8_t));
 
 			// No intermediate allocations please, so just account for the full load.
 			// FIXME: this is obviously too much for big dictionary VS. small grid or vice versa.
@@ -499,7 +503,7 @@ private:
 		const Query* instance;
 		const unsigned iThread;
 		const size_t gridSize;
-		std::unique_ptr<char[]> visited; // FIXME: optimize.
+		std::unique_ptr<uint8_t[]> visited; // FIXME: optimize.
 		const char* sanitized;
 
 		// Out-put
@@ -633,18 +637,24 @@ private:
 						const bool hasChild = subDict->HasChild(index);
 						if (true == hasChild)
 						{
-							unsigned depth = 0;
-							TraverseBoard(*context, morton2D, /* child */ subDict->GetChild(index), depth);
+							DictionaryNode* child = subDict->GetChild(index);
 
-/*
-							This doesn't help as it pollutes the loop with a costly branch.
+#if defined(DEBUG_STATS)
+							unsigned depth = 0;
+							TraverseBoard(*context, morton2D, child, depth);
+#else
+							TraverseBoard(*context, morton2D, child);
+#endif
+
+							/*
 							if (true == child->IsVoid())
 							{
 								subDict->RemoveChild(index);
 								if (true == subDict->IsVoid())
 									break;
 							}
-*/
+							*/
+
 						}
 
 #if defined(DEBUG_STATS)
@@ -676,40 +686,19 @@ private:
 		return kLUT[length-3];
 	}
 
+#if defined(DEBUG_STATS)
 	inline static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child, unsigned& depth)
+#else
+	inline static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child)
+#endif
 	{
-		assert(nullptr != child);
-		assert(depth < s_longestWord);
+		Assert(nullptr != child);
 
 #if defined(DEBUG_STATS)
+		Assert(depth < s_longestWord);
 		context.maxDepth = std::max(context.maxDepth, depth);
-#endif
-
-		// Note: checking if the depth is sufficient beforehand is costlier than just checking if the index is valid.
-		size_t wordIdx = child->wordIdx;
-		if (-1 != wordIdx)
-		{
-			// Found a word.
-			const size_t wordIdx = child->wordIdx;
-			context.wordsFound.emplace_back(wordIdx);
-			const size_t length = s_dictionary[wordIdx].length();
-			context.score += GetWordScore(length);
-			context.reqStrBufLen += length;
-
-			// FIXME: name et cetera
-			child->OnWordFound(); 
-
-#if defined(DEBUG_STATS)
-			context.isDeadEnd = 0;
-#endif
-
-			if (child->IsVoid()) 
-			{
-				return;
-			}
-		}
-
 		++depth;
+#endif
 
 		const size_t gridSize = context.gridSize;
 
@@ -735,34 +724,63 @@ private:
 			const morton_t newMorton = mortonCodes[iN];
 			if (newMorton < gridSize)
 			{
-				const bool skipTile = visited[newMorton];
-
-				if (false == skipTile)
+				// It's significantly faster to see if this position on the board is worth traversing than to
+				// touch the 'visited' (FIXME) array, so we'll do that last.
+				auto* board = context.sanitized;
+				const unsigned nbIndex = board[newMorton];
+				if (kPaddingTile != nbIndex && true == child->HasChild(nbIndex))
 				{
-					auto* board = context.sanitized;
-					const unsigned nbIndex = board[newMorton];
-					if (kPaddingTile != nbIndex && true == child->HasChild(nbIndex))
+					const bool skipTile = visited[newMorton];
+					if (false == skipTile)
 					{
 						// Traverse, and if we hit the wall go see if what we're left with his void.
 						auto* nbChild = child->GetChild(nbIndex);
+
+#if defined(DEBUG_STATS)
 						TraverseBoard(context, newMorton, nbChild, depth);
+#else
+						TraverseBoard(context, newMorton, nbChild);
+#endif
+
 						if (true == nbChild->IsVoid())
 						{
 							child->RemoveChild(nbIndex);
 
 							if (true == child->IsVoid())
+							{
 								// Stop recursing.
 								break;
+							}
 						}
+
 					}
 				}
 			}
 		}
 
+#if defined(DEBUG_STATS)
 		--depth;
+#endif
 
 		// Open up this position on the board again.
 		visited[mortonCode] = 0;
+
+		// Was this call a hit?
+		const size_t wordIdx = child->wordIdx;
+		if (-1 != wordIdx)
+		{
+			// Found a word.
+			context.wordsFound.emplace_back(wordIdx);
+			const size_t length = s_dictionary[wordIdx].length();
+			context.score += GetWordScore(length);
+			context.reqStrBufLen += length;
+
+			child->OnWordFound(); 
+
+#if defined(DEBUG_STATS)
+			context.isDeadEnd = 0;
+#endif
+		}
 	}
 
 	Results& m_results;
