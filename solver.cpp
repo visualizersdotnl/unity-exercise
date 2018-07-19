@@ -91,6 +91,9 @@
 #include "MZC2D32.h"
 typedef uint32_t morton_t;
 
+// Stupid simple sequential block allocator.
+#include "sequential.h"
+
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
 
@@ -99,6 +102,15 @@ typedef uint32_t morton_t;
 
 // Undef. to use only 1 thread.
 // #define SINGLE_THREAD
+
+// Undef. to kill assertions.
+// #define ASSERTIONS
+
+#if defined(_DEBUG) || defined(ASSERTIONS)
+	inline void Assert(bool condition) { if (false == condition) __debugbreak(); }
+#else
+	inline void Assert(bool condition) {}
+#endif
 
 #if defined(DEBUG_STATS)
 	#define debug_print printf
@@ -126,6 +138,21 @@ inline unsigned RoundPow2_32(unsigned value)
 const unsigned kAlphaRange = ('Z'-'A')+1;
 const unsigned kPaddingTile = 0xff;
 
+// FIXME: describe
+class ThreadInfo
+{
+public:
+	ThreadInfo() : 
+		load(0), nodeCount(0) {}
+
+	~ThreadInfo() {}
+
+	size_t load;
+	size_t nodeCount;
+};
+
+static std::vector<ThreadInfo> s_threadInfo;
+
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
 inline unsigned LetterToIndex(char letter)
 {
@@ -134,12 +161,15 @@ inline unsigned LetterToIndex(char letter)
 
 class DictionaryNode
 {
-public:
-	static DictionaryNode* DeepCopy(const DictionaryNode* parent)
-	{
-		assert(nullptr != parent);
+	friend /* static */ void AddWordToDictionary(const std::string& word);
+	friend /* static */ void FreeDictionary();
 
-		DictionaryNode* node = new DictionaryNode();
+public:
+	static DictionaryNode* ThreadCopy(const DictionaryNode* parent, SeqAlloc<DictionaryNode>& allocator)
+	{
+		Assert(nullptr != parent);
+
+		DictionaryNode* node = allocator.New();
 		const unsigned alphaBits = node->alphaBits = parent->alphaBits;
 		node->wordIdx = parent->wordIdx;
 
@@ -148,17 +178,17 @@ public:
 			const unsigned bit = 1 << index;
 			if (0 != (alphaBits & bit))
 			{
-				node->children[index] = DeepCopy(parent->GetChild(index));
+				node->children[index] = ThreadCopy(parent->GetChild(index), allocator);
 			}
 		}
 
 		return node;
 	}
 
-	DictionaryNode() : alphaBits(0), wordIdx(-1)
-	{
-	}
+	DictionaryNode() : alphaBits(0), wordIdx(-1) {}
 
+private:
+	// Must only be called from FreeDictionary();
 	~DictionaryNode() 
 	{
 		for (size_t index = 0; index < kAlphaRange; ++index)
@@ -169,15 +199,17 @@ public:
 			}
 		}
 	}
-	
-	// Only to be called during dictionary load, from the main thread.
-	DictionaryNode* AddChild(char letter)
+
+	// Must only be called from LoadDictionary().	
+	DictionaryNode* AddChild(char letter, unsigned iThread)
 	{
 		const unsigned index = LetterToIndex(letter);
 
 		if (false == HasChild(index))
 		{
 			children[index] = new DictionaryNode();
+			++s_threadInfo[iThread].nodeCount;
+
 			const unsigned bit = 1 << index;
 			alphaBits |= bit;
 		}
@@ -185,36 +217,36 @@ public:
 		return children[index];
 	}
 
+public:
 	inline bool IsWord() const { return -1 != wordIdx;  }
 	inline bool IsVoid() const { return 0 == alphaBits && false == IsWord(); }
 
 	// Return value indicates if node is now a dead end.
 	inline void RemoveChild(size_t index)
 	{
-		assert(true == HasChild(index));
+		Assert(true == HasChild(index));
 
 		const unsigned bit = 1 << index;
 		alphaBits &= ~bit;
 
-		// FIXME: this sucks.
-		delete children[index];
+		// No need to delete since RemoveChild() will only be called from a thread copy, and those
+		// use a custom block allocator.
 	}
 
 	inline bool HasChild(size_t index) const
 	{
-		assert(index < kAlphaRange);
+		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
 		return 0 != (alphaBits & bit);
 	}
 
 	inline DictionaryNode* GetChild(size_t index) const
 	{
-		assert(true == HasChild(index));
+		Assert(true == HasChild(index));
 		return children[index];
 	}
 
-	// FIXME: better func. name
-	inline void ClearWord()
+	inline void OnWordFound()
 	{
 		assert(true == IsWord());
 		wordIdx = -1;
@@ -234,7 +266,7 @@ private:
 static std::mutex s_dictMutex;
 
 // A root per thread (balancing it by word load doesn't necessarily work out due to mem. coherency).
-static std::vector<DictionaryNode> s_dictTrees;
+static std::vector<DictionaryNode*> s_threadDicts;
 
 // Sequential dictionary of all full words (FIXME: yet unsorted).
 static std::vector<std::string> s_dictionary;
@@ -242,19 +274,6 @@ static std::vector<std::string> s_dictionary;
 // Counters, the latter being useful to reserve space.
 static unsigned s_longestWord;
 static size_t s_wordCount;
-
-class ThreadInfo
-{
-public:
-	ThreadInfo() : 
-		load(0) {}
-
-	~ThreadInfo() {}
-
-	size_t load;
-};
-
-static std::vector<ThreadInfo> s_threadInfo;
 
 #ifdef NED_FLANDERS
 // Scoped lock for all dictionary globals.
@@ -316,34 +335,23 @@ static void AddWordToDictionary(const std::string& word)
 	// As a first strategy we'll split at the root.
 	// As it turns out this simple way of dividing the load works fairly well, but it's up for review (FIXME).
 	const char firstLetter = word[0];
-	const unsigned iDestThread = LetterToIndex(firstLetter)%kNumThreads;
+	const unsigned iThread = LetterToIndex(firstLetter)%kNumThreads;
 
-/*
-	// This balances the load but murders performance as it results in a lot more dead ends per traversal thread.
-	unsigned iDestThread = 0;
-	size_t maxLoad = 0;
-	for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
+	DictionaryNode* parent = s_threadDicts[iThread];
+	if (nullptr == parent)
 	{
-		const size_t load = s_threadInfo[iThread].load;
-		if (load <= maxLoad)
-		{
-			iDestThread = iThread;
-		}
-		else
-		{
-			maxLoad = load;
-		
+		// Allocate root.
+		// FIXME: move to a more central location!
+		parent = s_threadDicts[iThread] = new DictionaryNode();
+		++s_threadInfo[iThread].nodeCount;
 	}
-*/
-
-	DictionaryNode* parent = &s_dictTrees[iDestThread];
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
 		const char letter = *iLetter;
 
 		// Get or create child node.
-		parent = parent->AddChild(letter);
+		parent = parent->AddChild(letter, iThread);
 
 		// Handle 'Qu' rule.
 		if ('Q' == letter)
@@ -358,7 +366,7 @@ static void AddWordToDictionary(const std::string& word)
 
 	parent->wordIdx = s_wordCount;
 
-	++s_threadInfo[iDestThread].load;
+	++s_threadInfo[iThread].load;
 	++s_wordCount;
 }
 
@@ -422,11 +430,19 @@ void FreeDictionary()
 {
 	DictionaryLock lock;
 	{
+		// Delete thread roots.
+		for (auto* threadDict : s_threadDicts)
+		{
+			delete threadDict;
+		}
+
+		// Clean up arrays.
+		s_threadDicts.resize(kNumThreads, nullptr);
+		s_threadInfo.resize(kNumThreads, ThreadInfo());
+
+		// Reset counters.
 		s_longestWord = 0;
 		s_wordCount = 0;
-
-		s_dictTrees.resize(kNumThreads, DictionaryNode());
-		s_threadInfo.resize(kNumThreads, ThreadInfo());
 	}
 }
 
@@ -587,9 +603,10 @@ private:
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
-			// Pull a deep copy.
-			DictionaryNode* subDict = DictionaryNode::DeepCopy(&s_dictTrees[iThread]);
-
+			// Pull a deep copy; since everything is allocated with the sequential allocator we don't need to delete the root.
+			SeqAlloc<DictionaryNode> nodeAlloc(s_threadInfo[iThread].nodeCount);
+			DictionaryNode* subDict = DictionaryNode::ThreadCopy(s_threadDicts[iThread], nodeAlloc);
+			
 			const unsigned width = query.m_width;
 			const unsigned height = query.m_height;
 
@@ -619,15 +636,15 @@ private:
 							unsigned depth = 0;
 							TraverseBoard(*context, morton2D, /* child */ subDict->GetChild(index), depth);
 
-							/*
-													This doesn't help as it pollutes the loop with a costly branch.
-													if (true == child->IsVoid())
-													{
-														subDict->RemoveChild(index);
-														if (true == subDict->IsVoid())
-															break;
-													}
-							*/
+/*
+							This doesn't help as it pollutes the loop with a costly branch.
+							if (true == child->IsVoid())
+							{
+								subDict->RemoveChild(index);
+								if (true == subDict->IsVoid())
+									break;
+							}
+*/
 						}
 
 #if defined(DEBUG_STATS)
@@ -640,8 +657,6 @@ private:
 					mortonX = ulMC2Dxplusv(mortonX, 1);
 				}
 			}
-
-			delete subDict;
 
 		// Sorting the indices into the full word list improves execution time a little.
 		auto& wordsFound = context->wordsFound;
@@ -682,7 +697,7 @@ private:
 			context.reqStrBufLen += length;
 
 			// FIXME: name et cetera
-			child->ClearWord(); 
+			child->OnWordFound(); 
 
 #if defined(DEBUG_STATS)
 			context.isDeadEnd = 0;
@@ -729,7 +744,6 @@ private:
 					if (kPaddingTile != nbIndex && true == child->HasChild(nbIndex))
 					{
 						// Traverse, and if we hit the wall go see if what we're left with his void.
-						// auto* nbChild = child->GetChild(nbIndex, context.iThread);
 						auto* nbChild = child->GetChild(nbIndex);
 						TraverseBoard(context, newMorton, nbChild, depth);
 						if (true == nbChild->IsVoid())

@@ -30,6 +30,9 @@
     <ClInclude Include="..\MZC2D64.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\sequential.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\README.TXT" />
