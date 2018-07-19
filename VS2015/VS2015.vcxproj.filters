@@ -13,21 +13,44 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Dictionaries">
+      <UniqueIdentifier>{eadcbea8-6ec6-42ee-a6d2-de7bf3e20216}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\api.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\random.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MZC2D32.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MZC2D64.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="..\dictionary.txt" />
     <Text Include="..\README.TXT" />
+    <Text Include="..\dictionary-bigger.txt">
+      <Filter>Dictionaries</Filter>
+    </Text>
+    <Text Include="..\dictionary.txt">
+      <Filter>Dictionaries</Filter>
+    </Text>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\solver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\test.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\random.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\solver_submitted.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -6,6 +6,8 @@
 
 #define NUM_QUERIES 3
 
+#define WIN32_CRT_BREAK_ALLOC -1 // 1317291
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -22,6 +24,20 @@
 
 int main(int argC, char **arguments)
 {
+	
+#if defined(_DEBUG) && defined(_WIN32)
+	// Dump leak report at any possible exit.
+	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+	
+	// Report all to debug pane.
+	_CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_DEBUG);
+	_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
+	_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
+
+	if (-1 != WIN32_CRT_BREAK_ALLOC)
+		_CrtSetBreakAlloc(WIN32_CRT_BREAK_ALLOC);
+#endif
+
 	initialize_random_generator();
 
 #ifndef USE_UNITY_REF_GRID
@@ -121,7 +137,7 @@ int main(int argC, char **arguments)
 	
 	FreeDictionary();
 
-	const float time = timing.count();
+	const float time = (float) timing.count();
 	const float avgTime = time/NUM_QUERIES;
 	printf("\nSolver ran %u times for avg. %.2f MS or approx. %.2f second(s)\n", (unsigned) NUM_QUERIES, avgTime, avgTime*0.001f);
 

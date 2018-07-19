@@ -23,14 +23,12 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do (high priority):
-		- >>- Fix crash bug <<-
+		- Insert decent contiguous allocation strategy.
+		- Check compile & run status on OSX & Linux.
 		- Those huge grids to check if a tile is visited, per thread, are ridiculous, but my bit-packed version bugged, so it's out until
 		  further notice.
-		- I'm being dirty abusing std. containers for contiguous allocation now, and those deep copies, well..
 		  I could reasonable collapse the two integers in a node into 1 64-bit integer and make it an atomic type only!
-		- Less use of iThread: can be eliminated by stashing the sub-dict. in the thread context?
 		- Look at cache coherency a bit more.
-		- Make detection of dead ends more efficient, even though it's a really low percentage we're dealing with.
 		- I'm not using SIMD (by choice, for now).
 
 	To do (low priority):
@@ -45,6 +43,7 @@
 	Or it at the very least hardly helps.
 
 	Notes:
+		- ** Currently only tested on Windows 10, VS2017 **
 		- Compile with full optimization (-O3 for ex.) for best performance.
 		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
 		  ** I violate this to tell if this was compiled with or without NED_FLANDERS (see below).
@@ -98,6 +97,9 @@ typedef uint32_t morton_t;
 // Undef. to enable all the work I put in to please a, as it turns out, very forgiving test harness.
 // #define NED_FLANDERS
 
+// Undef. to use only 1 thread.
+// #define SINGLE_THREAD
+
 #if defined(DEBUG_STATS)
 	#define debug_print printf
 #else
@@ -115,7 +117,12 @@ inline unsigned RoundPow2_32(unsigned value)
 	return value+1;
 }
 
-const unsigned kNumThreads = std::thread::hardware_concurrency();
+#if defined(SINGLE_THREAD)
+	constexpr size_t kNumThreads = 1;
+#else
+	const size_t kNumThreads = std::thread::hardware_concurrency();
+#endif
+
 const unsigned kAlphaRange = ('Z'-'A')+1;
 const unsigned kPaddingTile = 0xff;
 
@@ -125,47 +132,44 @@ inline unsigned LetterToIndex(char letter)
 	return letter - 'A';
 }
 
-// FIXME: come on, this is just messy Niels..
-class DictionaryNode;
-inline unsigned AllocNode(unsigned iThread);
-inline DictionaryNode* GetNode(unsigned index, unsigned iThread);
-inline void ClearNodes(unsigned iThread);
-
-// FIXME: less pointers, less iThread!
 class DictionaryNode
 {
 public:
-	DictionaryNode() : alphaBits(0), wordIdx(-1) {}
-
-/*
-	DictionaryNode(unsigned alphaBits = 0, unsigned wordIdx = -1) :
-		alphaBits(alphaBits), wordIdx(wordIdx)
+	static DictionaryNode* DeepCopy(const DictionaryNode* parent)
 	{
-	}
-*/
+		assert(nullptr != parent);
 
-public:
-	static DictionaryNode DeepCopy(const DictionaryNode& parent, unsigned iThread)
-	{
-		DictionaryNode node;
-		node.alphaBits = parent.alphaBits;
-		node.wordIdx   = parent.wordIdx;
+		DictionaryNode* node = new DictionaryNode();
+		const unsigned alphaBits = node->alphaBits = parent->alphaBits;
+		node->wordIdx = parent->wordIdx;
 
 		for (unsigned index = 0; index < kAlphaRange; ++index)
 		{
-			if (true == parent.HasChild(index))
+			const unsigned bit = 1 << index;
+			if (0 != (alphaBits & bit))
 			{
-				auto iNode = AllocNode(iThread);
-				*GetNode(iNode, iThread) = DeepCopy(*parent.GetChild(index, -1), iThread);
-				node.children[index] = iNode;
+				node->children[index] = DeepCopy(parent->GetChild(index));
 			}
 		}
 
 		return node;
 	}
 
-	~DictionaryNode() {}
+	DictionaryNode() : alphaBits(0), wordIdx(-1)
+	{
+	}
 
+	~DictionaryNode() 
+	{
+		for (size_t index = 0; index < kAlphaRange; ++index)
+		{
+			if (true == HasChild(index))
+			{
+				delete children[index];
+			}
+		}
+	}
+	
 	// Only to be called during dictionary load, from the main thread.
 	DictionaryNode* AddChild(char letter)
 	{
@@ -173,37 +177,40 @@ public:
 
 		if (false == HasChild(index))
 		{
-			children[index] = AllocNode(-1);
+			children[index] = new DictionaryNode();
 			const unsigned bit = 1 << index;
 			alphaBits |= bit;
 		}
 
-		return GetNode(children[index], -1);
+		return children[index];
 	}
 
 	inline bool IsWord() const { return -1 != wordIdx;  }
 	inline bool IsVoid() const { return 0 == alphaBits && false == IsWord(); }
 
 	// Return value indicates if node is now a dead end.
-	inline void RemoveChild(unsigned index)
+	inline void RemoveChild(size_t index)
 	{
-		// Clear the according bit; this operation is performed on a copy so there's no deletion necessary.
+		assert(true == HasChild(index));
+
 		const unsigned bit = 1 << index;
 		alphaBits &= ~bit;
+
+		// FIXME: this sucks.
+		delete children[index];
 	}
 
-	// Always use this prior to GetChild(), it's decisively faster.
-	inline bool HasChild(unsigned index) const
+	inline bool HasChild(size_t index) const
 	{
 		assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
 		return 0 != (alphaBits & bit);
 	}
 
-	inline DictionaryNode* GetChild(unsigned index, unsigned iThread) const
+	inline DictionaryNode* GetChild(size_t index) const
 	{
 		assert(true == HasChild(index));
-		return GetNode(children[index], iThread);
+		return children[index];
 	}
 
 	// FIXME: better func. name
@@ -215,37 +222,16 @@ public:
 
 	// Dirty as it is, I'm touching these here and there.
 	// FIXME: wrap in operation methods on object.
-	unsigned wordIdx;
+	// FIXME: shove alphaBits in wordIdx.
+	size_t wordIdx;
 	unsigned alphaBits;
 
 private:
-	std::array<unsigned, kAlphaRange> children;
+	std::array<DictionaryNode*, kAlphaRange> children;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
-
-// Nodes are to be in contiguous memory.
-static std::vector<std::vector<DictionaryNode>> s_dictNodes;
-inline unsigned AllocNode(unsigned iThread) {
-//	assert(iThread+1 < s_dictNodes.size());
-	auto& vector = s_dictNodes[iThread+1];
-	vector.emplace_back(DictionaryNode());
-	return vector.size()-1;
-}
-
-inline DictionaryNode* GetNode(unsigned index, unsigned iThread) {
-//	assert(iThread+1 < s_dictNodes.size());
-	auto& vector = s_dictNodes[iThread+1];
-	return &vector[index];
-}
-
-inline void PrepareNodes(unsigned iThread) {
-//	assert(iThread > 0 && iThread <= kNumThreads);
-	auto& vector = s_dictNodes[iThread+1];
-//	vector.resize(s_dictNodes[0].size());
-//	vector.clear();
-}
 
 // A root per thread (balancing it by word load doesn't necessarily work out due to mem. coherency).
 static std::vector<DictionaryNode> s_dictTrees;
@@ -254,7 +240,7 @@ static std::vector<DictionaryNode> s_dictTrees;
 static std::vector<std::string> s_dictionary;
 
 // Counters, the latter being useful to reserve space.
-static size_t s_longestWord;
+static unsigned s_longestWord;
 static size_t s_wordCount;
 
 class ThreadInfo
@@ -317,11 +303,11 @@ inline bool IsWordValid(const std::string& word)
 // Input word must be uppercase!
 static void AddWordToDictionary(const std::string& word)
 {
-	// Word of any use given the Boggle rules?
+	// Word of any use given the Boggle rules?	
 	if (false == IsWordValid(word))
 		return;
-
-	const size_t length = word.length();
+	
+	const unsigned length = unsigned(word.length());
 	if (length > s_longestWord)
 	{
 		s_longestWord = length;
@@ -346,18 +332,18 @@ static void AddWordToDictionary(const std::string& word)
 		else
 		{
 			maxLoad = load;
-		}
+		
 	}
 */
 
-	DictionaryNode* current = &s_dictTrees[iDestThread];
+	DictionaryNode* parent = &s_dictTrees[iDestThread];
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
 		const char letter = *iLetter;
 
 		// Get or create child node.
-		current = current->AddChild(letter);
+		parent = parent->AddChild(letter);
 
 		// Handle 'Qu' rule.
 		if ('Q' == letter)
@@ -370,7 +356,7 @@ static void AddWordToDictionary(const std::string& word)
 
 	s_dictionary.emplace_back(word);
 
-	current->wordIdx = s_wordCount;
+	parent->wordIdx = s_wordCount;
 
 	++s_threadInfo[iDestThread].load;
 	++s_wordCount;
@@ -429,21 +415,17 @@ void LoadDictionary(const char* path)
 			debug_print("Thread word count %zu != total word count %zu!", count, s_wordCount);
 	}
 
-	debug_print("Dictionary loaded. %zu words, longest being %zu characters\n", s_wordCount, s_longestWord);
+	debug_print("Dictionary loaded. %zu words, longest being %u characters\n", s_wordCount, s_longestWord);
 }
 
 void FreeDictionary()
 {
 	DictionaryLock lock;
 	{
-		// FIXME
-		s_dictNodes.resize(kNumThreads+1);
-
-		s_dictTrees.resize(kNumThreads, DictionaryNode());
-		s_dictionary.clear();
-
 		s_longestWord = 0;
 		s_wordCount = 0;
+
+		s_dictTrees.resize(kNumThreads, DictionaryNode());
 		s_threadInfo.resize(kNumThreads, ThreadInfo());
 	}
 }
@@ -505,7 +487,7 @@ private:
 		const char* sanitized;
 
 		// Out-put
-		std::vector<unsigned> wordsFound;
+		std::vector<size_t> wordsFound;
 		unsigned score;
 		size_t reqStrBufLen;
 
@@ -525,12 +507,12 @@ public:
 		DictionaryLock dictLock;
 		{
 			// Kick off threads.
-			const unsigned numThreads = kNumThreads;
+			const size_t numThreads = kNumThreads;
 
 			std::vector<std::thread> threads;
 			std::vector<std::unique_ptr<ThreadContext>> contexts; // FIXME: can go into TLS?
 
-			debug_print("Kicking off %u threads.\n", numThreads);
+			debug_print("Kicking off %zu threads.\n", numThreads);
 
 			for (unsigned iThread = 0; iThread < numThreads; ++iThread)
 			{
@@ -605,61 +587,61 @@ private:
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
-		// Pull a deep copy.
-		PrepareNodes(iThread);
-		DictionaryNode subDict;
-		subDict = DictionaryNode::DeepCopy(s_dictTrees[iThread], iThread);
+			// Pull a deep copy.
+			DictionaryNode* subDict = DictionaryNode::DeepCopy(&s_dictTrees[iThread]);
 
-		const unsigned width = query.m_width;
-		const unsigned height = query.m_height;
+			const unsigned width = query.m_width;
+			const unsigned height = query.m_height;
 
 #if defined(DEBUG_STATS)
-		debug_print("Thread %u has a load of %zu words.\n", iThread, s_threadInfo[iThread].load);
+			debug_print("Thread %u has a load of %zu words.\n", iThread, s_threadInfo[iThread].load);
 
-		context->maxDepth = 0;
-		unsigned deadEnds = 0;
+			context->maxDepth = 0;
+			unsigned deadEnds = 0;
 #endif
 
-		if (false == subDict.IsVoid())
-		{
-			morton_t mortonX = ulMC2Dencode(0, 0);
-			for (unsigned iX = 0; iX < width; ++iX)
+			if (false == subDict->IsVoid())
 			{
-				morton_t morton2D = mortonX;
-				for (unsigned iY = 0; iY < height; ++iY)
+				morton_t mortonX = ulMC2Dencode(0, 0);
+				for (unsigned iX = 0; iX < width; ++iX)
 				{
+					morton_t morton2D = mortonX;
+					for (unsigned iY = 0; iY < height; ++iY)
+					{
 #if defined(DEBUG_STATS)
-					context->isDeadEnd = 1;
+						context->isDeadEnd = 1;
 #endif
 
-					const unsigned index = query.m_sanitized[morton2D];
-					const bool hasChild = subDict.HasChild(index);
-					if (true == hasChild)
-					{
-						unsigned depth = 0;
-						TraverseBoard(*context, morton2D, /* child */ subDict.GetChild(index, iThread), depth);
-
-/* 
-						This doesn't help as it pollutes the loop with a costly branch.
-						if (true == child->IsVoid())
+						const unsigned index = query.m_sanitized[morton2D];
+						const bool hasChild = subDict->HasChild(index);
+						if (true == hasChild)
 						{
-							subDict.RemoveChild(index);
-							if (true == subDict.IsVoid())
-								break;
+							unsigned depth = 0;
+							TraverseBoard(*context, morton2D, /* child */ subDict->GetChild(index), depth);
+
+							/*
+													This doesn't help as it pollutes the loop with a costly branch.
+													if (true == child->IsVoid())
+													{
+														subDict->RemoveChild(index);
+														if (true == subDict->IsVoid())
+															break;
+													}
+							*/
 						}
-*/
+
+#if defined(DEBUG_STATS)
+						deadEnds += !context->isDeadEnd;
+#endif
+
+						morton2D = ulMC2Dyplusv(morton2D, 1);
 					}
 
-#if defined(DEBUG_STATS)
-					deadEnds += !context->isDeadEnd;
-#endif
-
-					morton2D = ulMC2Dyplusv(morton2D, 1);
+					mortonX = ulMC2Dxplusv(mortonX, 1);
 				}
-
-				mortonX = ulMC2Dxplusv(mortonX, 1);
 			}
-		}
+
+			delete subDict;
 
 		// Sorting the indices into the full word list improves execution time a little.
 		auto& wordsFound = context->wordsFound;
@@ -667,7 +649,7 @@ private:
 		
 #if defined(DEBUG_STATS)
 		const float deadPct = ((float)deadEnds/query.m_gridSize)*100.f;
-		debug_print("Thread %u has max. traversal depth %u (longest %zu), %u dead ends (%.2f percent).\n", iThread, context->maxDepth, s_longestWord, deadEnds, deadPct);
+		debug_print("Thread %u has max. traversal depth %u (longest %u), %u dead ends (%.2f percent).\n", iThread, context->maxDepth, s_longestWord, deadEnds, deadPct);
 #endif
 	}
 
@@ -689,11 +671,11 @@ private:
 #endif
 
 		// Note: checking if the depth is sufficient beforehand is costlier than just checking if the index is valid.
-		unsigned wordIdx = child->wordIdx;
+		size_t wordIdx = child->wordIdx;
 		if (-1 != wordIdx)
 		{
 			// Found a word.
-			const unsigned wordIdx = child->wordIdx;
+			const size_t wordIdx = child->wordIdx;
 			context.wordsFound.emplace_back(wordIdx);
 			const size_t length = s_dictionary[wordIdx].length();
 			context.score += GetWordScore(length);
@@ -747,7 +729,8 @@ private:
 					if (kPaddingTile != nbIndex && true == child->HasChild(nbIndex))
 					{
 						// Traverse, and if we hit the wall go see if what we're left with his void.
-						auto* nbChild = child->GetChild(nbIndex, context.iThread);
+						// auto* nbChild = child->GetChild(nbIndex, context.iThread);
+						auto* nbChild = child->GetChild(nbIndex);
 						TraverseBoard(context, newMorton, nbChild, depth);
 						if (true == nbChild->IsVoid())
 						{

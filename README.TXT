@@ -22,7 +22,7 @@ And it got some!
 * Calls are threadsafe (the global dictionary is guarded by a mutex) and do *not* depend on call order.
 
 * Leak testing with Valgrind on OSX reported no memory leaks, except a few bogus ones caused by the runtime library.
-  -- I have to re-test this.
+  On Windows there's CRT heap debugging functions in the stub to test for leaks and break on allocation.
 
 * Look for DEBUG_STATS on top, disable it for speed, enable it for information.
 * Also look for NED_FLANDERS, if defined all safety measures mentioned are in effect.
