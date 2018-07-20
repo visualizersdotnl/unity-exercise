@@ -126,6 +126,9 @@
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <FloatingPointModel>Fast</FloatingPointModel>
       <OmitFramePointers>true</OmitFramePointers>
+      <ExceptionHandling>false</ExceptionHandling>
+      <StructMemberAlignment>16Bytes</StructMemberAlignment>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -150,6 +153,9 @@
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <FloatingPointModel>Fast</FloatingPointModel>
       <OmitFramePointers>true</OmitFramePointers>
+      <ExceptionHandling>false</ExceptionHandling>
+      <StructMemberAlignment>16Bytes</StructMemberAlignment>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

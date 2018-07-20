@@ -44,6 +44,7 @@
 	Notes:
 		- ** Currently only tested on Windows 10, VS2017 **
 		- Compile with full optimization (-O3 for ex.) for best performance.
+		  Disabling C++ exceptions helps too, as they hinder inlining and are not used.
 		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
 		  ** I violate this to tell if this was compiled with or without NED_FLANDERS (see below).
 		- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
@@ -142,9 +143,9 @@ class ThreadInfo
 {
 public:
 	ThreadInfo() : 
-		load(0), nodeCount(0) {}
-
-	~ThreadInfo() {}
+		load(0)
+,		nodeCount(1) // Each thread has at least 1 root node.
+	{}
 
 	size_t load;
 	size_t nodeCount;
@@ -176,7 +177,7 @@ public:
 		for (unsigned index = 0; index < kAlphaRange; ++index)
 		{
 			const unsigned bit = 1 << index;
-			if (0 != (alphaBits & bit))
+			if (alphaBits & bit)
 			{
 				node->children[index] = ThreadCopy(parent->GetChild(index), allocator);
 			}
@@ -229,7 +230,7 @@ public:
 		Assert(0 != HasChild(index));
 
 		const unsigned bit = 1 << index;
-		alphaBits &= ~bit;
+		alphaBits ^= bit;
 
 		// No need to delete since RemoveChild() will only be called from a thread copy, and those
 		// use a custom block allocator.
@@ -242,7 +243,7 @@ public:
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
-		return (alphaBits & bit);
+		return alphaBits & bit;
 	}
 
 	inline DictionaryNode* GetChild(size_t index) const
@@ -346,13 +347,7 @@ inline bool IsWordValid(const std::string& word)
 	// const unsigned iThread = mt_randu32()%kNumThreads;
 
 	DictionaryNode* parent = s_threadDicts[iThread];
-	if (nullptr == parent)
-	{
-		// Allocate root.
-		// FIXME: move to a more central location!
-		parent = s_threadDicts[iThread] = new DictionaryNode();
-		++s_threadInfo[iThread].nodeCount;
-	}
+	Assert(nullptr != parent);
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
@@ -395,6 +390,13 @@ void LoadDictionary(const char* path)
 
 	DictionaryLock lock;
 	{
+		// Create root node per thread.
+		for (auto& threadDict : s_threadDicts)
+		{
+			Assert(nullptr == threadDict);
+			threadDict = new DictionaryNode();
+		}
+
 		int character;
 		std::string word;
 
@@ -678,6 +680,8 @@ private:
 		return kLUT[length-3];
 	}
 
+	#pragma inline_recursion(on)
+
 #if defined(DEBUG_STATS)
 	inline static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child, unsigned& depth)
 #else
@@ -694,11 +698,6 @@ private:
 
 		const size_t gridSize = context.gridSize;
 		auto* board = context.sanitized;
-		auto& visited = context.visited;
-
-		// Recurse, as we've got a node that might be going somewhewre.
-		// Before recursion, mark this board position as evaluated.
-		visited[mortonCode] = true;
 
 		// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.
 		morton_t mortonCodes[8];
@@ -718,6 +717,11 @@ private:
 		// Up, Down		
 		mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1);
 		mortonCodes[7] = ulMC2Dyminusv(mortonCode, 1);
+
+		// Recurse, as we've got a node that might be going somewhewre.
+		// Before recursion, mark this board position as evaluated.
+		auto& visited = context.visited;
+		visited[mortonCode] = true;
 
 		for (int iDir = 0; iDir < 8; ++iDir)
 		{
@@ -773,6 +777,8 @@ private:
 #endif
 		}
 	}
+
+	#pragma inline_recursion(off)
 
 	Results& m_results;
 	const char* m_sanitized;
