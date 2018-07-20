@@ -52,11 +52,6 @@
 		- My class design isn't really tight (functions and public member values galore), but for now that's fine.
 		
 		** Some of these stability claims only work if NED_FLANDERS (see below) is defined! **
-	
-	I've done *initial* leak testing using Valgrind in OSX and I seem to be in the clear; there are some inconclusive and (hopefully) irrelevant
-	ones reported in the runtime library, but you shouldn't run into killer pileups.
-
-	Lesson learned, that I knew all along: branching is terrible.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -161,8 +156,8 @@ inline unsigned LetterToIndex(char letter)
 
 class DictionaryNode
 {
-	friend /* static */ void AddWordToDictionary(const std::string& word);
-	friend /* static */ void FreeDictionary();
+	friend static void AddWordToDictionary(const std::string& word);
+	friend void FreeDictionary();
 
 public:
 
@@ -252,7 +247,7 @@ public:
 
 	inline void OnWordFound()
 	{
-		assert(true == IsWord());
+		Assert(true == IsWord());
 		wordIdx = -1;
 	}
 
