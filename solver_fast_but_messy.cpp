@@ -23,18 +23,19 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do (high priority):
-		- Rename child, nbChild et cetera to parent and child.
-		- Profile and optimize:
-		  - Optimize 'visited' array.
-		  - Integrate TLSF allocator?
-		  - Smaller nodes?
-		- Check for leaks.
+		- Maybe it'd be much faster if you allocate nodes sequentially that are on the same depth level?
+		- Optimize 'visited' array.
+		- Integrate TLSF allocator.
+		- Smaller nodes.
 		- FIXMEs.
+		- Profile some more!
 
 	To do (low priority):
 		- Check compile & run status on Linux.
 		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver.
 		- Fix class members (notation).
+		- Use more references where applicable.
+
 
 	There's this idea floating that if you have a hash and eliminate a part of the dict. tree that way
 	by special-casing the first 3 characters you're golden, but you're not if you do it right really.
@@ -68,13 +69,18 @@
 #include <string>
 #include <iostream>
 // #include <map>
-#include <unordered_map>
+// #include <unordered_map>
+// #include <set>
+// #include <list>
 #include <mutex>
 #include <thread>
 // #include <atomic>
 #include <array>
+// #include <deque>
 #include <cassert>
 #include <algorithm>
+// #include <bitset>
+#include <chrono>
 
 #include "api.h"
 #include "random.h"
@@ -83,6 +89,9 @@
 // Long before 32 bits become too little I'll have problems of another nature.
 #include "MZC2D32.h"
 typedef uint32_t morton_t;
+
+// Stupid simple sequential block allocator.
+#include "sequential.h"
 
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
@@ -123,7 +132,7 @@ inline unsigned RoundPow2_32(unsigned value)
 	constexpr size_t kNumThreads = 1;
 #else
 	const size_t kNumCores = std::thread::hardware_concurrency();
-	const size_t kNumThreads = kNumCores;
+	const size_t kNumThreads = kNumCores*2; // FIXE: this indicates that I'm not using the cores efficiently, and that might be that damned 'visited' array.
 #endif
 
 const unsigned kAlphaRange = ('Z'-'A')+1;
@@ -153,55 +162,94 @@ inline unsigned LetterToIndex(char letter)
 class DictionaryNode
 {
 	friend void AddWordToDictionary(const std::string& word);
+	friend void FreeDictionary();
 
 public:
 
-	DictionaryNode() : wordIdx(-1), indexBits(0) {}
+	static inline DictionaryNode* ThreadCopy(const DictionaryNode* parent, SeqAlloc<DictionaryNode>& allocator)
+	{
+		Assert(nullptr != parent);
+
+		DictionaryNode* node = allocator.New();
+		unsigned alphaBits = node->alphaBits = parent->alphaBits;
+		node->wordIdx = parent->wordIdx;
+
+		for (unsigned index = 0; index < kAlphaRange; ++index)
+		{
+			const unsigned bit = 1 << index;
+			if (alphaBits & bit)
+			{
+				node->children[index] = ThreadCopy(parent->GetChild(index), allocator);
+			}
+		}
+
+		return node;
+
+	}
+
+	DictionaryNode() : alphaBits(0), wordIdx(-1) {}
 
 private:
-	// Only called from LoadDictionary().	
-	DictionaryNode* AddChild(char letter)
+	// Must only be called from FreeDictionary();
+	~DictionaryNode() 
+	{
+		for (size_t index = 0; index < kAlphaRange; ++index)
+		{
+			if (0 != HasChild(index))
+			{
+				delete children[index];
+			}
+		}
+	}
+
+	// Must only be called from LoadDictionary().	
+	DictionaryNode* AddChild(char letter, unsigned iThread)
 	{
 		const unsigned index = LetterToIndex(letter);
 
-		const unsigned bit = 1 << index;
-		indexBits |= bit;
+		if (0 == HasChild(index))
+		{
+			children[index] = new DictionaryNode();
+			++s_threadInfo[iThread].nodeCount;
 
-		return &children[index];
+			const unsigned bit = 1 << index;
+			alphaBits |= bit;
+		}
+
+		return children[index];
 	}
 
 public:
-	// FIXME: eliminate comparisons by returning non-zero.
+	inline unsigned HasChildren() const { return alphaBits; } // Non-zero: has children.
+	inline bool IsWord() const { return -1 != wordIdx;  }
+	inline bool IsVoid() const { return 0 == alphaBits && -1 == wordIdx; }
 
-	inline bool HasChildren() const { return 0 != indexBits; }
-	inline bool IsWord()      const { return -1 != wordIdx;  }
-	inline bool IsVoid()      const { return false == IsWord() && false == HasChildren(); }
-
-	// Returns true if node is now a dead end.
-	inline bool RemoveChild(unsigned index)
+	// Zeo return value indicates if node is now a dead end.
+	inline unsigned RemoveChild(size_t index)
 	{
-		Assert(nullptr != GetChild(index));
-
-		children.erase(index);
+		Assert(0 != HasChild(index));
 
 		const unsigned bit = 1 << index;
-		indexBits ^= bit;
+		alphaBits ^= bit;
 
-		return 0 == indexBits;
+		// No need to delete since RemoveChild() will only be called from a thread copy, and those
+		// use a custom block allocator.
 
+		return HasChildren();
 	}
 
-	inline bool HasChild(unsigned index)
+	// Returns non-zero if true.
+	inline unsigned HasChild(size_t index) const
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
-		return 0 != (indexBits & bit);
+		return alphaBits & bit;
 	}
 
-	inline DictionaryNode* GetChild(unsigned index)
+	inline DictionaryNode* GetChild(size_t index) const
 	{
-		Assert(true == HasChild(index));
-		return &children[index];
+		Assert(0 != HasChild(index));
+		return children[index];
 	}
 
 	inline void OnWordFound()
@@ -210,19 +258,21 @@ public:
 		wordIdx = -1;
 	}
 
-	// FIXME: wrap?
+	// Dirty as it is, I'm touching these here and there.
+	// FIXME: wrap in operation methods on object.
+	// FIXME: shove alphaBits in wordIdx?
 	size_t wordIdx;
+	unsigned alphaBits;
 
 private:
-	unsigned indexBits;
-	std::unordered_map<unsigned, DictionaryNode> children;
+	std::array<DictionaryNode*, kAlphaRange> children;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 
-// A root per thread.
-static std::vector<DictionaryNode> s_threadDicts;
+// A root per thread (balancing it by word load doesn't necessarily work out due to mem. coherency).
+static std::vector<DictionaryNode*> s_threadDicts;
 
 // Sequential dictionary of all full words (FIXME: yet unsorted).
 static std::vector<std::string> s_dictionary;
@@ -276,7 +326,7 @@ inline bool IsWordValid(const std::string& word)
 }
 
 // Input word must be uppercase!
-static void AddWordToDictionary(const std::string& word)
+/* static */ void AddWordToDictionary(const std::string& word)
 {
 	// Word of any use given the Boggle rules?	
 	if (false == IsWordValid(word))
@@ -296,15 +346,15 @@ static void AddWordToDictionary(const std::string& word)
 	// Gives perfect distribution, but that's apparently *not* what we're looking for.
 	// const unsigned iThread = mt_randu32()%kNumThreads;
 
-	DictionaryNode* node = &s_threadDicts[iThread];
+	DictionaryNode* parent = s_threadDicts[iThread];
+	Assert(nullptr != parent);
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
 		const char letter = *iLetter;
 
 		// Get or create child node.
-		node = node->AddChild(letter);
-		++s_threadInfo[iThread].nodeCount;
+		parent = parent->AddChild(letter, iThread);
 
 		// Handle 'Qu' rule.
 		if ('Q' == letter)
@@ -315,9 +365,9 @@ static void AddWordToDictionary(const std::string& word)
 		}
 	}
 
-	// Store.
 	s_dictionary.emplace_back(word);
-	node->wordIdx = s_wordCount;
+
+	parent->wordIdx = s_wordCount;
 
 	++s_threadInfo[iThread].load;
 	++s_wordCount;
@@ -340,6 +390,13 @@ void LoadDictionary(const char* path)
 
 	DictionaryLock lock;
 	{
+		// Create root node per thread.
+		for (auto& threadDict : s_threadDicts)
+		{
+			Assert(nullptr == threadDict);
+			threadDict = new DictionaryNode();
+		}
+
 		int character;
 		std::string word;
 
@@ -383,8 +440,14 @@ void FreeDictionary()
 {
 	DictionaryLock lock;
 	{
+		// Delete thread roots.
+		for (auto* threadDict : s_threadDicts)
+		{
+			delete threadDict;
+		}
+
 		// Clean up arrays.
-		s_threadDicts.resize(kNumThreads, DictionaryNode());
+		s_threadDicts.resize(kNumThreads, nullptr);
 		s_threadInfo.resize(kNumThreads, ThreadInfo());
 
 		// Reset counters.
@@ -425,8 +488,8 @@ private:
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
+			// Minimal initialization, handle rest in OnThreadStart().
 			assert(nullptr != instance);
-
 			memset(visited.get(), 0, gridSize*sizeof(bool));
 
 			// FIXME: this is obviously too much for big dictionary VS. small grid or vice versa.
@@ -538,8 +601,9 @@ private:
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
-		// Pull a copy.
-		DictionaryNode subDict = s_threadDicts[iThread];
+		// Pull a deep copy; since everything is allocated with the sequential allocator we don't need to delete the root.
+		SeqAlloc<DictionaryNode> nodeAlloc(s_threadInfo[iThread].nodeCount);
+		DictionaryNode* subDict = DictionaryNode::ThreadCopy(s_threadDicts[iThread], nodeAlloc);
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -551,40 +615,45 @@ private:
 		unsigned deadEnds = 0;
 #endif
 
-		if (true == subDict.IsVoid())
-			return;
-
-		morton_t mortonY = ulMC2Dencode(0, 0);
-		for (unsigned iY = 0; iY < height; ++iY)
+		if (false == subDict->IsVoid())
 		{
-			morton_t morton2D = mortonY;
-			for (unsigned iX = 0; iX < width; ++iX)
+			morton_t mortonY = ulMC2Dencode(0, 0);
+			for (unsigned iY = 0; iY < height; ++iY)
 			{
-#if defined(DEBUG_STATS)
-				context->isDeadEnd = 1;
-#endif
-
-				const unsigned index = query.m_sanitized[morton2D];
-				if (true == subDict.HasChild(index))
+				morton_t morton2D = mortonY;
+				for (unsigned iX = 0; iX < width; ++iX)
 				{
-					DictionaryNode* child = subDict.GetChild(index);
 #if defined(DEBUG_STATS)
-					unsigned depth = 0;
-					TraverseBoard(*context, morton2D, child, depth);
+					context->isDeadEnd = 1;
+#endif
+
+					const unsigned index = query.m_sanitized[morton2D];
+					if (0 != subDict->HasChild(index))
+					{
+						DictionaryNode* child = subDict->GetChild(index);
+
+#if defined(DEBUG_STATS)
+						unsigned depth = 0;
+						TraverseBoard(*context, morton2D, child, depth);
 #else
-					TraverseBoard(*context, morton2D, child);
+						TraverseBoard(*context, morton2D, child);
 #endif
+
+						// ->> Testing if subDict is empty here doesn't give any gain. <<-
 
 #if defined(DEBUG_STATS)
-					deadEnds += !context->isDeadEnd;
+						deadEnds += !context->isDeadEnd;
 #endif
-				}
-				morton2D = ulMC2Dxplusv(morton2D, 1);
-			}
+					}
 
-			mortonY = ulMC2Dyplusv(mortonY, 1);
+					morton2D = ulMC2Dxplusv(morton2D, 1);
+				}
+
+				mortonY = ulMC2Dyplusv(mortonY, 1);
+			}
 		}
 
+	done:
 		// Sorting the indices into the full word list improves execution time a little.
 		auto& wordsFound = context->wordsFound;
 		std::sort(wordsFound.begin(), wordsFound.end());
@@ -611,6 +680,8 @@ private:
 		return kLUT[length-3];
 	}
 
+	// #pragma inline_recursion(on)
+
 #if defined(DEBUG_STATS)
 	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child, unsigned& depth)
 #else
@@ -633,7 +704,7 @@ private:
 		}
 
 		// Early out?
-		if (false == child->HasChildren())
+		if (!child->HasChildren())
 			return;
 
 #if defined(DEBUG_STATS)
@@ -676,11 +747,13 @@ private:
 				continue;
 
 			const unsigned nbIndex = board[newMorton];
-			if (kPaddingTile != nbIndex && true == child->HasChild(nbIndex))
+			if (kPaddingTile != nbIndex && child->HasChild(nbIndex))
 			{
-				auto* nbChild = child->GetChild(nbIndex);
 				if (false == visited[newMorton])
 				{
+					// Traverse, and if we hit the wall go see if what we're left with his void.
+					auto* nbChild = child->GetChild(nbIndex);
+
 #if defined(DEBUG_STATS)
 					TraverseBoard(context, newMorton, nbChild, depth);
 #else
@@ -689,9 +762,9 @@ private:
 
 					if (true == nbChild->IsVoid())
 					{
-						if (true == child->RemoveChild(nbIndex))
+						if (0 == child->RemoveChild(nbIndex))
 						{
-							// Stop recursing.
+							// Stop recursing, but still check for word below.
 							break;
 						}
 					}
@@ -706,6 +779,8 @@ private:
 		// Open up this position on the board again.
 		visited[mortonCode] = false;
 	}
+
+	// #pragma inline_recursion(off)
 
 	Results& m_results;
 	const char* m_sanitized;
