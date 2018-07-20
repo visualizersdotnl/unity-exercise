@@ -24,7 +24,7 @@
 
 	To do (high priority):
 		- Optimize 'visited' array.
-		- Sequentially allocate main dictionary copy.
+		- Integrate TLSF allocator.
 		- Smaller nodes.
 		- FIXMEs.
 		- Profile some more!
@@ -218,8 +218,9 @@ private:
 	}
 
 public:
+	inline bool HasChildren() const { return 0 != alphaBits;}
 	inline bool IsWord() const { return -1 != wordIdx;  }
-	inline bool IsVoid() const { return 0 == alphaBits && false == IsWord(); }
+	inline bool IsVoid() const { return 0 == alphaBits && -1 == wordIdx; }
 
 	// Return value indicates if node is now a dead end.
 	inline bool RemoveChild(size_t index)
@@ -232,7 +233,7 @@ public:
 		// No need to delete since RemoveChild() will only be called from a thread copy, and those
 		// use a custom block allocator.
 
-		return IsVoid();
+		return HasChildren();
 	}
 
 	inline bool HasChild(size_t index) const
@@ -638,18 +639,12 @@ private:
 						TraverseBoard(*context, morton2D, child);
 #endif
 
-/*
-						if (true == child->IsVoid())
-						{
-							if (true == subDict->RemoveChild(index))
-								goto done;
-						}
-*/
-					}
+						// ->> Testing if subDict is empty here doesn't give any gain. <<-
 
 #if defined(DEBUG_STATS)
-					deadEnds += !context->isDeadEnd;
+						deadEnds += !context->isDeadEnd;
 #endif
+					}
 
 					morton2D = ulMC2Dyplusv(morton2D, 1);
 				}
@@ -677,26 +672,6 @@ private:
 		return kLUT[length-3];
 	}
 
-	// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.s
-	inline static void CalculateMortonCodes(morton_t curCode, morton_t* codes)
-	{
-		// Left, Right
-		codes[0] = ulMC2Dxminusv(curCode, 1);
-		codes[1] = ulMC2Dxplusv(curCode, 1);
-	
-		// Lower left, Upper right
-		codes[2] = ulMC2Dyminusv(codes[0], 1);
-		codes[3] = ulMC2Dyplusv(codes[1], 1);
-
-		// Lower right, Upper left		
-		codes[4] = ulMC2Dyminusv(codes[1], 1);
-		codes[5] = ulMC2Dyplusv(codes[0], 1);
-
-		// Up, Down		
-		codes[6] = ulMC2Dyplusv(curCode, 1);
-		codes[7] = ulMC2Dyminusv(curCode, 1);
-	}
-
 #if defined(DEBUG_STATS)
 	inline static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child, unsigned& depth)
 #else
@@ -719,8 +694,24 @@ private:
 		// Before recursion, mark this board position as evaluated.
 		visited[mortonCode] = true;
 
+		// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.
 		morton_t mortonCodes[8];
-		CalculateMortonCodes(mortonCode, mortonCodes);
+
+		// Left, Right
+		mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
+		mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
+	
+		// Lower left, Upper right
+		mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
+		mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
+
+		// Lower right, Upper left		
+		mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
+		mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
+
+		// Up, Down		
+		mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1);
+		mortonCodes[7] = ulMC2Dyminusv(mortonCode, 1);
 
 		for (int iDir = 0; iDir < 8; ++iDir)
 		{
@@ -745,9 +736,9 @@ private:
 
 						if (true == nbChild->IsVoid())
 						{
-							if  (true == child->RemoveChild(nbIndex))
+							if  (false == child->RemoveChild(nbIndex))
 							{
-								// Stop recursing.
+								// Stop recursing, but still check for word below.
 								break;
 							}
 						}

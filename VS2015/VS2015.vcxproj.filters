@@ -16,6 +16,9 @@
     <Filter Include="Dictionaries">
       <UniqueIdentifier>{eadcbea8-6ec6-42ee-a6d2-de7bf3e20216}</UniqueIdentifier>
     </Filter>
+    <Filter Include="tlsf">
+      <UniqueIdentifier>{367b98c2-379d-42f3-8dd2-c7ba96e26d59}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\api.h">
@@ -33,21 +36,23 @@
     <ClInclude Include="..\sequential.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\tlsf\tlsf.h">
+      <Filter>tlsf</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="..\README.TXT" />
     <Text Include="..\dictionary-bigger.txt">
       <Filter>Dictionaries</Filter>
     </Text>
     <Text Include="..\dictionary.txt">
       <Filter>Dictionaries</Filter>
     </Text>
+    <Text Include="..\README.TXT">
+      <Filter>tlsf</Filter>
+    </Text>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\solver.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\test.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\random.cpp">
@@ -56,5 +61,14 @@
     <ClCompile Include="..\solver_submitted.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\tlsf\tlsf.c">
+      <Filter>tlsf</Filter>
+    </ClCompile>
+    <ClCompile Include="..\test.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\tlsf\README.md" />
   </ItemGroup>
 </Project>

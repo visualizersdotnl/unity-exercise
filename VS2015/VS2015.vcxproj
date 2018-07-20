@@ -162,6 +162,7 @@
     <ClInclude Include="..\MZC2D32.h" />
     <ClInclude Include="..\MZC2D64.h" />
     <ClInclude Include="..\random.h" />
+    <ClInclude Include="..\tlsf\tlsf.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\dictionary-bigger.txt" />
@@ -183,6 +184,10 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\test.cpp" />
+    <ClCompile Include="..\tlsf\tlsf.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\tlsf\README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
