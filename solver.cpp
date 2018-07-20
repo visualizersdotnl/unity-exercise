@@ -23,6 +23,7 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do (high priority):
+		- Maybe it'd be much faster if you allocate nodes sequentially that are on the same depth level?
 		- Optimize 'visited' array.
 		- Integrate TLSF allocator.
 		- Smaller nodes.
@@ -193,7 +194,7 @@ private:
 	{
 		for (size_t index = 0; index < kAlphaRange; ++index)
 		{
-			if (true == HasChild(index))
+			if (0 != HasChild(index))
 			{
 				delete children[index];
 			}
@@ -205,7 +206,7 @@ private:
 	{
 		const unsigned index = LetterToIndex(letter);
 
-		if (false == HasChild(index))
+		if (0 == HasChild(index))
 		{
 			children[index] = new DictionaryNode();
 			++s_threadInfo[iThread].nodeCount;
@@ -225,7 +226,7 @@ public:
 	// Return value indicates if node is now a dead end.
 	inline bool RemoveChild(size_t index)
 	{
-		Assert(true == HasChild(index));
+		Assert(0 != HasChild(index));
 
 		const unsigned bit = 1 << index;
 		alphaBits &= ~bit;
@@ -236,16 +237,17 @@ public:
 		return HasChildren();
 	}
 
-	inline bool HasChild(size_t index) const
+	// Returns non-zero if true.
+	inline unsigned HasChild(size_t index) const
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
-		return 0 != (alphaBits & bit);
+		return (alphaBits & bit);
 	}
 
 	inline DictionaryNode* GetChild(size_t index) const
 	{
-		Assert(true == HasChild(index));
+		Assert(0 != HasChild(index));
 		return children[index];
 	}
 
@@ -627,8 +629,7 @@ private:
 #endif
 
 					const unsigned index = query.m_sanitized[morton2D];
-					const bool hasChild = subDict->HasChild(index);
-					if (true == hasChild)
+					if (0 != subDict->HasChild(index))
 					{
 						DictionaryNode* child = subDict->GetChild(index);
 
@@ -721,7 +722,7 @@ private:
 				// It's significantly faster to see if this position on the board is worth traversing than to
 				// touch the 'visited' (FIXME) array, so we'll do that last.
 				const unsigned nbIndex = board[newMorton];
-				if (kPaddingTile != nbIndex && true == child->HasChild(nbIndex))
+				if (kPaddingTile != nbIndex && child->HasChild(nbIndex))
 				{
 					if (visited[newMorton] == false) // FIXME: expensive!
 					{
