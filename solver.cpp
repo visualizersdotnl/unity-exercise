@@ -30,7 +30,7 @@
 		- Profile some more!
 
 	To do (low priority):
-		- Check compile & run status on OSX & Linux.
+		- Check compile & run status on Linux.
 		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver.
 		- Fix class members (notation).
 		- Use more references where applicable.
@@ -73,9 +73,11 @@
 #include <mutex>
 #include <thread>
 // #include <atomic>
-#include <array>
+// #include <array>
 // #include <deque>
 #include <cassert>
+#include <algorithm>
+// #include <bitset>
 
 #include "api.h"
 
@@ -100,7 +102,7 @@ typedef uint32_t morton_t;
 // #define ASSERTIONS
 
 #if defined(_DEBUG) || defined(ASSERTIONS)
-	inline void Assert(bool condition) { if (false == condition) __debugbreak(); }
+	inline void Assert(bool condition) { assert(condition); }
 #else
 	inline void Assert(bool condition) {}
 #endif
@@ -151,8 +153,6 @@ inline unsigned LetterToIndex(char letter)
 {
 	return letter - 'A';
 }
-
-// #include <intrin.h>
 
 class DictionaryNode
 {
@@ -221,7 +221,7 @@ public:
 	inline bool IsVoid() const { return 0 == alphaBits && false == IsWord(); }
 
 	// Return value indicates if node is now a dead end.
-	inline void RemoveChild(size_t index)
+	inline bool RemoveChild(size_t index)
 	{
 		Assert(true == HasChild(index));
 
@@ -230,6 +230,8 @@ public:
 
 		// No need to delete since RemoveChild() will only be called from a thread copy, and those
 		// use a custom block allocator.
+
+		return 0 == alphaBits && -1 == wordIdx;
 	}
 
 	inline bool HasChild(size_t index) const
@@ -258,7 +260,7 @@ public:
 	unsigned alphaBits;
 
 private:
-	std::array<DictionaryNode*, kAlphaRange> children;
+	DictionaryNode* children[kAlphaRange];
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
@@ -472,22 +474,16 @@ private:
 		instance(instance)
 ,		iThread(iThread)
 ,		gridSize(instance->m_gridSize)
-,		visited(nullptr)
+,		visited(new bool[gridSize])
 ,		sanitized(instance->m_sanitized)
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
 			// Minimal initialization, handle rest in OnThreadStart().
 			assert(nullptr != instance);
-		}
 
-		// To be called when entering thread.
-		void OnThreadStart()
-		{
-			visited = std::unique_ptr<uint8_t[]>(new uint8_t[gridSize]);
-			memset(visited.get(), 0, gridSize*sizeof(uint8_t));
+			memset(visited.get(), 0, gridSize*sizeof(bool));
 
-			// No intermediate allocations please, so just account for the full load.
 			// FIXME: this is obviously too much for big dictionary VS. small grid or vice versa.
 			wordsFound.reserve(s_threadInfo[iThread].load); 
 		}
@@ -498,7 +494,7 @@ private:
 		const Query* instance;
 		const unsigned iThread;
 		const size_t gridSize;
-		std::unique_ptr<uint8_t[]> visited; // FIXME: optimize.
+		std::unique_ptr<bool[]> visited; // FIXME: optimize.
 		const char* sanitized;
 
 		// Out-put
@@ -597,72 +593,69 @@ public:
 private:
 	static void ExecuteThread(ThreadContext* context)
 	{
-		context->OnThreadStart();
-
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
-			// Pull a deep copy; since everything is allocated with the sequential allocator we don't need to delete the root.
-			SeqAlloc<DictionaryNode> nodeAlloc(s_threadInfo[iThread].nodeCount);
-			DictionaryNode* subDict = DictionaryNode::ThreadCopy(s_threadDicts[iThread], nodeAlloc);
+		// Pull a deep copy; since everything is allocated with the sequential allocator we don't need to delete the root.
+		SeqAlloc<DictionaryNode> nodeAlloc(s_threadInfo[iThread].nodeCount);
+		DictionaryNode* subDict = DictionaryNode::ThreadCopy(s_threadDicts[iThread], nodeAlloc);
 			
-			const unsigned width = query.m_width;
-			const unsigned height = query.m_height;
+		const unsigned width = query.m_width;
+		const unsigned height = query.m_height;
 
 #if defined(DEBUG_STATS)
-			debug_print("Thread %u has a load of %zu words.\n", iThread, s_threadInfo[iThread].load);
+		debug_print("Thread %u has a load of %zu words.\n", iThread, s_threadInfo[iThread].load);
 
-			context->maxDepth = 0;
-			unsigned deadEnds = 0;
+		context->maxDepth = 0;
+		unsigned deadEnds = 0;
 #endif
 
-			if (false == subDict->IsVoid())
+		if (false == subDict->IsVoid())
+		{
+			morton_t mortonX = ulMC2Dencode(0, 0);
+			for (unsigned iX = 0; iX < width; ++iX)
 			{
-				morton_t mortonX = ulMC2Dencode(0, 0);
-				for (unsigned iX = 0; iX < width; ++iX)
+				morton_t morton2D = mortonX;
+				for (unsigned iY = 0; iY < height; ++iY)
 				{
-					morton_t morton2D = mortonX;
-					for (unsigned iY = 0; iY < height; ++iY)
+#if defined(DEBUG_STATS)
+					context->isDeadEnd = 1;
+#endif
+
+					const unsigned index = query.m_sanitized[morton2D];
+					const bool hasChild = subDict->HasChild(index);
+					if (true == hasChild)
 					{
-#if defined(DEBUG_STATS)
-						context->isDeadEnd = 1;
-#endif
-
-						const unsigned index = query.m_sanitized[morton2D];
-						const bool hasChild = subDict->HasChild(index);
-						if (true == hasChild)
-						{
-							DictionaryNode* child = subDict->GetChild(index);
+						DictionaryNode* child = subDict->GetChild(index);
 
 #if defined(DEBUG_STATS)
-							unsigned depth = 0;
-							TraverseBoard(*context, morton2D, child, depth);
+						unsigned depth = 0;
+						TraverseBoard(*context, morton2D, child, depth);
 #else
-							TraverseBoard(*context, morton2D, child);
+						TraverseBoard(*context, morton2D, child);
 #endif
 
-							/*
-							if (true == child->IsVoid())
-							{
-								subDict->RemoveChild(index);
-								if (true == subDict->IsVoid())
-									break;
-							}
-							*/
-
+/*
+						if (true == child->IsVoid())
+						{
+							if (true == subDict->RemoveChild(index))
+								goto done;
 						}
-
-#if defined(DEBUG_STATS)
-						deadEnds += !context->isDeadEnd;
-#endif
-
-						morton2D = ulMC2Dyplusv(morton2D, 1);
+*/
 					}
 
-					mortonX = ulMC2Dxplusv(mortonX, 1);
-				}
-			}
+#if defined(DEBUG_STATS)
+					deadEnds += !context->isDeadEnd;
+#endif
 
+					morton2D = ulMC2Dyplusv(morton2D, 1);
+				}
+
+				mortonX = ulMC2Dxplusv(mortonX, 1);
+			}
+		}
+
+	done:
 		// Sorting the indices into the full word list improves execution time a little.
 		auto& wordsFound = context->wordsFound;
 		std::sort(wordsFound.begin(), wordsFound.end());
@@ -700,7 +693,7 @@ private:
 		// Recurse, as we've got a node that might be going somewhewre.
 		// Before recursion, mark this board position as evaluated.
 		auto& visited = context.visited;
-		visited[mortonCode] = 1;
+		visited[mortonCode] = true;
 
 		// FIXME: a lot of these calculations are needless as we're moving a window, but it seems fine and we're not
 		// pushing the ALU so much that it'd warrant any branching or memory hits.
@@ -725,8 +718,7 @@ private:
 				const unsigned nbIndex = board[newMorton];
 				if (kPaddingTile != nbIndex && true == child->HasChild(nbIndex))
 				{
-					const bool skipTile = visited[newMorton];
-					if (false == skipTile)
+					if (visited[newMorton] == false)
 					{
 						// Traverse, and if we hit the wall go see if what we're left with his void.
 						auto* nbChild = child->GetChild(nbIndex);
@@ -739,9 +731,7 @@ private:
 
 						if (true == nbChild->IsVoid())
 						{
-							child->RemoveChild(nbIndex);
-
-							if (true == child->IsVoid())
+							if  (true == child->RemoveChild(nbIndex))
 							{
 								// Stop recursing.
 								break;
@@ -758,7 +748,7 @@ private:
 #endif
 
 		// Open up this position on the board again.
-		visited[mortonCode] = 0;
+		visited[mortonCode] = false;
 
 		// Was this call a hit?
 		const size_t wordIdx = child->wordIdx;
