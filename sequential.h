@@ -15,8 +15,8 @@
 //        Also a bit odd that both Windows and OSX don't implement aligned_alloc() (C++11).
 #ifdef _WIN32
 
-	inline void* AllocAligned(size_t size, size_t alignment) { return _aligned_malloc(size, alignment); }
-	inline void FreeAligned(void* address) { _aligned_free(address); }
+	__forceinline void* AllocAligned(size_t size, size_t alignment) { return _aligned_malloc(size, alignment); }
+	__forceinline void FreeAligned(void* address) { _aligned_free(address); }
 
 #else // _GNUC_, hopefully
 

@@ -699,17 +699,23 @@ private:
 		// Before recursion, mark this board position as evaluated.
 		visited[mortonCode] = true;
 
-		// FIXME: a lot of these calculations are needless as we're moving a window, but it seems fine and we're not
-		// pushing the ALU so much that it'd warrant any branching or memory hits.
 		morton_t mortonCodes[8];
+
+		// Left, Right
 		mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
 		mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
+	
+		// Lower left, Upper right
 		mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
-		mortonCodes[3] = ulMC2Dyminusv(mortonCode, 1);
+		mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
+
+		// Lower right, Upper left		
 		mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
 		mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
+
+		// Up, Down		
 		mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1);
-		mortonCodes[7] = ulMC2Dyplusv(mortonCodes[1], 1);
+		mortonCodes[7] = ulMC2Dyminusv(mortonCode, 1);
 
 		for (unsigned iN = 0; iN < 8; ++iN)
 		{
