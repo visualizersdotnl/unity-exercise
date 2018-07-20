@@ -219,12 +219,12 @@ private:
 	}
 
 public:
-	inline bool HasChildren() const { return 0 != alphaBits;}
+	inline unsigned HasChildren() const { return alphaBits; } // Non-zero: has children.
 	inline bool IsWord() const { return -1 != wordIdx;  }
 	inline bool IsVoid() const { return 0 == alphaBits && -1 == wordIdx; }
 
-	// Return value indicates if node is now a dead end.
-	inline bool RemoveChild(size_t index)
+	// Zeo return value indicates if node is now a dead end.
+	inline unsigned RemoveChild(size_t index)
 	{
 		Assert(0 != HasChild(index));
 
@@ -488,14 +488,11 @@ private:
 		{
 			// Minimal initialization, handle rest in OnThreadStart().
 			assert(nullptr != instance);
-
 			memset(visited.get(), 0, gridSize*sizeof(bool));
 
 			// FIXME: this is obviously too much for big dictionary VS. small grid or vice versa.
 			wordsFound.reserve(s_threadInfo[iThread].load); 
 		}
-
-		~ThreadContext() {}
 
 		// In-put
 		const Query* instance;
@@ -618,11 +615,11 @@ private:
 
 		if (false == subDict->IsVoid())
 		{
-			morton_t mortonX = ulMC2Dencode(0, 0);
-			for (unsigned iX = 0; iX < width; ++iX)
+			morton_t mortonY = ulMC2Dencode(0, 0);
+			for (unsigned iY = 0; iY < height; ++iY)
 			{
-				morton_t morton2D = mortonX;
-				for (unsigned iY = 0; iY < height; ++iY)
+				morton_t morton2D = mortonY;
+				for (unsigned iX = 0; iX < width; ++iX)
 				{
 #if defined(DEBUG_STATS)
 					context->isDeadEnd = 1;
@@ -647,10 +644,10 @@ private:
 #endif
 					}
 
-					morton2D = ulMC2Dyplusv(morton2D, 1);
+					morton2D = ulMC2Dxplusv(morton2D, 1);
 				}
 
-				mortonX = ulMC2Dxplusv(mortonX, 1);
+				mortonY = ulMC2Dyplusv(mortonY, 1);
 			}
 		}
 
@@ -658,6 +655,14 @@ private:
 		// Sorting the indices into the full word list improves execution time a little.
 		auto& wordsFound = context->wordsFound;
 		std::sort(wordsFound.begin(), wordsFound.end());
+
+		// Tally up the score and required buffer length.
+		for (auto wordIdx : wordsFound)
+		{
+			const size_t length = s_dictionary[wordIdx].length();
+			context->score += GetWordScore(length);
+			context->reqStrBufLen += length;
+		}
 		
 #if defined(DEBUG_STATS)
 		const float deadPct = ((float)deadEnds/query.m_gridSize)*100.f;
@@ -724,7 +729,7 @@ private:
 				const unsigned nbIndex = board[newMorton];
 				if (kPaddingTile != nbIndex && child->HasChild(nbIndex))
 				{
-					if (visited[newMorton] == false) // FIXME: expensive!
+					if (false == visited[newMorton]) // FIXME: expensive!
 					{
 						// Traverse, and if we hit the wall go see if what we're left with his void.
 						auto* nbChild = child->GetChild(nbIndex);
@@ -737,13 +742,12 @@ private:
 
 						if (true == nbChild->IsVoid())
 						{
-							if  (false == child->RemoveChild(nbIndex))
+							if (0 == child->RemoveChild(nbIndex))
 							{
 								// Stop recursing, but still check for word below.
 								break;
 							}
 						}
-
 					}
 				}
 			}
@@ -762,10 +766,6 @@ private:
 		{
 			// Found a word.
 			context.wordsFound.emplace_back(wordIdx);
-			const size_t length = s_dictionary[wordIdx].length();
-			context.score += GetWordScore(length);
-			context.reqStrBufLen += length;
-
 			child->OnWordFound(); 
 
 #if defined(DEBUG_STATS)
@@ -803,7 +803,10 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	// FIXME: this is a cheap fix, but keeping the Morton-arithmetic light during traversal is worth something.
 	const unsigned pow2Width = RoundPow2_32(width);
 	const unsigned pow2Height = RoundPow2_32(height);
-	debug_print("Rounding board dimensions to %u*%u.\n", pow2Width, pow2Height);
+	
+	if (pow2Width != width || pow2Height != height)
+		debug_print("Rounding board dimensions to %u*%u.\n", pow2Width, pow2Height);
+
 //	const unsigned xPadding = pow2Width-width;
 //	const unsigned yPadding = pow2Height-height;
 
@@ -819,11 +822,11 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 #ifdef NED_FLANDERS
 		// Sanitize that checks for illegal input and uppercases.
-		morton_t mortonX = ulMC2Dencode(0, 0);
-		for (unsigned iX = 0; iX < width; ++iX)
+		morton_t mortonY = ulMC2Dencode(0, 0);
+		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			morton_t morton2D = mortonX;
-			for (unsigned iY = 0; iY < height; ++iY)
+			morton_t morton2D = mortonY;
+			for (unsigned iX = 0; iX < width; ++iX)
 			{
 				const char letter = *board++;
 				if (0 != isalpha((unsigned char) letter))
@@ -837,27 +840,27 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 					return results;
 				}
 
-				morton2D = ulMC2Dyplusv(morton2D, 1);
+				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
 
-			mortonX = ulMC2Dxplusv(mortonX, 1);
+			mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
 #else
 		// Sanitize that just uppercases.
-		morton_t mortonX = ulMC2Dencode(0, 0);
-		for (unsigned iX = 0; iX < width; ++iX)
+		morton_t mortonY = ulMC2Dencode(0, 0);
+		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			morton_t morton2D = mortonX;
-			for (unsigned iY = 0; iY < height; ++iY)
+			morton_t morton2D = mortonY;
+			for (unsigned iX = 0; iX < width; ++iX)
 			{
 				const char letter = *board++;
 				const unsigned sanity = LetterToIndex(toupper(letter));
 				sanitized[morton2D] = sanity;
 
-				morton2D = ulMC2Dyplusv(morton2D, 1);
+				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
 
-			mortonX = ulMC2Dxplusv(mortonX, 1);
+			mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
 #endif
 
