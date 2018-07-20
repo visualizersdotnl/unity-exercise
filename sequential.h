@@ -3,6 +3,8 @@
 	Simple sequential/contiguous memory block allocator.
 	Allocate at will, then dump at once.
 	C-style, so no construction nor destruction.
+
+	FIXME: OSX/Linux!
 */
 
 #pragma once
@@ -13,12 +15,12 @@ public:
 	SeqAlloc(size_t count) :
 		m_index(0)
 	{
-		m_blocks = static_cast<T*>(malloc(count*sizeof(T)));
+		m_blocks = static_cast<T*>(_aligned_malloc(count*sizeof(T), sizeof(size_t)<<3) /* Likely cache line size */);
 	}
 
 	~SeqAlloc()
 	{
-		free(m_blocks);
+		_aligned_free(m_blocks);
 	}
 
 	inline T* New()

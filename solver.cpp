@@ -23,7 +23,7 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do (high priority):
-		- Optimize 'visited' array (use bits).
+		- Optimize 'visited' array.
 		- Sequentially allocate main dictionary copy.
 		- Smaller nodes.
 		- FIXMEs.
@@ -78,8 +78,10 @@
 #include <cassert>
 #include <algorithm>
 // #include <bitset>
+#include <chrono>
 
 #include "api.h"
+#include "random.h"
 
 // 32-bit Morton ordering routines, they're good enough for the 64-bit build too and it saves some stack.
 // Long before 32 bits become too little I'll have problems of another nature.
@@ -127,7 +129,8 @@ inline unsigned RoundPow2_32(unsigned value)
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
 #else
-	const size_t kNumThreads = std::thread::hardware_concurrency();
+	const size_t kNumCores = std::thread::hardware_concurrency();
+	const size_t kNumThreads = kNumCores*2; // FIXE: this indicates that I'm not using the cores efficiently, and that might be that damned 'visited' array.
 #endif
 
 const unsigned kAlphaRange = ('Z'-'A')+1;
@@ -169,8 +172,6 @@ public:
 		unsigned alphaBits = node->alphaBits = parent->alphaBits;
 		node->wordIdx = parent->wordIdx;
 
-		// const unsigned range = 32 - _lzcnt_u32(alphaBits);
-		// for (unsigned index = 0; index < range; ++index)
 		for (unsigned index = 0; index < kAlphaRange; ++index)
 		{
 			const unsigned bit = 1 << index;
@@ -231,7 +232,7 @@ public:
 		// No need to delete since RemoveChild() will only be called from a thread copy, and those
 		// use a custom block allocator.
 
-		return 0 == alphaBits && -1 == wordIdx;
+		return IsVoid();
 	}
 
 	inline bool HasChild(size_t index) const
@@ -255,7 +256,7 @@ public:
 
 	// Dirty as it is, I'm touching these here and there.
 	// FIXME: wrap in operation methods on object.
-	// FIXME: shove alphaBits in wordIdx.
+	// FIXME: shove alphaBits in wordIdx?
 	size_t wordIdx;
 	unsigned alphaBits;
 
@@ -337,6 +338,9 @@ inline bool IsWordValid(const std::string& word)
 	// As it turns out this simple way of dividing the load works fairly well, but it's up for review (FIXME).
 	const char firstLetter = word[0];
 	const unsigned iThread = LetterToIndex(firstLetter)%kNumThreads;
+
+	// Gives perfect distribution, but that's apparently *not* what we're looking for.
+	// const unsigned iThread = mt_randu32()%kNumThreads;
 
 	DictionaryNode* parent = s_threadDicts[iThread];
 	if (nullptr == parent)
@@ -518,14 +522,13 @@ public:
 		DictionaryLock dictLock;
 		{
 			// Kick off threads.
-			const size_t numThreads = kNumThreads;
 
 			std::vector<std::thread> threads;
-			std::vector<std::unique_ptr<ThreadContext>> contexts; // FIXME: can go into TLS?
+			std::vector<std::unique_ptr<ThreadContext>> contexts;
 
-			debug_print("Kicking off %zu threads.\n", numThreads);
+			debug_print("Kicking off %zu threads.\n", kNumThreads);
 
-			for (unsigned iThread = 0; iThread < numThreads; ++iThread)
+			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
 				contexts.emplace_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
 				threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
@@ -689,10 +692,11 @@ private:
 #endif
 
 		const size_t gridSize = context.gridSize;
+		auto* board = context.sanitized;
+		auto& visited = context.visited;
 
 		// Recurse, as we've got a node that might be going somewhewre.
 		// Before recursion, mark this board position as evaluated.
-		auto& visited = context.visited;
 		visited[mortonCode] = true;
 
 		// FIXME: a lot of these calculations are needless as we're moving a window, but it seems fine and we're not
@@ -714,11 +718,10 @@ private:
 			{
 				// It's significantly faster to see if this position on the board is worth traversing than to
 				// touch the 'visited' (FIXME) array, so we'll do that last.
-				auto* board = context.sanitized;
 				const unsigned nbIndex = board[newMorton];
 				if (kPaddingTile != nbIndex && true == child->HasChild(nbIndex))
 				{
-					if (visited[newMorton] == false)
+					if (visited[newMorton] == false) // FIXME: expensive!
 					{
 						// Traverse, and if we hit the wall go see if what we're left with his void.
 						auto* nbChild = child->GetChild(nbIndex);
@@ -750,7 +753,7 @@ private:
 		// Open up this position on the board again.
 		visited[mortonCode] = false;
 
-		// Was this call a hit?
+		// Profiling indicates that moving this less likely case to the bottom reduces execution time.
 		const size_t wordIdx = child->wordIdx;
 		if (-1 != wordIdx)
 		{
