@@ -680,12 +680,12 @@ private:
 		return kLUT[length-3];
 	}
 
-	#pragma inline_recursion(on)
+	// #pragma inline_recursion(on)
 
 #if defined(DEBUG_STATS)
-	inline static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child, unsigned& depth)
+	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child, unsigned& depth)
 #else
-	inline static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child)
+	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child)
 #endif
 	{
 		Assert(nullptr != child);
@@ -696,60 +696,63 @@ private:
 		++depth;
 #endif
 
-		const size_t gridSize = context.gridSize;
-		auto* board = context.sanitized;
-
-		// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.
-		morton_t mortonCodes[8];
-
-		// Left, Right
-		mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
-		mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
-	
-		// Lower left, Upper right
-		mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
-		mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
-
-		// Lower right, Upper left		
-		mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
-		mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
-
-		// Up, Down		
-		mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1);
-		mortonCodes[7] = ulMC2Dyminusv(mortonCode, 1);
-
-		// Recurse, as we've got a node that might be going somewhewre.
 		// Before recursion, mark this board position as evaluated.
 		auto& visited = context.visited;
 		visited[mortonCode] = true;
 
-		for (int iDir = 0; iDir < 8; ++iDir)
+		if (child->HasChildren())
 		{
-			const morton_t newMorton = mortonCodes[iDir];
-			if (newMorton < gridSize)
+			const size_t gridSize = context.gridSize;
+			auto* board = context.sanitized;
+
+			// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.
+			morton_t mortonCodes[8];
+
+			// Left, Right
+			mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
+			mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
+	
+			// Lower left, Upper right
+			mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
+			mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
+
+			// Lower right, Upper left		
+			mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
+			mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
+
+			// Up, Down		
+			mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1);
+			mortonCodes[7] = ulMC2Dyminusv(mortonCode, 1);
+
+			// Recurse, as we've got a node that might be going somewhewre.
+			for (int iDir = 0; iDir < 8; ++iDir)
 			{
-				// It's significantly faster to see if this position on the board is worth traversing than to
-				// touch the 'visited' (FIXME) array, so we'll do that last.
-				const unsigned nbIndex = board[newMorton];
-				if (kPaddingTile != nbIndex && child->HasChild(nbIndex))
+				const morton_t newMorton = mortonCodes[iDir];
+				if (newMorton < gridSize)
 				{
-					if (false == visited[newMorton]) // FIXME: expensive!
+					// It's significantly faster to see if this position on the board is worth traversing than to
+					// touch the 'visited' (FIXME) array, so we'll do that last.
+					const unsigned nbIndex = board[newMorton];
+					if (kPaddingTile != nbIndex && child->HasChild(nbIndex))
 					{
-						// Traverse, and if we hit the wall go see if what we're left with his void.
-						auto* nbChild = child->GetChild(nbIndex);
-
-#if defined(DEBUG_STATS)
-						TraverseBoard(context, newMorton, nbChild, depth);
-#else
-						TraverseBoard(context, newMorton, nbChild);
-#endif
-
-						if (true == nbChild->IsVoid())
+ 						if (false == visited[newMorton]) // FIXME: expensive!
 						{
-							if (0 == child->RemoveChild(nbIndex))
+							// Traverse, and if we hit the wall go see if what we're left with his void.
+							auto* nbChild = child->GetChild(nbIndex);
+
+	#if defined(DEBUG_STATS)
+							TraverseBoard(context, newMorton, nbChild, depth);
+	#else
+							TraverseBoard(context, newMorton, nbChild);
+	#endif
+
+							if (true == nbChild->IsVoid())
 							{
-								// Stop recursing, but still check for word below.
-								break;
+								if (0 == child->RemoveChild(nbIndex))
+								{
+									// Stop recursing, but still check for word below.
+									break;
+								}
 							}
 						}
 					}
@@ -760,9 +763,6 @@ private:
 #if defined(DEBUG_STATS)
 		--depth;
 #endif
-
-		// Open up this position on the board again.
-		visited[mortonCode] = false;
 
 		// Profiling indicates that moving this less likely case to the bottom reduces execution time.
 		const size_t wordIdx = child->wordIdx;
@@ -776,9 +776,12 @@ private:
 			context.isDeadEnd = 0;
 #endif
 		}
+
+		// Open up this position on the board again.
+		visited[mortonCode] = false;
 	}
 
-	#pragma inline_recursion(off)
+	// #pragma inline_recursion(off)
 
 	Results& m_results;
 	const char* m_sanitized;

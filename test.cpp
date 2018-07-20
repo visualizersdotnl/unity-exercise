@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 3
+#define NUM_QUERIES 10
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 991000 // 1317291
 
