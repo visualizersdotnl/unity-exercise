@@ -677,6 +677,26 @@ private:
 		return kLUT[length-3];
 	}
 
+	// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.s
+	inline static void CalculateMortonCodes(morton_t curCode, morton_t* codes)
+	{
+		// Left, Right
+		codes[0] = ulMC2Dxminusv(curCode, 1);
+		codes[1] = ulMC2Dxplusv(curCode, 1);
+	
+		// Lower left, Upper right
+		codes[2] = ulMC2Dyminusv(codes[0], 1);
+		codes[3] = ulMC2Dyplusv(codes[1], 1);
+
+		// Lower right, Upper left		
+		codes[4] = ulMC2Dyminusv(codes[1], 1);
+		codes[5] = ulMC2Dyplusv(codes[0], 1);
+
+		// Up, Down		
+		codes[6] = ulMC2Dyplusv(curCode, 1);
+		codes[7] = ulMC2Dyminusv(curCode, 1);
+	}
+
 #if defined(DEBUG_STATS)
 	inline static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* child, unsigned& depth)
 #else
@@ -700,26 +720,11 @@ private:
 		visited[mortonCode] = true;
 
 		morton_t mortonCodes[8];
+		CalculateMortonCodes(mortonCode, mortonCodes);
 
-		// Left, Right
-		mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
-		mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
-	
-		// Lower left, Upper right
-		mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
-		mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
-
-		// Lower right, Upper left		
-		mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
-		mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
-
-		// Up, Down		
-		mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1);
-		mortonCodes[7] = ulMC2Dyminusv(mortonCode, 1);
-
-		for (unsigned iN = 0; iN < 8; ++iN)
+		for (int iDir = 0; iDir < 8; ++iDir)
 		{
-			const morton_t newMorton = mortonCodes[iN];
+			const morton_t newMorton = mortonCodes[iDir];
 			if (newMorton < gridSize)
 			{
 				// It's significantly faster to see if this position on the board is worth traversing than to
