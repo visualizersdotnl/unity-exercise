@@ -156,7 +156,7 @@ inline unsigned LetterToIndex(char letter)
 
 class DictionaryNode
 {
-	friend static void AddWordToDictionary(const std::string& word);
+	friend void AddWordToDictionary(const std::string& word);
 	friend void FreeDictionary();
 
 public:
@@ -319,7 +319,7 @@ inline bool IsWordValid(const std::string& word)
 }
 
 // Input word must be uppercase!
-static void AddWordToDictionary(const std::string& word)
+/* static */ void AddWordToDictionary(const std::string& word)
 {
 	// Word of any use given the Boggle rules?	
 	if (false == IsWordValid(word))
