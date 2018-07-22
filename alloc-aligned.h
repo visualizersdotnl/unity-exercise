@@ -13,7 +13,7 @@ void  CRT_FreeAligned(void* address);
 	void* CRT_AllocAligned(size_t size, size_t alignment) { return _aligned_malloc(size, alignment); }
 	void CRT_FreeAligned(void* address) {  _aligned_free(address); }
 
-#else if defined(__GNUC__)
+#elif defined(__GNUC__)
 
 	void* CRT_AllocAligned(size_t size, size_t alignment) 
 	{ 
