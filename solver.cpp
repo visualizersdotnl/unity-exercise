@@ -148,9 +148,12 @@ inline unsigned LetterToIndex(char letter)
 	return letter - 'A';
 }
 
+// FWD.
+static void AddWordToDictionary(const std::string& word);
+
 class DictionaryNode
 {
-	friend static void AddWordToDictionary(const std::string& word);
+	friend void AddWordToDictionary(const std::string& word);
 
 public:
 
