@@ -67,9 +67,6 @@
     <ClCompile Include="..\test.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\solver_fast_but_messy.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\tlsf\README.md" />

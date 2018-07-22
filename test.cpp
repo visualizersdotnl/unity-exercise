@@ -6,7 +6,7 @@
 
 #define NUM_QUERIES 1
 
-#define WIN32_CRT_BREAK_ALLOC -1 // 991000 // 1317291
+#define WIN32_CRT_BREAK_ALLOC 497 // 991000 // 1317291
 
 #include <stdlib.h>
 #include <stdio.h>
