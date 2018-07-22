@@ -25,11 +25,13 @@
 	To do (high priority):
 		- Rename child, nbChild et cetera to parent and child.
 		- Profile and optimize:
+		  - Finish up new node, remove as much pain as possible.
 		  - Optimize 'visited' array.
 		  - Integrate TLSF allocator?
 		  - Smaller nodes?
 		- Check for leaks.
 		- FIXMEs.
+		- When this works nicely, delete the messy implementation. Let's call a spade a spade, you lousy drunk.
 
 	To do (low priority):
 		- Check compile & run status on Linux.
@@ -65,17 +67,16 @@
 
 #include <memory>
 #include <vector>
+#include <set>
 #include <string>
 #include <iostream>
-// #include <map>
-#include <unordered_map>
 #include <mutex>
 #include <thread>
 // #include <atomic>
 #include <array>
 #include <cassert>
 #include <algorithm>
-
+	
 #include "api.h"
 #include "random.h"
 
@@ -156,7 +157,11 @@ class DictionaryNode
 
 public:
 
-	DictionaryNode() : wordIdx(-1), indexBits(0) {}
+	DictionaryNode() : 
+		m_wordIdx(-1)
+,		m_indexBits(0) 
+	{
+	}
 
 private:
 	// Only called from LoadDictionary().	
@@ -165,16 +170,19 @@ private:
 		const unsigned index = LetterToIndex(letter);
 
 		const unsigned bit = 1 << index;
-		indexBits |= bit;
+		if (m_indexBits & bit)
+			return m_children[index];
 
-		return &children[index];
+		m_indexBits |= bit;
+		return m_children[index] = new DictionaryNode();
 	}
 
 public:
+	// FIXME: get it to work by introducing deep copy (or test if it works first).
 	// FIXME: eliminate comparisons by returning non-zero.
 
-	inline bool HasChildren() const { return 0 != indexBits; }
-	inline bool IsWord()      const { return -1 != wordIdx;  }
+	inline bool HasChildren() const { return 0 != m_indexBits; }
+	inline bool IsWord()      const { return -1 != m_wordIdx;  }
 	inline bool IsVoid()      const { return false == IsWord() && false == HasChildren(); }
 
 	// Returns true if node is now a dead end.
@@ -182,12 +190,10 @@ public:
 	{
 		Assert(nullptr != GetChild(index));
 
-		children.erase(index);
-
 		const unsigned bit = 1 << index;
-		indexBits ^= bit;
+		m_indexBits ^= bit;
 
-		return 0 == indexBits;
+		return 0 == m_indexBits;
 
 	}
 
@@ -195,27 +201,30 @@ public:
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
-		return 0 != (indexBits & bit);
+		return 0 != (m_indexBits & bit);
 	}
 
 	inline DictionaryNode* GetChild(unsigned index)
 	{
 		Assert(true == HasChild(index));
-		return &children[index];
+		return m_children[index];
+	}
+
+	inline size_t GetWordIndex() const
+	{
+		return m_wordIdx;
 	}
 
 	inline void OnWordFound()
 	{
 		Assert(true == IsWord());
-		wordIdx = -1;
+		m_wordIdx = -1;
 	}
 
-	// FIXME: wrap?
-	size_t wordIdx;
-
 private:
-	unsigned indexBits;
-	std::unordered_map<unsigned, DictionaryNode> children;
+	size_t m_wordIdx;
+	unsigned m_indexBits;
+	std::array<DictionaryNode*, kAlphaRange> m_children;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
@@ -317,7 +326,7 @@ static void AddWordToDictionary(const std::string& word)
 
 	// Store.
 	s_dictionary.emplace_back(word);
-	node->wordIdx = s_wordCount;
+	node->m_wordIdx = s_wordCount;
 
 	++s_threadInfo[iThread].load;
 	++s_wordCount;
@@ -539,7 +548,10 @@ private:
 		const unsigned iThread = context->iThread;
 
 		// Pull a copy.
-		DictionaryNode subDict = s_threadDicts[iThread];
+//		DictionaryNode subDict = s_threadDicts[iThread];
+
+		// FIXME: only works for a single iteration ;)
+		DictionaryNode& subDict = s_threadDicts[iThread];
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -620,11 +632,10 @@ private:
 		Assert(nullptr != child);
 
 		// Profiling indicates that moving this less likely case to the bottom reduces execution time.
-		const size_t wordIdx = child->wordIdx;
-		if (-1 != wordIdx)
+		if (true == child->IsWord())
 		{
 			// Found a word.
-			context.wordsFound.emplace_back(wordIdx);
+			context.wordsFound.emplace_back(child->GetWordIndex());
 			child->OnWordFound(); 
 
 #if defined(DEBUG_STATS)
@@ -678,9 +689,10 @@ private:
 			const unsigned nbIndex = board[newMorton];
 			if (kPaddingTile != nbIndex && true == child->HasChild(nbIndex))
 			{
-				auto* nbChild = child->GetChild(nbIndex);
 				if (false == visited[newMorton])
 				{
+					auto* nbChild = child->GetChild(nbIndex);
+
 #if defined(DEBUG_STATS)
 					TraverseBoard(context, newMorton, nbChild, depth);
 #else
