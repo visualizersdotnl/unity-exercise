@@ -4,7 +4,7 @@
 	Allocate at will, then dump at once.
 	C-style, so no construction nor destruction.
 
-	FIXME: OSX/Linux!
+	FIXME: probably doesn't have a place after rewrite.
 */
 
 #pragma once

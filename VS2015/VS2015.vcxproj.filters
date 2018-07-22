@@ -47,9 +47,7 @@
     <Text Include="..\dictionary.txt">
       <Filter>Dictionaries</Filter>
     </Text>
-    <Text Include="..\README.TXT">
-      <Filter>tlsf</Filter>
-    </Text>
+    <Text Include="..\README.TXT" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\solver.cpp">
@@ -69,6 +67,8 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\tlsf\README.md" />
+    <None Include="..\tlsf\README.md">
+      <Filter>tlsf</Filter>
+    </None>
   </ItemGroup>
 </Project>

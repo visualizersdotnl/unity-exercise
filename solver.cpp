@@ -23,10 +23,8 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do (high priority):
-		- Nodes do not release allocated memory: this is normal because you're trying to delete by looking at modified index bits!
-		  It wasn't like this in the messy implementation since the original roots were untouched and the others used a different type of allocator.
-		- Allocate out of different pool for each thread (using TLSF) allocator (may very well fix the above).
 		- Profile and optimize:
+		  - Use TLSF allocator.
 		  - Optimize 'visited' array.
 		  - Smaller nodes.
 		- Check for leaks.
@@ -164,13 +162,16 @@ public:
 
 	~DictionaryNode()
 	{
-		for (unsigned index = 0; index < kAlphaRange; ++index)
+		unsigned index = 0;
+		while (m_indexBits)
 		{
-			const unsigned bit = 1 << index;
-			if (m_indexBits & bit)
+			if (m_indexBits & 1)
 			{
 				delete m_children[index];
 			}
+
+			++index;
+			m_indexBits >>= 1;
 		}
 	}
 
@@ -192,34 +193,35 @@ private:
 	}
 
 public:
-	// FIXME: eliminate comparisons by returning non-zero?
-	//        Compiler is or should be smart enough to see through it.
-	inline bool HasChildren() const { return 0 != m_indexBits; }
-	inline bool IsWord()      const { return -1 != m_wordIdx;  }
-	inline bool IsVoid()      const { return false == IsWord() && false == HasChildren(); }
+	inline unsigned HasChildren() const { return m_indexBits; } // Non-zero.
+	inline bool IsWord() const { return -1 != m_wordIdx;  }
+	inline bool IsVoid() const { return false == IsWord() && !HasChildren(); }
 
-	// Returns true if node is now a dead end.
-	inline bool RemoveChild(unsigned index)
+	// Returns zero if node is now a dead end.
+	inline unsigned RemoveChild(unsigned index)
 	{
-		Assert(nullptr != GetChild(index));
+		DictionaryNode* child = GetChild(index);
+		Assert(nullptr != child);
+		delete child;
 
 		const unsigned bit = 1 << index;
 		m_indexBits &= ~bit;
 
-		return 0 == m_indexBits;
+		return m_indexBits;
 
 	}
 
-	inline bool HasChild(unsigned index)
+	// Returns non-zero if true.
+	inline unsigned HasChild(unsigned index)
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
-		return 0 != (m_indexBits & bit);
+		return m_indexBits & bit;
 	}
 
 	inline DictionaryNode* GetChild(unsigned index)
 	{
-		Assert(true == HasChild(index));
+		Assert(HasChild(index));
 		return m_children[index];
 	}
 
@@ -597,7 +599,7 @@ private:
 #endif
 
 				const unsigned index = query.m_sanitized[morton2D];
-				if (true == root->HasChild(index))
+				if (root->HasChild(index))
 				{
 					DictionaryNode* child = root->GetChild(index);
 #if defined(DEBUG_STATS)
@@ -664,7 +666,7 @@ private:
 		}
 
 		// Early out?
-		if (false == node->HasChildren())
+		if (!node->HasChildren())
 			return;
 
 #if defined(DEBUG_STATS)
@@ -707,7 +709,7 @@ private:
 				continue;
 
 			const unsigned nbIndex = board[newMorton];
-			if (kPaddingTile != nbIndex && true == node->HasChild(nbIndex))
+			if (kPaddingTile != nbIndex && node->HasChild(nbIndex))
 			{
 				if (false == visited[newMorton])
 				{
@@ -721,7 +723,7 @@ private:
 					// Child exhausted?
 					if (true == child->IsVoid())
 					{
-						if (true == node->RemoveChild(nbIndex))
+						if (!node->RemoveChild(nbIndex))
 						{
 							// Dead end: stop recursing.
 							break;
