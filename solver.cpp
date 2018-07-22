@@ -122,7 +122,7 @@ inline unsigned RoundPow2_32(unsigned value)
 	constexpr size_t kNumThreads = 1;
 #else
 	const unsigned kNumCores = std::thread::hardware_concurrency();
-	const unsigned kNumThreads = kNumCores;
+	const unsigned kNumThreads = kNumCores<<1; // FIXME: this speeds things up on my Intel I7, I have to investigate the exact cause.
 #endif
 
 const unsigned kAlphaRange = ('Z'-'A')+1;
@@ -161,8 +161,10 @@ public:
 
 	DictionaryNode() : 
 		m_wordIdx(-1)
-,		m_indexBits(0) 
+,		m_indexBits(0)
 	{
+		// FIXME: remove when working variables are separated
+		m_children.fill(nullptr);
 	}
 
 	static DictionaryNode* DeepCopy(DictionaryNode* parent)
@@ -186,20 +188,25 @@ public:
 		return node;
 	}
 
+/*
 	~DictionaryNode()
 	{
 		unsigned index = 0;
 		while (m_indexBits)
 		{
 			if (m_indexBits & 1)
-			{
 				delete m_children[index];
-//				m_children[index] = nullptr;
-			}
 
 			m_indexBits >>= 1;
 			++index;
 		}
+	}
+*/
+
+	~DictionaryNode()
+	{
+		for (auto* child : m_children)
+			delete child;
 	}
 
 private:
@@ -227,15 +234,9 @@ public:
 	// Returns zero if node is now a dead end.
 	inline unsigned RemoveChild(unsigned index)
 	{
-		DictionaryNode* child = GetChild(index);
-		Assert(nullptr != child);
-		delete child;
-
 		const unsigned bit = 1 << index;
 		m_indexBits &= ~bit;
-
 		return m_indexBits;
-
 	}
 
 	// Returns non-zero if true.
@@ -603,8 +604,7 @@ private:
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
-		DictionaryNode* root = s_dictRoots[iThread];
-		// root = DictionaryNode::DeepCopy(root);
+		std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -663,8 +663,6 @@ private:
 		const float deadPct = ((float)deadEnds/query.m_gridSize)*100.f;
 		debug_print("Thread %u has max. traversal depth %u (longest %u), %u dead ends (%.2f percent).\n", iThread, context->maxDepth, s_longestWord, deadEnds, deadPct);
 #endif
-
-//		delete root;
 	}
 
 private:
@@ -739,15 +737,20 @@ private:
 				continue;
 
 			const unsigned nbIndex = board[newMorton];
-			if (kPaddingTile != nbIndex && node->HasChild(nbIndex))
+			if (kPaddingTile == nbIndex)
+				continue;
+			
+			if (node->HasChild(nbIndex))
 			{
 				auto* child = node->GetChild(nbIndex);
+				
 				if (false == visited[newMorton])
 				{
 #if defined(DEBUG_STATS)
 					TraverseBoard(context, newMorton, child, depth);
 #else
 					TraverseBoard(context, newMorton, child);
+					
 #endif
 					// Child exhausted?
 					if (true == child->IsVoid())
@@ -807,8 +810,8 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	if (pow2Width != width || pow2Height != height)
 		debug_print("Rounding board dimensions to %u*%u.\n", pow2Width, pow2Height);
 
-//	const unsigned xPadding = pow2Width-width;
-//	const unsigned yPadding = pow2Height-height;
+	const unsigned xPadding = pow2Width-width;
+	const unsigned yPadding = pow2Height-height;
 
 	// Board parameters check out?
 	if (nullptr != board && !(0 == width || 0 == height))
@@ -818,7 +821,8 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 		// FIXME: easy way to set all padding tiles, won't notice it with boards that are large, but it'd be at least
 		//        better to do this with a write-combined memset().
-		memset(sanitized, kPaddingTile, gridSize*sizeof(char));
+		if (0 != xPadding || 0 != yPadding)
+			memset(sanitized, kPaddingTile, gridSize*sizeof(char));
 
 #ifdef NED_FLANDERS
 		// Sanitize that checks for illegal input and uppercases.
