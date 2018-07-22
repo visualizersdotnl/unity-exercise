@@ -150,7 +150,7 @@ inline unsigned LetterToIndex(char letter)
 
 class DictionaryNode
 {
-	friend void AddWordToDictionary(const std::string& word);
+	friend static void AddWordToDictionary(const std::string& word);
 
 public:
 

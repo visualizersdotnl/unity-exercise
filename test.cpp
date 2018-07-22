@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 3 /* For some reason, 3 seems to be the sweet spot. */
+#define NUM_QUERIES 4 /* For some reason, 3 seems to be the sweet spot. */
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -27,7 +27,8 @@ int main(int argC, char **arguments)
 	
 #if defined(_DEBUG) && defined(_WIN32)
 	// Dump leak report at any possible exit.
-	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | 
+	_CRTDBG_LEAK_CHECK_DF);
 	
 	// Report all to debug pane.
 	_CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_DEBUG);
