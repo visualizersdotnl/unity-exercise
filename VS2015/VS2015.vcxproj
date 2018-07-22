@@ -165,8 +165,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\alloc-aligned.h" />
     <ClInclude Include="..\api.h" />
-    <ClInclude Include="..\sequential.h" />
     <ClInclude Include="..\MZC2D32.h" />
     <ClInclude Include="..\MZC2D64.h" />
     <ClInclude Include="..\random.h" />

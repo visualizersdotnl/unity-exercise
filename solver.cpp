@@ -24,10 +24,10 @@
 
 	To do (high priority):
 		- Profile and optimize:
-		  - Use TLSF allocator.
+		  - Global TLSF instance?
 		  - Optimize 'visited' array.
 		  - Smaller nodes.
-		- Check for leaks.
+		- Always check for leaks.
 		- FIXMEs.
 
 	To do (low priority):
@@ -76,6 +76,7 @@
 	
 #include "api.h"
 #include "random.h"
+#include "alloc-aligned.h"
 
 // 32-bit Morton ordering routines, they're good enough for the 64-bit build too and it saves some stack.
 // Long before 32 bits become too little I'll have problems of another nature.
@@ -154,6 +155,7 @@ static void AddWordToDictionary(const std::string& word);
 class DictionaryNode
 {
 	friend void AddWordToDictionary(const std::string& word);
+	friend void FreeDictionary();
 
 public:
 
@@ -161,6 +163,27 @@ public:
 		m_wordIdx(-1)
 ,		m_indexBits(0) 
 	{
+	}
+
+	static DictionaryNode* DeepCopy(DictionaryNode* parent)
+	{
+		DictionaryNode* node = new DictionaryNode();
+		node->m_wordIdx = parent->m_wordIdx;
+		unsigned indexBits = node->m_indexBits = parent->m_indexBits;
+
+		unsigned index = 0;
+		while (indexBits)
+		{
+			if (indexBits & 1)
+			{
+				node->m_children[index] = DeepCopy(parent->GetChild(index));
+			}
+
+			indexBits >>= 1;
+			++index;
+		}
+
+		return node;
 	}
 
 	~DictionaryNode()
@@ -171,15 +194,16 @@ public:
 			if (m_indexBits & 1)
 			{
 				delete m_children[index];
+//				m_children[index] = nullptr;
 			}
 
-			++index;
 			m_indexBits >>= 1;
+			++index;
 		}
 	}
 
 private:
-	// Only called from LoadDictionary().	
+	// Only called from LoadDictionary().
 	DictionaryNode* AddChild(char letter)
 	{
 		const unsigned index = LetterToIndex(letter);
@@ -458,27 +482,30 @@ private:
 		instance(instance)
 ,		iThread(iThread)
 ,		gridSize(instance->m_gridSize)
-,		visited(new bool[gridSize])
+,		visited(static_cast<bool*>(CRT_AllocAligned(gridSize*sizeof(bool), 16)))
 ,		sanitized(instance->m_sanitized)
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
 			assert(nullptr != instance);
 
-			memset(visited.get(), 0, gridSize*sizeof(bool));
-
-			// FIXME: this is obviously too much for big dictionary VS. small grid or vice versa.
-			wordsFound.reserve(s_threadInfo[iThread].load); 
+			memset(visited, 0, gridSize*sizeof(bool));
+			wordsFound.reserve(s_threadInfo[iThread].load); // FIXME: this is obviously too much for big dictionary VS. small grid or vice versa.
 		}
 
-		// In-put
+		~ThreadContext()
+		{
+			CRT_FreeAligned(visited);
+		}
+
+		// In-put (FIXME)
 		const Query* instance;
 		const unsigned iThread;
 		const size_t gridSize;
-		std::unique_ptr<bool[]> visited; // FIXME: optimize.
+		bool* visited; // FIXME: optimize.
 		const char* sanitized;
 
-		// Out-put
+		// Out-put (FIXME)
 		std::vector<size_t> wordsFound;
 		unsigned score;
 		size_t reqStrBufLen;
@@ -576,10 +603,8 @@ private:
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 
-		// FIXME: pull a copy!
 		DictionaryNode* root = s_dictRoots[iThread];
-		if (true == root->IsVoid())
-			return;
+		// root = DictionaryNode::DeepCopy(root);
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -638,6 +663,8 @@ private:
 		const float deadPct = ((float)deadEnds/query.m_gridSize)*100.f;
 		debug_print("Thread %u has max. traversal depth %u (longest %u), %u dead ends (%.2f percent).\n", iThread, context->maxDepth, s_longestWord, deadEnds, deadPct);
 #endif
+
+//		delete root;
 	}
 
 private:
@@ -714,10 +741,9 @@ private:
 			const unsigned nbIndex = board[newMorton];
 			if (kPaddingTile != nbIndex && node->HasChild(nbIndex))
 			{
+				auto* child = node->GetChild(nbIndex);
 				if (false == visited[newMorton])
 				{
-					auto* child = node->GetChild(nbIndex);
-
 #if defined(DEBUG_STATS)
 					TraverseBoard(context, newMorton, child, depth);
 #else
@@ -762,12 +788,16 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		warned = true;
 	}
 #endif
+
 	
 	Results results;
 	results.Words = nullptr;
 	results.Count = 0;
 	results.Score = 0;
 	results.UserData = nullptr; // Didn't need it in this implementation.
+
+//	const size_t mainPoolSize = 1024; /* FIXME */
+//	tlsf_t allocator = tlsf_create_with_pool();
 
 	// FIXME: check if board fits in 32 bits.
 	// FIXME: this is a cheap fix, but keeping the Morton-arithmetic light during traversal is worth something.
@@ -784,11 +814,11 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
 		const unsigned gridSize = pow2Width*pow2Height;
-		std::unique_ptr<char[]> sanitized(new char[gridSize]);
+		char* sanitized = static_cast<char*>(CRT_AllocAligned(gridSize*sizeof(char), 16));
 
 		// FIXME: easy way to set all padding tiles, won't notice it with boards that are large, but it'd be at least
 		//        better to do this with a write-combined memset().
-		memset(sanitized.get(), kPaddingTile, gridSize*sizeof(char));
+		memset(sanitized, kPaddingTile, gridSize*sizeof(char));
 
 #ifdef NED_FLANDERS
 		// Sanitize that checks for illegal input and uppercases.
@@ -834,8 +864,10 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		}
 #endif
 
-		Query query(results, sanitized.get(), pow2Width, pow2Height);
+		Query query(results, sanitized, pow2Width, pow2Height);
 		query.Execute();
+
+		CRT_FreeAligned(sanitized);
 	}
 
 	return results;
