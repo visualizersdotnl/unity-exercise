@@ -18,7 +18,7 @@ void  freeAligned(void* address);
 
 #elif defined(__GNUC__)
 
-	void* mallocAligned(size_t size, align) 
+	void* mallocAligned(size_t size, size_t align) 
 	{ 
 		void* address;
 		posix_memalign(&address, align, size);

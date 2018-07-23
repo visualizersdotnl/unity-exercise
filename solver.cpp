@@ -40,7 +40,8 @@
 	Or it at the very least hardly helps.
 
 	Notes:
-		- ** Currently only tested on Windows 10, VS2017 **
+		- ** Currently only tested on Windows 10, VS2017 + OSX **
+		- It's currently faster on a proper multi-core CPU than the Core M, probably due to those allocator locks.
 		- Compile with full optimization (-O3 for ex.) for best performance.
 		  Disabling C++ exceptions helps too, as they hinder inlining and are not used.
 		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
@@ -140,7 +141,7 @@ class TLSF
 public:
 	TLSF()
 	{
-		const size_t kTLSFPoolSize = 1024*1024*10000; /* 10GB */
+		const size_t kTLSFPoolSize = 1024*1024*1000; /* 10GB */
 		m_pool = mallocAligned(kTLSFPoolSize, 4096);
 		m_instance = tlsf_create_with_pool(m_pool, kTLSFPoolSize);
 	}
