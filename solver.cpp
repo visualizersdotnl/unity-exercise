@@ -95,6 +95,7 @@ typedef uint32_t morton_t;
 // #define DEBUG_STATS
 
 // Undef. to enable all the work I put in to please a, as it turns out, very forgiving test harness.
+// But basically the only gaurantee here is that this works with my own test!
 // #define NED_FLANDERS
 
 // Undef. to use only 1 thread.
@@ -702,7 +703,7 @@ private:
 		Assert(nullptr != node);
 
 		// Early out?
-		if (node->HasChildren())
+		// if (node->HasChildren())
 		{ 
 #if defined(DEBUG_STATS)
 			Assert(depth < s_longestWord);
@@ -717,17 +718,17 @@ private:
 			mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
 			mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
 	
-			// Lower left, Upper right
+			// Upper left, Lower right
 			mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
 			mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
 
-			// Lower right, Upper left		
+			// Upper right, Lower left		
 			mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
 			mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
 
 			// Up, Down		
-			mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1);
-			mortonCodes[7] = ulMC2Dyminusv(mortonCode, 1);
+			mortonCodes[6] = ulMC2Dyminusv(mortonCode, 1);
+			mortonCodes[7] = ulMC2Dyplusv(mortonCode, 1);
 
 			// Recurse, as we've got a node that might be going somewhewre.
 
@@ -735,13 +736,12 @@ private:
 			auto* visited = context.visited;
 			const size_t gridSize = context.gridSize;
 
-			for (int iDir = 0; iDir < 8; ++iDir)
+			for (unsigned iDir = 0; iDir < 8; ++iDir)
 			{
 				const morton_t newMorton = mortonCodes[iDir];
 				if (newMorton >= gridSize)
 					continue;
 
-				// FIXME: can use either as a mask to eliminate 1 comparison!
 				unsigned nbIndex = board[newMorton];
 				if (!node->HasChild(nbIndex))
 					continue;
@@ -753,6 +753,7 @@ private:
 				visited[newMorton] = true;
 
 				auto* child = node->GetChild(nbIndex);
+
 #if defined(DEBUG_STATS)
 				TraverseBoard(context, newMorton, child, depth);
 #else
@@ -767,7 +768,7 @@ private:
 				{
 					if (!node->RemoveChild(nbIndex))
 					{
-						// Dead end: stop recursing.
+						// Dead end: stop recursing, but might still contain a word.
 						break;
 					}
 				}
@@ -864,7 +865,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
 #else
-		// Sanitize that just uppercases.
+		// Sanitize that just reorders and expects uppercase.
 		morton_t mortonY = ulMC2Dencode(0, 0);
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
@@ -872,7 +873,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
 				const char letter = *board++;
-				const unsigned sanity = LetterToIndex(toupper(letter));
+				const unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
 				sanitized[morton2D] = sanity;
 
 				morton2D = ulMC2Dxplusv(morton2D, 1);
