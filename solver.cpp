@@ -251,7 +251,7 @@ public:
 	// Returns non-zero if true.
 	inline unsigned HasChild(unsigned index)
 	{
-		Assert(index < kAlphaRange);
+		Assert(index < kAlphaRange || index == kPaddingTile /* Saves checking for it since it'll just resuld in zilch. */);
 		const unsigned bit = 1 << index;
 		return m_indexBits & bit;
 	}
@@ -490,33 +490,31 @@ private:
 		instance(instance)
 ,		iThread(iThread)
 ,		gridSize(instance->m_gridSize)
-,		sanitized(instance->m_sanitized) // (sanitized(static_cast<char*>(mallocAligned(gridSize*sizeof(char))))
+,		sanitized(instance->m_sanitized)
 ,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool))))
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
 			assert(nullptr != instance);
 
-			// memcpy(sanitized, instance->m_sanitized, gridSize*sizeof(char));
 			memset(visited, 0, gridSize*sizeof(bool));
 
-			wordsFound.reserve(s_threadInfo[iThread].load); // FIXME: this is obviously too much for big dictionary VS. small grid or vice versa.
+			wordsFound.reserve(s_threadInfo[iThread].load); // FIXME: if the grid size is small this is obviously too much, but in the "worst" case we won't re-allocate.
 		}
 
 		~ThreadContext()
 		{
-//			freeAligned(sanitized);
 			freeAligned(visited);
 		}
 
-		// In-put (FIXME)
+		// Input/Temp
 		const Query* instance;
 		const unsigned iThread;
 		const size_t gridSize;
 		const char* sanitized;
 		bool* visited;
 
-		// Out-put (FIXME)
+		// Output
 		std::vector<size_t> wordsFound;
 		unsigned score;
 		size_t reqStrBufLen;
@@ -641,7 +639,7 @@ private:
 				const unsigned index = sanitized[morton2D];
 
 				// FIXME: can use either as a mask to eliminate 1 comparison!
-				if (index != kPaddingTile && root->HasChild(index))
+				if (root->HasChild(index))
 				{
 					// Flag tile as visited.
 					visited[morton2D] = true;
@@ -698,7 +696,7 @@ private:
 #if defined(DEBUG_STATS)
 	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node, unsigned& depth)
 #else
-	static inline void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node)
+	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node)
 #endif
 	{
 		Assert(nullptr != node);
@@ -745,7 +743,7 @@ private:
 
 				// FIXME: can use either as a mask to eliminate 1 comparison!
 				unsigned nbIndex = board[newMorton];
-				if (nbIndex == kPaddingTile || !node->HasChild(nbIndex))
+				if (!node->HasChild(nbIndex))
 					continue;
 
 				if (true == visited[newMorton])
