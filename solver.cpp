@@ -24,9 +24,9 @@
 
 	To do (high priority):
 		- Profile and optimize:
-		  - Global TLSF instance?
 		  - Different 'visited' strategy.
 		  - Smaller nodes.
+		  - Dumb route: dump entire heap on exit, never free.
 		- Always check for leaks.
 		- FIXMEs.
 
@@ -127,6 +127,57 @@ typedef uint64_t morton_t;
 	inline void debug_print(const char* format, ...) {}
 #endif
 
+//
+// Very simple thread-safe TLSF wrapper.
+// Only use *after* static initialization.
+// For testing purposes.
+//
+
+#include "tlsf/tlsf.h"
+
+class TLSF
+{
+public:
+	TLSF()
+	{
+		const size_t kTLSFPoolSize = 1024*1024*10000; /* 10GB */
+		m_pool = mallocAligned(kTLSFPoolSize, 4096);
+		m_instance = tlsf_create_with_pool(m_pool, kTLSFPoolSize);
+	}
+
+	~TLSF()
+	{
+		tlsf_destroy(m_instance);
+		freeAligned(m_pool);
+	}
+
+	inline void* Allocate(size_t size, size_t align = sizeof(size_t)<<3)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		void *address = tlsf_memalign(m_instance, align, size);
+		return address;
+	}
+
+	inline void Free(void* address)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		tlsf_free(m_instance, address);
+	}
+
+	inline tlsf_t Get() { return m_instance; }
+
+private: 
+	void* m_pool;
+	tlsf_t m_instance;
+
+	std::mutex m_mutex;
+};
+
+static TLSF s_TLSF;
+
+//
+//
+
 inline unsigned RoundPow2_32(unsigned value)
 {
 	--value;
@@ -178,7 +229,18 @@ class DictionaryNode
 	friend void FreeDictionary();
 
 public:
+	void* operator new(size_t size)
+	{
+		return s_TLSF.Allocate(size);
+	}
 
+	void operator delete(void* address)
+	{
+		return s_TLSF.Free(address);
+	}
+
+
+public:
 	DictionaryNode() : 
 		m_wordIdx(-1)
 ,		m_indexBits(0)
@@ -503,7 +565,8 @@ private:
 ,		iThread(iThread)
 ,		gridSize(instance->m_gridSize)
 ,		sanitized(instance->m_sanitized)
-,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool))))
+,		visited(static_cast<bool*>(s_TLSF.Allocate(gridSize*sizeof(bool), 4096)))
+//,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool))))
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
@@ -516,7 +579,8 @@ private:
 
 		~ThreadContext()
 		{
-			freeAligned(visited);
+			s_TLSF.Free(visited);
+//			freeAligned(visited);
 		}
 
 		// Input/Temp
@@ -749,30 +813,30 @@ private:
 
 			for (unsigned iDir = 0; iDir < 8; ++iDir)
 			{
-				const morton_t newMorton = mortonCodes[iDir];
-				if (newMorton >= gridSize)
+				const morton_t nbMorton = mortonCodes[iDir];
+				if (nbMorton >= gridSize)
 					continue;
 
-				unsigned nbIndex = board[newMorton];
+				const unsigned nbIndex = board[nbMorton];
 				if (!node->HasChild(nbIndex))
 					continue;
 
-				if (true == visited[newMorton])
+				if (true == visited[nbMorton])
 					continue;
 
 				// Flag new tile as visited.
-				visited[newMorton] = true;
+				visited[nbMorton] = true;
 
 				auto* child = node->GetChild(nbIndex);
 
 #if defined(DEBUG_STATS)
-				TraverseBoard(context, newMorton, child, depth);
+				TraverseBoard(context, nbMorton, child, depth);
 #else
-				TraverseBoard(context, newMorton, child);
+				TraverseBoard(context, nbMorton, child);
 #endif
 
 				// Remove visit flag;
-				visited[newMorton] = false;
+				visited[nbMorton] = false;
 
 				// Child node exhausted?
 				if (true == child->IsVoid())
@@ -845,7 +909,8 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
 		const unsigned gridSize = pow2Width*pow2Height;
-		char* sanitized = static_cast<char*>(mallocAligned(gridSize*sizeof(char)));
+//		char* sanitized = static_cast<char*>(mallocAligned(gridSize*sizeof(char)));
+		char* sanitized = static_cast<char*>(s_TLSF.Allocate(gridSize*sizeof(char), 4096));
 
 		// FIXME: easy way to set all padding tiles, won't notice it with boards that are large, but it'd be at least
 		//        better to do this with a write-combined memset().
@@ -899,7 +964,8 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		Query query(results, sanitized, pow2Width, pow2Height);
 		query.Execute();
 
-		freeAligned(sanitized);
+//		freeAligned(sanitized);
+		s_TLSF.Free(sanitized);
 	}
 
 	return results;

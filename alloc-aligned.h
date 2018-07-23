@@ -8,20 +8,20 @@
 
 #include <stdlib.h>
 
-void* mallocAligned(size_t size);
+void* mallocAligned(size_t size, size_t align = sizeof(size_t)<<3);
 void  freeAligned(void* address);
 
 #ifdef _WIN32
 
-	void* mallocAligned(size_t size) { return _aligned_malloc(size, sizeof(size_t)<<3); }
+	void* mallocAligned(size_t size, size_t align) { return _aligned_malloc(size, align); }
 	void  freeAligned(void* address) {  _aligned_free(address); }
 
 #elif defined(__GNUC__)
 
-	void* mallocAligned(size_t size) 
+	void* mallocAligned(size_t size, align) 
 	{ 
 		void* address;
-		posix_memalign(&address, sizeof(size_t)<<3, size);
+		posix_memalign(&address, align, size);
 		return address;
 	}
 
