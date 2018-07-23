@@ -91,6 +91,17 @@
 #include "MZC2D32.h"
 typedef uint32_t morton_t;
 
+
+/*
+#include "MZC2D64.h"
+typedef uint64_t morton_t;
+#define ulMC2Dencode ullMC2Dencode
+#define ulMC2Dxplusv ullMC2Dxplusv
+#define ulMC2Dyplusv ullMC2Dyplusv
+#define ulMC2Dxminusv ullMC2Dxminusv
+#define ulMC2Dyminusv ullMC2Dyminusv
+*/
+
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
 
@@ -131,13 +142,13 @@ inline unsigned RoundPow2_32(unsigned value)
 	constexpr size_t kNumThreads = 1;
 #else
 	const unsigned kNumCores = std::thread::hardware_concurrency();
-	const unsigned kNumThreads = kNumCores<<1; // FIXME: this speeds things up on my Intel I7, I have to investigate the exact cause.
+	const unsigned kNumThreads = kNumCores*2; // FIXME: this speeds things up on my Intel I7, I have to investigate the exact cause.
 #endif
 
 const unsigned kAlphaRange  = ('Z'-'A')+1;
 const unsigned kPaddingTile = 0xff;
 
-// FIXME: describe
+// Number of words and number of nodes (1 for root) per thread.
 class ThreadInfo
 {
 public:
@@ -766,11 +777,13 @@ private:
 				// Child node exhausted?
 				if (true == child->IsVoid())
 				{
-					if (!node->RemoveChild(nbIndex))
-					{
-						// Dead end: stop recursing, but might still contain a word.
-						break;
-					}
+					node->RemoveChild(nbIndex);
+
+//					if (!node->RemoveChild(nbIndex))
+//					{
+//						// Dead end: stop recursing, but might still contain a word.
+//						break;
+//					}
 				}
 			}
 		}
