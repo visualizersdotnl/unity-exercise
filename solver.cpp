@@ -26,8 +26,8 @@
 		- Profile and optimize:
 		  - Different 'visited' strategy.
 		  - Smaller nodes.
-		  - Dumb route: dump entire heap on exit, never free.
-		- Always check for leaks.
+		  - Bigger free()-granularity.
+		- Always check for leaks (Windows debug build does it automatically).
 		- FIXMEs.
 
 	To do (low priority):
@@ -141,7 +141,7 @@ class TLSF
 public:
 	TLSF()
 	{
-		const size_t kTLSFPoolSize = 1024*1024*1000; /* 10GB */
+		const size_t kTLSFPoolSize = 0xffffffff; /* 4GB */
 		m_pool = mallocAligned(kTLSFPoolSize, 4096);
 		m_instance = tlsf_create_with_pool(m_pool, kTLSFPoolSize);
 	}
@@ -176,9 +176,6 @@ private:
 
 static TLSF s_TLSF;
 
-//
-//
-
 inline unsigned RoundPow2_32(unsigned value)
 {
 	--value;
@@ -189,6 +186,10 @@ inline unsigned RoundPow2_32(unsigned value)
 	value |= value >> 16;
 	return value+1;
 }
+
+// Thank you Bit Twiddling Hacks.
+inline unsigned IsNotZero(unsigned value) { return ((value | (~value + 1)) >> 31) & 1; }
+inline unsigned IsZero(unsigned value)    { return 1 + (value >> 31) - (-value >> 31); }
 
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
@@ -778,8 +779,15 @@ private:
 	{
 		Assert(nullptr != node);
 
-		// Early out?
+		// Branching is slower than just going for it.
 		// if (node->HasChildren())
+
+		// So we use this as the recursion loop counter below instead, which again...
+		// const unsigned count = IsNotZero(node->HasChildren()) << 3;
+
+		// Is slower than just not accessing the node at all.
+		constexpr unsigned count = 8;
+
 		{ 
 #if defined(DEBUG_STATS)
 			Assert(depth < s_longestWord);
@@ -812,7 +820,7 @@ private:
 			auto* visited = context.visited;
 			const size_t gridSize = context.gridSize;
 
-			for (unsigned iDir = 0; iDir < 8; ++iDir)
+			for (unsigned iDir = 0; iDir < count; ++iDir)
 			{
 				const morton_t nbMorton = mortonCodes[iDir];
 				if (nbMorton >= gridSize)
@@ -842,13 +850,8 @@ private:
 				// Child node exhausted?
 				if (true == child->IsVoid())
 				{
-					node->RemoveChild(nbIndex);
-
-//					if (!node->RemoveChild(nbIndex))
-//					{
-//						// Dead end: stop recursing, but might still contain a word.
-//						break;
-//					}
+					const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
+					iDir += isZero<<3; // Break out of loop without extra branch.
 				}
 			}
 		}
