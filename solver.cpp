@@ -63,12 +63,11 @@
 #include <string.h>
 
 #include <memory>
-#include <vector>
-#include <set>
 #include <string>
 #include <iostream>
 #include <mutex>
 #include <thread>
+// #include <atomic>
 
 // #include <unordered_map>
 // #include <unordered_set>
@@ -76,11 +75,12 @@
 // #include <list>
 // #include <set>
 // #include <stack>
-
-// #include <atomic>
+#include <unordered_set>
+#include <vector>
 #include <array>
-#include <cassert>
 #include <algorithm>
+
+#include <cassert>
 	
 #include "api.h"
 #include "random.h"
@@ -133,10 +133,8 @@ inline unsigned RoundPow2_32(unsigned value)
 	const unsigned kNumThreads = kNumCores<<1; // FIXME: this speeds things up on my Intel I7, I have to investigate the exact cause.
 #endif
 
-const unsigned kAlphaRange = ('Z'-'A')+1;
-const unsigned kPaddingBit = 1<<7;
-const unsigned kVisitBit   = 1<<6;
-const unsigned kIndexMask  = ~(kPaddingBit|kVisitBit);
+const unsigned kAlphaRange  = ('Z'-'A')+1;
+const unsigned kPaddingTile = 0xff;
 
 // FIXME: describe
 class ThreadInfo
@@ -484,7 +482,7 @@ public:
 	~Query() {}
 
 private:
-	// FIXME: slim this down.
+	// FIXME: slim this down, fix notation.
 	class ThreadContext
 	{
 	public:
@@ -492,26 +490,31 @@ private:
 		instance(instance)
 ,		iThread(iThread)
 ,		gridSize(instance->m_gridSize)
-,		sanitized(static_cast<char*>(mallocAligned(gridSize*sizeof(char))))
+,		sanitized(instance->m_sanitized) // (sanitized(static_cast<char*>(mallocAligned(gridSize*sizeof(char))))
+,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool))))
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
 			assert(nullptr != instance);
 
-			memcpy(sanitized, instance->m_sanitized, gridSize*sizeof(char));
+			// memcpy(sanitized, instance->m_sanitized, gridSize*sizeof(char));
+			memset(visited, 0, gridSize*sizeof(bool));
+
 			wordsFound.reserve(s_threadInfo[iThread].load); // FIXME: this is obviously too much for big dictionary VS. small grid or vice versa.
 		}
 
 		~ThreadContext()
 		{
-			freeAligned(sanitized);
+//			freeAligned(sanitized);
+			freeAligned(visited);
 		}
 
 		// In-put (FIXME)
 		const Query* instance;
 		const unsigned iThread;
 		const size_t gridSize;
-		char* sanitized;
+		const char* sanitized;
+		bool* visited;
 
 		// Out-put (FIXME)
 		std::vector<size_t> wordsFound;
@@ -611,6 +614,7 @@ private:
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
 		auto* sanitized = context->sanitized;
+		auto* visited = context->visited;
 
 		std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
 			
@@ -634,9 +638,14 @@ private:
 				context->isDeadEnd = 1;
 #endif
 
-				const unsigned index = sanitized[morton2D]&kIndexMask;
-				if (root->HasChild(index))
+				const unsigned index = sanitized[morton2D];
+
+				// FIXME: can use either as a mask to eliminate 1 comparison!
+				if (index != kPaddingTile && root->HasChild(index))
 				{
+					// Flag tile as visited.
+					visited[morton2D] = true;
+
 					DictionaryNode* child = root->GetChild(index);
 #if defined(DEBUG_STATS)
 					unsigned depth = 0;
@@ -645,10 +654,15 @@ private:
 					TraverseBoard(*context, morton2D, child);
 #endif
 
+					// Remove visit flag.
+					visited[morton2D] = false;
+
 #if defined(DEBUG_STATS)
 					deadEnds += !context->isDeadEnd;
 #endif
+
 				}
+
 				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
 
@@ -684,81 +698,73 @@ private:
 #if defined(DEBUG_STATS)
 	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node, unsigned& depth)
 #else
-	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node)
+	static inline void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node)
 #endif
 	{
 		Assert(nullptr != node);
 
-		// Profiling indicates that moving this less likely case to the bottom reduces execution time.
-		if (true == node->IsWord())
-		{
-			// Found a word.
-			context.wordsFound.emplace_back(node->GetWordIndex());
-			node->OnWordFound(); 
-
-#if defined(DEBUG_STATS)
-			context.isDeadEnd = 0;
-#endif
-		}
-
 		// Early out?
-		if (!node->HasChildren())
-			return;
-
+		if (node->HasChildren())
+		{ 
 #if defined(DEBUG_STATS)
-		Assert(depth < s_longestWord);
-		context.maxDepth = std::max(context.maxDepth, depth);
-		++depth;
+			Assert(depth < s_longestWord);
+			context.maxDepth = std::max(context.maxDepth, depth);
+			++depth;
 #endif
 
-		auto* board = context.sanitized;
-		const size_t gridSize = context.gridSize;
+			// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.
+			morton_t mortonCodes[8];
 
-		// Before recursion, mark this board position as evaluated.
-		const unsigned index = board[mortonCode];
-		board[mortonCode] |= kVisitBit;
-
-		// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.
-		morton_t mortonCodes[8];
-
-		// Left, Right
-		mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
-		mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
+			// Left, Right
+			mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
+			mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
 	
-		// Lower left, Upper right
-		mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
-		mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
+			// Lower left, Upper right
+			mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
+			mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
 
-		// Lower right, Upper left		
-		mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
-		mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
+			// Lower right, Upper left		
+			mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
+			mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
 
-		// Up, Down		
-		mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1);
-		mortonCodes[7] = ulMC2Dyminusv(mortonCode, 1);
+			// Up, Down		
+			mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1);
+			mortonCodes[7] = ulMC2Dyminusv(mortonCode, 1);
 
-		// Recurse, as we've got a node that might be going somewhewre.
-		for (int iDir = 0; iDir < 8; ++iDir)
-		{
-			const morton_t newMorton = mortonCodes[iDir];
-			if (newMorton >= gridSize)
-				continue;
+			// Recurse, as we've got a node that might be going somewhewre.
 
-			unsigned nbIndex = board[newMorton];
-			if ((nbIndex & kVisitBit) || (nbIndex & kPaddingBit))
-				continue;
+			auto* board = context.sanitized;
+			auto* visited = context.visited;
+			const size_t gridSize = context.gridSize;
 
-			nbIndex &= kIndexMask;
-			if (node->HasChild(nbIndex))
+			for (int iDir = 0; iDir < 8; ++iDir)
 			{
+				const morton_t newMorton = mortonCodes[iDir];
+				if (newMorton >= gridSize)
+					continue;
+
+				// FIXME: can use either as a mask to eliminate 1 comparison!
+				unsigned nbIndex = board[newMorton];
+				if (nbIndex == kPaddingTile || !node->HasChild(nbIndex))
+					continue;
+
+				if (true == visited[newMorton])
+					continue;
+
+				// Flag new tile as visited.
+				visited[newMorton] = true;
+
 				auto* child = node->GetChild(nbIndex);
 #if defined(DEBUG_STATS)
 				TraverseBoard(context, newMorton, child, depth);
 #else
 				TraverseBoard(context, newMorton, child);
-					
 #endif
-				// Child exhausted?
+
+				// Remove visit flag;
+				visited[newMorton] = false;
+
+				// Child node exhausted?
 				if (true == child->IsVoid())
 				{
 					if (!node->RemoveChild(nbIndex))
@@ -774,8 +780,16 @@ private:
 		--depth;
 #endif
 
-		// Restore board pos.
-		board[mortonCode] = index;
+		if (true == node->IsWord())
+		{
+			// Found a word.
+			context.wordsFound.emplace_back(node->GetWordIndex());
+			node->OnWordFound(); 
+
+#if defined(DEBUG_STATS)
+			context.isDeadEnd = 0;
+#endif
+		}
 	}
 
 	Results& m_results;
@@ -824,7 +838,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		// FIXME: easy way to set all padding tiles, won't notice it with boards that are large, but it'd be at least
 		//        better to do this with a write-combined memset().
 		if (0 != xPadding || 0 != yPadding)
-			memset(sanitized, kPaddingBit, gridSize*sizeof(char));
+			memset(sanitized, kPaddingTile, gridSize*sizeof(char));
 
 #ifdef NED_FLANDERS
 		// Sanitize that checks for illegal input and uppercases.
