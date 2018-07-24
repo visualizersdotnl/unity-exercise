@@ -27,6 +27,7 @@
 		  - One index is never used (letter 'u').
 		  - Different 'visited' strategy.
 		  - Bigger free()-granularity.
+		  - Cache issues.
 		- Always check for leaks (Windows debug build does it automatically).
 		- FIXMEs.
 
@@ -85,13 +86,14 @@
 	
 #include "api.h"
 #include "random.h"
-#include "alloc-aligned.h"
+// #include "alloc-aligned.h"
+#include "bit-tricks.h"
+#include "simple-tlsf.h"
 
 // 32-bit Morton ordering routines, they're good enough for the 64-bit build too and it saves some stack.
 // Long before 32 bits become too little I'll have problems of another nature.
 #include "MZC2D32.h"
 typedef uint32_t morton_t;
-
 
 /*
 #include "MZC2D64.h"
@@ -127,75 +129,6 @@ typedef uint64_t morton_t;
 #else
 	inline void debug_print(const char* format, ...) {}
 #endif
-
-//
-// Very simple thread-safe TLSF wrapper.
-// Only use *after* static initialization.
-// For testing purposes.
-//
-
-#include "tlsf/tlsf.h"
-
-class TLSF
-{
-public:
-	TLSF()
-	{
-		const size_t kTLSFPoolSize = 0x7d000000; /* 2GB */
-		m_pool = mallocAligned(kTLSFPoolSize, 4096);
-		m_instance = tlsf_create_with_pool(m_pool, kTLSFPoolSize);
-	}
-
-	~TLSF()
-	{
-		tlsf_destroy(m_instance);
-		freeAligned(m_pool);
-	}
-
-	inline void* Allocate(size_t size, size_t align = sizeof(size_t)<<3)
-	{
-		std::lock_guard<std::mutex> lock(m_mutex);
-		void *address = tlsf_memalign(m_instance, align, size);
-		return address;
-	}
-
-	inline void Free(void* address)
-	{
-		std::lock_guard<std::mutex> lock(m_mutex);
-		tlsf_free(m_instance, address);
-	}
-
-	inline tlsf_t Get() { return m_instance; }
-
-private: 
-	void* m_pool;
-	tlsf_t m_instance;
-
-	std::mutex m_mutex;
-};
-
-static TLSF s_TLSF;
-
-#define TLSF_NEW void* operator new(size_t size) { return s_TLSF.Allocate(size); }
-#define TLSF_DELETE void operator delete(void* address) { return s_TLSF.Free(address); }
-
-//
-//
-
-inline unsigned RoundPow2_32(unsigned value)
-{
-	--value;
-	value |= value >> 1;
-	value |= value >> 2;
-	value |= value >> 4;
-	value |= value >> 8;
-	value |= value >> 16;
-	return value+1;
-}
-
-// Thank you Bit Twiddling Hacks.
-inline unsigned IsNotZero(unsigned value) { return ((value | (~value + 1)) >> 31) & 1; }
-inline unsigned IsZero(unsigned value) { return 1 + (value >> 31) - (-value >> 31); }
 
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
@@ -246,7 +179,7 @@ public:
 ,		m_indexBits(0)
 ,		m_children(new DictionaryNode*[kAlphaRange])
 	{
-		memset(m_children.get(), 0, sizeof(DictionaryNode*)*kAlphaRange);
+		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
 	static DictionaryNode* DeepCopy(DictionaryNode* parent)
@@ -269,22 +202,6 @@ public:
 
 		return node;
 	}
-	
-
-/*	FIXME: remove when working variables are separated
-	~DictionaryNode()
-	{
-		unsigned index = 0;
-		while (m_indexBits)
-		{
-			if (m_indexBits & 1)
-				delete m_children[index];
-
-			m_indexBits >>= 1;
-			++index;
-		}
-	}
-*/
 
 	~DictionaryNode()
 	{
@@ -293,6 +210,8 @@ public:
 			auto* child = m_children[iChild];
 			delete child;
 		}
+
+		delete[] m_children;
 	}
 
 private:
@@ -302,14 +221,11 @@ private:
 		const unsigned index = LetterToIndex(letter);
 
 		const unsigned bit = 1 << index;
-		if (0 == (m_indexBits & bit))
-		{
-			m_children[index] = new DictionaryNode();
-		}
+		if (m_indexBits & bit)
+			return m_children[index];
 
 		m_indexBits |= bit;
-
-		return m_children[index];
+		return m_children[index] = new DictionaryNode();
 	}
 
 public:
@@ -354,8 +270,7 @@ public:
 private:
 	size_t m_wordIdx;
 	unsigned m_indexBits;
-//	std::array<DictionaryNode*, kAlphaRange> m_children;
-	std::unique_ptr<DictionaryNode*[]> m_children;
+	DictionaryNode** m_children;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.

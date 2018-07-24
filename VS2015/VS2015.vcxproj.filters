@@ -39,6 +39,12 @@
     <ClInclude Include="..\alloc-aligned.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\bit-tricks.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\simple-tlsf.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\dictionary-bigger.txt">

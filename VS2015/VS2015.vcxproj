@@ -169,9 +169,11 @@
   <ItemGroup>
     <ClInclude Include="..\alloc-aligned.h" />
     <ClInclude Include="..\api.h" />
+    <ClInclude Include="..\bit-tricks.h" />
     <ClInclude Include="..\MZC2D32.h" />
     <ClInclude Include="..\MZC2D64.h" />
     <ClInclude Include="..\random.h" />
+    <ClInclude Include="..\simple-tlsf.h" />
     <ClInclude Include="..\tlsf\tlsf.h" />
   </ItemGroup>
   <ItemGroup>

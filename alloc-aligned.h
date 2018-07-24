@@ -8,7 +8,7 @@
 
 #include <stdlib.h>
 
-void* mallocAligned(size_t size, size_t align = sizeof(size_t)<<3);
+void* mallocAligned(size_t size, size_t align);
 void  freeAligned(void* address);
 
 #ifdef _WIN32
