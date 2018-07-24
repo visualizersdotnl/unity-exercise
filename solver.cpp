@@ -676,6 +676,7 @@ private:
 				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
 
+			// This stabilizes thread load a little.
 			std::this_thread::yield();
 
 			mortonY = ulMC2Dyplusv(mortonY, 1);
@@ -790,16 +791,16 @@ private:
 #endif
 
 		const size_t wordIdx = node->GetWordIndex();
-		if (-1 != wordIdx)
-		{
-			// Found a word.
-			context.wordsFound.emplace_back(wordIdx);
-			node->OnWordFound(); 
+		if (-1 == wordIdx)
+			return;
+
+		// Found a word.
+		context.wordsFound.emplace_back(wordIdx);
+		node->OnWordFound(); 
 
 #if defined(DEBUG_STATS)
-			context.isDeadEnd = 0;
+		context.isDeadEnd = 0;
 #endif
-		}
 	}
 
 	Results& m_results;
