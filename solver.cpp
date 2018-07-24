@@ -137,6 +137,8 @@ typedef uint64_t morton_t;
 	const unsigned kNumThreads = kNumCores*2; // FIXME: this speeds things up on my Intel I7, I have to investigate the exact cause.
 #endif
 
+const size_t kCacheLine = sizeof(size_t)<<3;
+
 const unsigned kAlphaRange  = ('Z'-'A')+1;
 const unsigned kPaddingTile = 0xff;
 
@@ -492,7 +494,7 @@ private:
 ,		iThread(iThread)
 ,		gridSize(instance->m_gridSize)
 ,		sanitized(instance->m_sanitized)
-,		visited(static_cast<bool*>(s_TLSF.Allocate(gridSize*sizeof(bool), 4096)))
+,		visited(static_cast<bool*>(s_TLSF.Allocate(gridSize*sizeof(bool), kCacheLine)))
 //,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool))))
 ,		score(0)
 ,		reqStrBufLen(0)
@@ -849,7 +851,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	{
 		const unsigned gridSize = pow2Width*pow2Height;
 //		char* sanitized = static_cast<char*>(mallocAligned(gridSize*sizeof(char)));
-		char* sanitized = static_cast<char*>(s_TLSF.Allocate(gridSize*sizeof(char), 4096));
+		char* sanitized = static_cast<char*>(s_TLSF.Allocate(gridSize*sizeof(char), kCacheLine));
 
 		// FIXME: easy way to set all padding tiles, won't notice it with boards that are large, but it'd be at least
 		//        better to do this with a write-combined memset().
@@ -864,6 +866,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			morton_t morton2D = mortonY;
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
+				// FIXME: does not check for 'u'!
 				const char letter = *board++;
 				if (0 != isalpha((unsigned char) letter))
 				{
