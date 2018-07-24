@@ -125,11 +125,13 @@
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <FloatingPointModel>Fast</FloatingPointModel>
-      <OmitFramePointers>true</OmitFramePointers>
+      <OmitFramePointers>false</OmitFramePointers>
       <ExceptionHandling>false</ExceptionHandling>
-      <StructMemberAlignment>8Bytes</StructMemberAlignment>
+      <StructMemberAlignment>Default</StructMemberAlignment>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <CallingConvention>FastCall</CallingConvention>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <FloatingPointExceptions>false</FloatingPointExceptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -153,11 +155,13 @@
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <FloatingPointModel>Fast</FloatingPointModel>
-      <OmitFramePointers>true</OmitFramePointers>
+      <OmitFramePointers>false</OmitFramePointers>
       <ExceptionHandling>false</ExceptionHandling>
-      <StructMemberAlignment>8Bytes</StructMemberAlignment>
+      <StructMemberAlignment>Default</StructMemberAlignment>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <CallingConvention>FastCall</CallingConvention>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <FloatingPointExceptions>false</FloatingPointExceptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

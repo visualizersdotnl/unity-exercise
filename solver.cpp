@@ -275,7 +275,7 @@ private:
 	DictionaryNode** m_children;
 };
 
-// We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
+// We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 
 // A root per thread.
@@ -495,7 +495,7 @@ private:
 ,		gridSize(instance->m_gridSize)
 ,		sanitized(instance->m_sanitized)
 ,		visited(static_cast<bool*>(s_TLSF.Allocate(gridSize*sizeof(bool), kCacheLine)))
-//,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool))))
+//,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool), kCacheLine)))
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
@@ -729,8 +729,6 @@ private:
 		++depth;
 #endif
 
-		// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.
-		// morton_t mortonCodes[8];
 		morton_t mortonCodes[8];
 
 		// Left, Right
@@ -760,28 +758,31 @@ private:
 			if (nbMorton < gridSize)
 			{
 				const unsigned nbIndex = board[nbMorton];
-				if (!node->HasChild(nbIndex) || true == visited[nbMorton])
-					continue;
+				if (node->HasChild(nbIndex))
+				{
+					if (true == visited[nbMorton])
+						continue;
 
-				// Flag new tile as visited.
-				visited[nbMorton] = true;
+					// Flag new tile as visited.
+					visited[nbMorton] = true;
 
-				auto* child = node->GetChild(nbIndex);
+					auto* child = node->GetChild(nbIndex);
 
 #if defined(DEBUG_STATS)
-				TraverseBoard(context, nbMorton, child, depth);
+					TraverseBoard(context, nbMorton, child, depth);
 #else
-				TraverseBoard(context, nbMorton, child);
+					TraverseBoard(context, nbMorton, child);
 #endif
 
-				// Remove visit flag;
-				visited[nbMorton] = false;
+					// Remove visit flag;
+					visited[nbMorton] = false;
 
-				// Child node exhausted?
-				if (child->IsVoid())
-				{
-					const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
-					iDir = isZero<<3; // Break out of loop without extra branch.
+					// Child node exhausted?
+					if (child->IsVoid())
+					{
+						const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
+						iDir = isZero<<3; // Break out of loop without extra branch.
+					}
 				}
 			}
 		}
@@ -846,12 +847,12 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
 		const unsigned gridSize = pow2Width*pow2Height;
-//		char* sanitized = static_cast<char*>(mallocAligned(gridSize*sizeof(char)));
+//		char* sanitized = static_cast<char*>(mallocAligned(gridSize*sizeof(char), kCacheLine));
 		char* sanitized = static_cast<char*>(s_TLSF.Allocate(gridSize*sizeof(char), kCacheLine));
 
 		// FIXME: easy way to set all padding tiles, won't notice it with boards that are large, but it'd be at least
 		//        better to do this with a write-combined memset().
-		if (0 != xPadding || 0 != yPadding)
+		if (xPadding+yPadding > 0)
 			memset(sanitized, kPaddingTile, gridSize*sizeof(char));
 
 #ifdef NED_FLANDERS

@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 8 /* For some reason, 3 seems to be the sweet spot. */
+#define NUM_QUERIES 3 /* For some reason, 3 seems to be the sweet spot. */
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 

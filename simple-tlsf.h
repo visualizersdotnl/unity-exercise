@@ -14,13 +14,15 @@
 #include "alloc-aligned.h"
 #include "bit-tricks.h"
 
+const size_t kPageSize = 4096; // Usually right ;)
+
 class TLSF
 {
 public:
 	TLSF()
 	{
 		const size_t kTLSFPoolSize = 0x7d000000; /* 2GB */
-		m_pool = mallocAligned(kTLSFPoolSize, 4096);
+		m_pool = mallocAligned(kTLSFPoolSize, kPageSize);
 		m_instance = tlsf_create_with_pool(m_pool, kTLSFPoolSize);
 	}
 
