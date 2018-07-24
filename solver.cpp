@@ -25,7 +25,6 @@
 	To do (high priority):
 		- Profile and optimize:
 		  - Different 'visited' strategy.
-		  - Smaller nodes.
 		  - Bigger free()-granularity.
 		- Always check for leaks (Windows debug build does it automatically).
 		- FIXMEs.
@@ -141,7 +140,7 @@ class TLSF
 public:
 	TLSF()
 	{
-		const size_t kTLSFPoolSize = 0xffffffff; /* 4GB */
+		const size_t kTLSFPoolSize = 0x7d000000; /* 2GB */
 		m_pool = mallocAligned(kTLSFPoolSize, 4096);
 		m_instance = tlsf_create_with_pool(m_pool, kTLSFPoolSize);
 	}
@@ -176,6 +175,12 @@ private:
 
 static TLSF s_TLSF;
 
+#define TLSF_NEW void* operator new(size_t size) { return s_TLSF.Allocate(size); }
+#define TLSF_DELETE void operator delete(void* address) { return s_TLSF.Free(address); }
+
+//
+//
+
 inline unsigned RoundPow2_32(unsigned value)
 {
 	--value;
@@ -189,7 +194,7 @@ inline unsigned RoundPow2_32(unsigned value)
 
 // Thank you Bit Twiddling Hacks.
 inline unsigned IsNotZero(unsigned value) { return ((value | (~value + 1)) >> 31) & 1; }
-inline unsigned IsZero(unsigned value)    { return 1 + (value >> 31) - (-value >> 31); }
+inline unsigned IsZero(unsigned value) { return 1 + (value >> 31) - (-value >> 31); }
 
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
@@ -208,7 +213,8 @@ public:
 	ThreadInfo() : 
 		load(0)
 ,		nodeCount(1) // Each thread has at least 1 root node.
-	{}
+	{
+	}
 
 	size_t load;
 	size_t nodeCount;
@@ -231,24 +237,15 @@ class DictionaryNode
 	friend void FreeDictionary();
 
 public:
-	void* operator new(size_t size)
-	{
-		return s_TLSF.Allocate(size);
-	}
+	TLSF_NEW
+	TLSF_DELETE
 
-	void operator delete(void* address)
-	{
-		return s_TLSF.Free(address);
-	}
-
-
-public:
 	DictionaryNode() : 
 		m_wordIdx(-1)
 ,		m_indexBits(0)
+,		m_children(new DictionaryNode*[kAlphaRange])
 	{
-		// FIXME: remove when working variables are separated
-		m_children.fill(nullptr);
+		memset(m_children.get(), 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
 	static DictionaryNode* DeepCopy(DictionaryNode* parent)
@@ -271,6 +268,7 @@ public:
 
 		return node;
 	}
+	
 
 /*	FIXME: remove when working variables are separated
 	~DictionaryNode()
@@ -289,8 +287,8 @@ public:
 
 	~DictionaryNode()
 	{
-		for (auto* child : m_children)
-			delete child;
+//		for (auto* child : m_children)
+//			delete child;
 	}
 
 private:
@@ -312,15 +310,15 @@ private:
 
 public:
 	inline unsigned HasChildren() const { return m_indexBits; } // Non-zero.
-	inline bool IsWord() const { return -1 != m_wordIdx;  }
-	inline bool IsVoid() const { return false == IsWord() && !HasChildren(); }
+	inline bool IsWord() const { return -1 != m_wordIdx; }
+	inline int IsVoid() const { return int(m_indexBits+m_wordIdx)>>31; } // Is 1 (sign bit) if zero children (0) and no word (-1).
 
 	// Returns zero if node is now a dead end.
 	inline unsigned RemoveChild(unsigned index)
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
-		m_indexBits &= ~bit;
+		m_indexBits ^= bit;
 		return m_indexBits;
 	}
 
@@ -352,7 +350,8 @@ public:
 private:
 	size_t m_wordIdx;
 	unsigned m_indexBits;
-	std::array<DictionaryNode*, kAlphaRange> m_children;
+//	std::array<DictionaryNode*, kAlphaRange> m_children;
+	std::unique_ptr<DictionaryNode*[]> m_children;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
@@ -430,9 +429,8 @@ static void AddWordToDictionary(const std::string& word)
 	const char firstLetter = word[0];
 	const unsigned iThread = LetterToIndex(firstLetter)%kNumThreads;
 
-	// Gives perfect distribution, but that's apparently *not* what we're looking for.
 	// const unsigned iThread = mt_randu32()%kNumThreads;
-
+	
 	DictionaryNode* node = s_dictRoots[iThread];
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
@@ -543,6 +541,8 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
+#include <emmintrin.h>
+
 class Query
 {
 public:
@@ -574,7 +574,13 @@ private:
 		{
 			assert(nullptr != instance);
 
-			memset(visited, 0, gridSize*sizeof(bool));
+//			memset(visited, 0, gridSize*sizeof(bool));
+
+			size_t numStreams = gridSize*sizeof(bool);
+			numStreams >>= 2;
+			int* pWrite = reinterpret_cast<int*>(visited);
+			while (numStreams--)
+				_mm_stream_si32(pWrite++, 0);
 
 			wordsFound.reserve(s_threadInfo[iThread].load); // FIXME: if the grid size is small this is obviously too much, but in the "worst" case we won't re-allocate.
 		}
@@ -692,7 +698,8 @@ private:
 		auto* sanitized = context->sanitized;
 		auto* visited = context->visited;
 
-		std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
+		// std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
+		DictionaryNode* root = s_dictRoots[iThread];
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -716,7 +723,7 @@ private:
 
 				const unsigned index = sanitized[morton2D];
 
-				// FIXME: can use either as a mask to eliminate 1 comparison!
+				// FIXME: this only works as long as the children array is initialized with null pointers.
 				if (root->HasChild(index))
 				{
 					// Flag tile as visited.
@@ -741,6 +748,8 @@ private:
 
 				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
+
+			std::this_thread::yield();
 
 			mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
@@ -788,71 +797,69 @@ private:
 		// Is slower than just not accessing the node at all.
 		constexpr unsigned count = 8;
 
-		{ 
 #if defined(DEBUG_STATS)
-			Assert(depth < s_longestWord);
-			context.maxDepth = std::max(context.maxDepth, depth);
-			++depth;
+		Assert(depth < s_longestWord);
+		context.maxDepth = std::max(context.maxDepth, depth);
+		++depth;
 #endif
 
-			// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.
-			morton_t mortonCodes[8];
+		// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.
+		morton_t mortonCodes[8];
 
-			// Left, Right
-			mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
-			mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
+		// Left, Right
+		mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
+		mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
 	
-			// Upper left, Lower right
-			mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
-			mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
+		// Upper left, Lower right
+		mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
+		mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
 
-			// Upper right, Lower left		
-			mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
-			mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
+		// Upper right, Lower left		
+		mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
+		mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
 
-			// Up, Down		
-			mortonCodes[6] = ulMC2Dyminusv(mortonCode, 1);
-			mortonCodes[7] = ulMC2Dyplusv(mortonCode, 1);
+		// Up, Down		
+		mortonCodes[6] = ulMC2Dyminusv(mortonCode, 1);
+		mortonCodes[7] = ulMC2Dyplusv(mortonCode, 1);
 
-			// Recurse, as we've got a node that might be going somewhewre.
+		// Recurse, as we've got a node that might be going somewhewre.
 
-			auto* board = context.sanitized;
-			auto* visited = context.visited;
-			const size_t gridSize = context.gridSize;
+		auto* board = context.sanitized;
+		auto* visited = context.visited;
+		const size_t gridSize = context.gridSize;
 
-			for (unsigned iDir = 0; iDir < count; ++iDir)
-			{
-				const morton_t nbMorton = mortonCodes[iDir];
-				if (nbMorton >= gridSize)
-					continue;
+		for (unsigned iDir = 0; iDir < count; ++iDir)
+		{
+			const morton_t nbMorton = mortonCodes[iDir];
+			if (nbMorton >= gridSize)
+				continue;
 
-				const unsigned nbIndex = board[nbMorton];
-				if (!node->HasChild(nbIndex))
-					continue;
+			const unsigned nbIndex = board[nbMorton];
+			if (!node->HasChild(nbIndex))
+				continue;
 
-				if (true == visited[nbMorton])
-					continue;
+			if (true == visited[nbMorton])
+				continue;
 
-				// Flag new tile as visited.
-				visited[nbMorton] = true;
+			// Flag new tile as visited.
+			visited[nbMorton] = true;
 
-				auto* child = node->GetChild(nbIndex);
+			auto* child = node->GetChild(nbIndex);
 
 #if defined(DEBUG_STATS)
-				TraverseBoard(context, nbMorton, child, depth);
+			TraverseBoard(context, nbMorton, child, depth);
 #else
-				TraverseBoard(context, nbMorton, child);
+			TraverseBoard(context, nbMorton, child);
 #endif
 
-				// Remove visit flag;
-				visited[nbMorton] = false;
+			// Remove visit flag;
+			visited[nbMorton] = false;
 
-				// Child node exhausted?
-				if (true == child->IsVoid())
-				{
-					const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
-					iDir += isZero<<3; // Break out of loop without extra branch.
-				}
+			// Child node exhausted?
+			if (child->IsVoid())
+			{
+				const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
+				iDir += isZero<<3; // Break out of loop without extra branch.
 			}
 		}
 
@@ -860,10 +867,11 @@ private:
 		--depth;
 #endif
 
-		if (true == node->IsWord())
+		const size_t wordIdx = node->GetWordIndex();
+		if (-1 != wordIdx)
 		{
 			// Found a word.
-			context.wordsFound.emplace_back(node->GetWordIndex());
+			context.wordsFound.emplace_back(wordIdx);
 			node->OnWordFound(); 
 
 #if defined(DEBUG_STATS)
@@ -891,6 +899,8 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	}
 #endif
 
+	const size_t nodeSize = sizeof(DictionaryNode);
+	debug_print("Node size: %zu\n", nodeSize);
 	
 	Results results;
 	results.Words = nullptr;
