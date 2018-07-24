@@ -650,11 +650,12 @@ private:
 
 				const unsigned index = sanitized[morton2D];
 
+				// Flag tile as visited.
+				visited[morton2D] = true;
+
 				// FIXME: this only works as long as the children array is initialized with null pointers.
 				if (root->HasChild(index))
 				{
-					// Flag tile as visited.
-					visited[morton2D] = true;
 
 					DictionaryNode* child = root->GetChild(index);
 #if defined(DEBUG_STATS)
@@ -664,14 +665,13 @@ private:
 					TraverseBoard(*context, morton2D, child);
 #endif
 
-					// Remove visit flag.
-					visited[morton2D] = false;
-
 #if defined(DEBUG_STATS)
 					deadEnds += !context->isDeadEnd;
 #endif
-
 				}
+
+				// Remove visit flag.
+				visited[morton2D] = false;
 
 				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
@@ -718,11 +718,9 @@ private:
 		// Branching is slower than just going for it.
 		// if (node->HasChildren())
 
-		// So we use this as the recursion loop counter below instead, which again...
-		// const unsigned count = IsNotZero(node->HasChildren()) << 3;
+		// So we use this as the recursion loop counter below instead.
+		const unsigned count = IsNotZero(node->HasChildren()) << 3;
 
-		// Is slower than just not accessing the node at all.
-		constexpr unsigned count = 8;
 
 #if defined(DEBUG_STATS)
 		Assert(depth < s_longestWord);
@@ -731,23 +729,23 @@ private:
 #endif
 
 		// FIXME: this can be done much smarter using a sliding window, but in the full picture it doesn't look to be worth it.
+		// morton_t mortonCodes[8];
 		morton_t mortonCodes[8];
 
 		// Left, Right
-		mortonCodes[0] = ulMC2Dxminusv(mortonCode, 1);
-		mortonCodes[1] = ulMC2Dxplusv(mortonCode, 1);
-	
-		// Upper left, Lower right
-		mortonCodes[2] = ulMC2Dyminusv(mortonCodes[0], 1);
-		mortonCodes[3] = ulMC2Dyplusv(mortonCodes[1], 1);
+		const morton_t left  = ulMC2Dxminusv(mortonCode, 1);
+		const morton_t right = ulMC2Dxplusv(mortonCode, 1);
 
-		// Upper right, Lower left		
-		mortonCodes[4] = ulMC2Dyminusv(mortonCodes[1], 1);
-		mortonCodes[5] = ulMC2Dyplusv(mortonCodes[0], 1);
+		mortonCodes[0] = left;
+		mortonCodes[1] = right;
 
-		// Up, Down		
-		mortonCodes[6] = ulMC2Dyminusv(mortonCode, 1);
-		mortonCodes[7] = ulMC2Dyplusv(mortonCode, 1);
+		mortonCodes[2] = ulMC2Dyminusv(left, 1); // UL
+		mortonCodes[3] = ulMC2Dyminusv(mortonCode, 1); // U
+		mortonCodes[4] = ulMC2Dyminusv(right, 1); // UR
+
+		mortonCodes[5] = ulMC2Dyplusv(right, 1); // LR
+		mortonCodes[6] = ulMC2Dyplusv(mortonCode, 1); // D
+		mortonCodes[7] = ulMC2Dyplusv(left, 1); // LL
 
 		// Recurse, as we've got a node that might be going somewhewre.
 
@@ -755,38 +753,35 @@ private:
 		auto* visited = context.visited;
 		const size_t gridSize = context.gridSize;
 
-		for (unsigned iDir = 0; iDir < count; ++iDir)
+		for (unsigned iDir = 0; iDir < 8; ++iDir)
 		{
 			const morton_t nbMorton = mortonCodes[iDir];
-			if (nbMorton >= gridSize)
-				continue;
+			if (nbMorton < gridSize)
+			{
+				const unsigned nbIndex = board[nbMorton];
+				if (!node->HasChild(nbIndex) || true == visited[nbMorton])
+					continue;
 
-			const unsigned nbIndex = board[nbMorton];
-			if (!node->HasChild(nbIndex))
-				continue;
+				// Flag new tile as visited.
+				visited[nbMorton] = true;
 
-			if (true == visited[nbMorton])
-				continue;
-
-			// Flag new tile as visited.
-			visited[nbMorton] = true;
-
-			auto* child = node->GetChild(nbIndex);
+				auto* child = node->GetChild(nbIndex);
 
 #if defined(DEBUG_STATS)
-			TraverseBoard(context, nbMorton, child, depth);
+				TraverseBoard(context, nbMorton, child, depth);
 #else
-			TraverseBoard(context, nbMorton, child);
+				TraverseBoard(context, nbMorton, child);
 #endif
 
-			// Remove visit flag;
-			visited[nbMorton] = false;
+				// Remove visit flag;
+				visited[nbMorton] = false;
 
-			// Child node exhausted?
-			if (child->IsVoid())
-			{
-				const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
-				iDir += isZero<<3; // Break out of loop without extra branch.
+				// Child node exhausted?
+				if (child->IsVoid())
+				{
+					const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
+					iDir = isZero<<3; // Break out of loop without extra branch.
+				}
 			}
 		}
 
