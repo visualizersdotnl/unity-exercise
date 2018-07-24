@@ -24,6 +24,7 @@
 
 	To do (high priority):
 		- Profile and optimize:
+		  - One index is never used (letter 'u').
 		  - Different 'visited' strategy.
 		  - Bigger free()-granularity.
 		- Always check for leaks (Windows debug build does it automatically).
@@ -287,8 +288,11 @@ public:
 
 	~DictionaryNode()
 	{
-//		for (auto* child : m_children)
-//			delete child;
+		for (unsigned iChild = 0; iChild < kAlphaRange; ++iChild)
+		{
+			auto* child = m_children[iChild];
+			delete child;
+		}
 	}
 
 private:
@@ -546,6 +550,9 @@ void FreeDictionary()
 class Query
 {
 public:
+	TLSF_NEW
+	TLSF_DELETE
+
 	Query(Results& results, const char* sanitized, unsigned width, unsigned height) :
 		m_results(results)
 ,		m_sanitized(sanitized)
@@ -562,6 +569,9 @@ private:
 	class ThreadContext
 	{
 	public:
+		TLSF_NEW
+		TLSF_DELETE
+
 		ThreadContext(unsigned iThread, const Query* instance) :
 		instance(instance)
 ,		iThread(iThread)
@@ -698,8 +708,8 @@ private:
 		auto* sanitized = context->sanitized;
 		auto* visited = context->visited;
 
-		// std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
-		DictionaryNode* root = s_dictRoots[iThread];
+		std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
+		// DictionaryNode* root = s_dictRoots[iThread];
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
