@@ -24,6 +24,8 @@ inline size_t RoundPow2_64(size_t value)
 	return value+1;
 }
 
+#pragma warning(disable:4146) // 'unary minus operator applied, result still unsigned' (IsZero())
+
 // Thank you Bit Twiddling Hacks.
 inline unsigned IsNotZero(unsigned value) { return ((value | (~value + 1)) >> 31) & 1; }
 inline unsigned IsZero(unsigned value) { return 1 + (value >> 31) - (-value >> 31); }

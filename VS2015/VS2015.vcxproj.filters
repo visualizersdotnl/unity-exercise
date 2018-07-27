@@ -16,7 +16,10 @@
     <Filter Include="Dictionaries">
       <UniqueIdentifier>{eadcbea8-6ec6-42ee-a6d2-de7bf3e20216}</UniqueIdentifier>
     </Filter>
-    <Filter Include="tlsf">
+    <Filter Include="allocators">
+      <UniqueIdentifier>{d22b43e9-43b8-436e-b11f-4077dfabc42b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="allocators\tlsf">
       <UniqueIdentifier>{367b98c2-379d-42f3-8dd2-c7ba96e26d59}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
@@ -34,7 +37,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\tlsf\tlsf.h">
-      <Filter>tlsf</Filter>
+      <Filter>allocators\tlsf</Filter>
     </ClInclude>
     <ClInclude Include="..\alloc-aligned.h">
       <Filter>Header Files</Filter>
@@ -66,7 +69,7 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\tlsf\tlsf.c">
-      <Filter>tlsf</Filter>
+      <Filter>allocators\tlsf</Filter>
     </ClCompile>
     <ClCompile Include="..\test.cpp">
       <Filter>Source Files</Filter>
@@ -74,7 +77,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\tlsf\README.md">
-      <Filter>tlsf</Filter>
+      <Filter>allocators\tlsf</Filter>
     </None>
   </ItemGroup>
 </Project>

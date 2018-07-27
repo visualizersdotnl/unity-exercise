@@ -173,8 +173,8 @@ class DictionaryNode
 	friend void FreeDictionary();
 
 public:
-	TLSF_NEW
-	TLSF_DELETE
+	CUSTOM_NEW
+	CUSTOM_DELETE
 
 	DictionaryNode() : 
 		m_wordIdx(-1)
@@ -467,8 +467,8 @@ void FreeDictionary()
 class Query
 {
 public:
-	TLSF_NEW
-	TLSF_DELETE
+	CUSTOM_NEW
+	CUSTOM_DELETE
 
 	Query(Results& results, const char* sanitized, unsigned width, unsigned height) :
 		m_results(results)
@@ -486,15 +486,15 @@ private:
 	class ThreadContext
 	{
 	public:
-		TLSF_NEW
-		TLSF_DELETE
+		CUSTOM_NEW
+		CUSTOM_DELETE
 
 		ThreadContext(unsigned iThread, const Query* instance) :
 		instance(instance)
 ,		iThread(iThread)
 ,		gridSize(instance->m_gridSize)
 ,		sanitized(instance->m_sanitized)
-,		visited(static_cast<bool*>(s_TLSF.Allocate(gridSize*sizeof(bool), kCacheLine)))
+,		visited(static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine)))
 //,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool), kCacheLine)))
 ,		score(0)
 ,		reqStrBufLen(0)
@@ -514,7 +514,7 @@ private:
 
 		~ThreadContext()
 		{
-			s_TLSF.Free(visited);
+			s_customAlloc.Free(visited);
 //			freeAligned(visited);
 		}
 
@@ -557,10 +557,20 @@ public:
 				contexts.emplace_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
 				threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
 			}
-
-			for (auto& thread : threads)
+			
+			size_t busy = kNumThreads;
+			while (busy)
 			{
-				thread.join();
+				for (auto& thread : threads)
+				{
+					if (thread.joinable())
+					{
+						thread.join();
+						--busy;
+					}
+
+					std::this_thread::yield();
+				}
 			}
 
 			m_results.Count  = 0;
@@ -637,7 +647,6 @@ private:
 		context->maxDepth = 0;
 		unsigned deadEnds = 0;
 #endif
-
 		morton_t mortonY = ulMC2Dencode(0, 0);
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
@@ -720,7 +729,9 @@ private:
 		// if (node->HasChildren())
 
 		// So we use this as the recursion loop counter below instead.
-		const unsigned count = IsNotZero(node->HasChildren()) << 3;
+		// const unsigned count = IsNotZero(node->HasChildren()) << 3;
+
+		constexpr unsigned count = 8;
 
 
 #if defined(DEBUG_STATS)
@@ -729,7 +740,7 @@ private:
 		++depth;
 #endif
 
-		morton_t mortonCodes[8];
+		morton_t mortonCodes[count];
 
 		// Left, Right
 		const morton_t left  = ulMC2Dxminusv(mortonCode, 1);
@@ -755,35 +766,35 @@ private:
 		for (unsigned iDir = 0; iDir < 8; ++iDir)
 		{
 			const morton_t nbMorton = mortonCodes[iDir];
-			if (nbMorton < gridSize)
-			{
-				const unsigned nbIndex = board[nbMorton];
-				if (node->HasChild(nbIndex))
-				{
-					if (true == visited[nbMorton])
-						continue;
+			if (nbMorton >= gridSize)
+				continue;
 
-					// Flag new tile as visited.
-					visited[nbMorton] = true;
+			const unsigned nbIndex = board[nbMorton];
+			if (!node->HasChild(nbIndex))
+				continue;
 
-					auto* child = node->GetChild(nbIndex);
+			if (true == visited[nbMorton])
+				continue;
+
+			// Flag new tile as visited.
+			visited[nbMorton] = true;
+
+			auto* child = node->GetChild(nbIndex);
 
 #if defined(DEBUG_STATS)
-					TraverseBoard(context, nbMorton, child, depth);
+			TraverseBoard(context, nbMorton, child, depth);
 #else
-					TraverseBoard(context, nbMorton, child);
+			TraverseBoard(context, nbMorton, child);
 #endif
 
-					// Remove visit flag;
-					visited[nbMorton] = false;
+			// Remove visit flag;
+			visited[nbMorton] = false;
 
-					// Child node exhausted?
-					if (child->IsVoid())
-					{
-						const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
-						iDir = isZero<<3; // Break out of loop without extra branch.
-					}
-				}
+				// Child node exhausted?
+			if (child->IsVoid())
+			{
+				const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
+				iDir = isZero<<3; // Break out of loop without extra branch.
 			}
 		}
 
@@ -848,7 +859,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	{
 		const unsigned gridSize = pow2Width*pow2Height;
 //		char* sanitized = static_cast<char*>(mallocAligned(gridSize*sizeof(char), kCacheLine));
-		char* sanitized = static_cast<char*>(s_TLSF.Allocate(gridSize*sizeof(char), kCacheLine));
+		char* sanitized = static_cast<char*>(s_customAlloc.Allocate(gridSize*sizeof(char), kCacheLine));
 
 		// FIXME: easy way to set all padding tiles, won't notice it with boards that are large, but it'd be at least
 		//        better to do this with a write-combined memset().
@@ -904,7 +915,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		query.Execute();
 
 //		freeAligned(sanitized);
-		s_TLSF.Free(sanitized);
+		s_customAlloc.Free(sanitized);
 	}
 
 	return results;

@@ -1,6 +1,6 @@
 
 //
-// Very simple thread-safe TLSF wrapper.
+// Simple-as-fuck thread-safe TLSF wrapper.
 // Only use *after* static initialization.
 // For testing purposes.
 //
@@ -16,20 +16,26 @@
 
 const size_t kPageSize = 4096; // Usually right ;)
 
-class TLSF
+class CustomAlloc
 {
 public:
-	TLSF()
+	CustomAlloc()
 	{
-		const size_t kTLSFPoolSize = 0x7d000000; /* 2GB */
-		m_pool = mallocAligned(kTLSFPoolSize, kPageSize);
-		m_instance = tlsf_create_with_pool(m_pool, kTLSFPoolSize);
+		const size_t kPoolSize = 0x7d000000; /* 2GB */
+		m_pool = mallocAligned(kPoolSize, kPageSize);
+		m_instance = tlsf_create_with_pool(m_pool, kPoolSize);
 	}
 
-	~TLSF()
+	~CustomAlloc()
 	{
 		tlsf_destroy(m_instance);
 		freeAligned(m_pool);
+	}
+
+	inline void* Allocate(size_t size)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return tlsf_malloc(m_instance, size);
 	}
 
 	inline void* Allocate(size_t size, size_t align)
@@ -52,7 +58,8 @@ private:
 	tlsf_t m_instance;
 
 	std::mutex m_mutex;
-} static s_TLSF;
+} static s_customAlloc;
 
-#define TLSF_NEW void* operator new(size_t size) { return s_TLSF.Allocate(size, RoundPow2_64(size)); }
-#define TLSF_DELETE void operator delete(void* address) { return s_TLSF.Free(address); }
+#define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size, RoundPow2_64(size)); }
+// #define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size); }
+#define CUSTOM_DELETE void operator delete(void* address) { return s_customAlloc.Free(address); }
