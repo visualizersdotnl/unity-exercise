@@ -1,7 +1,7 @@
 
 #pragma once
 
-inline unsigned RoundPow2_32(unsigned value)
+__inline unsigned RoundPow2_32(unsigned value)
 {
 	--value;
 	value |= value >> 1;
@@ -12,7 +12,7 @@ inline unsigned RoundPow2_32(unsigned value)
 	return value+1;
 }
 
-inline size_t RoundPow2_64(size_t value)
+__inline size_t RoundPow2_64(size_t value)
 {
 	--value;
 	value |= value >> 1;

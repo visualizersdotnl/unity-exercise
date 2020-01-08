@@ -159,7 +159,7 @@ public:
 static std::vector<ThreadInfo> s_threadInfo;
 
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
-inline unsigned LetterToIndex(char letter)
+__inline unsigned LetterToIndex(char letter)
 {
 	return letter - 'A';
 }
@@ -179,7 +179,7 @@ public:
 	DictionaryNode() : 
 		m_wordIdx(-1)
 ,		m_indexBits(0)
-,		m_children(new DictionaryNode*[kAlphaRange])
+// ,		m_children(new DictionaryNode*[kAlphaRange])
 	{
 		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
@@ -207,13 +207,14 @@ public:
 
 	~DictionaryNode()
 	{
+		// FIXME: C++11-ify
 		for (unsigned iChild = 0; iChild < kAlphaRange; ++iChild)
 		{
 			auto* child = m_children[iChild];
 			delete child;
 		}
 
-		delete[] m_children;
+		// delete[] m_children;
 	}
 
 private:
@@ -231,12 +232,12 @@ private:
 	}
 
 public:
-	inline unsigned HasChildren() const { return m_indexBits; } // Non-zero.
-	inline bool IsWord() const { return -1 != m_wordIdx; }
-	inline int IsVoid() const { return int(m_indexBits+m_wordIdx)>>31; } // Is 1 (sign bit) if zero children (0) and no word (-1).
+	__inline unsigned HasChildren() const { return m_indexBits; } // Non-zero.
+	__inline bool IsWord() const { return -1 != m_wordIdx; }
+	__inline int IsVoid() const { return int(m_indexBits+m_wordIdx)>>31; } // Is 1 (sign bit) if zero children (0) and no word (-1).
 
 	// Returns zero if node is now a dead end.
-	inline unsigned RemoveChild(unsigned index)
+	__inline unsigned RemoveChild(unsigned index)
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
@@ -245,25 +246,25 @@ public:
 	}
 
 	// Returns non-zero if true.
-	inline unsigned HasChild(unsigned index)
+	__inline unsigned HasChild(unsigned index)
 	{
-		Assert(index < kAlphaRange || index == kPaddingTile /* Saves checking for it since it'll just resuld in zilch. */);
+		Assert(index < kAlphaRange || index == kPaddingTile /* Saves checking for it since it'll just result in zilch. */);
 		const unsigned bit = 1 << index;
 		return m_indexBits & bit;
 	}
 
-	inline DictionaryNode* GetChild(unsigned index)
+	__inline DictionaryNode* GetChild(unsigned index)
 	{
 		Assert(HasChild(index));
 		return m_children[index];
 	}
 
-	inline size_t GetWordIndex() const
+	__inline size_t GetWordIndex() const
 	{
 		return m_wordIdx;
 	}
 
-	inline void OnWordFound()
+	__inline void OnWordFound()
 	{
 		Assert(true == IsWord());
 		m_wordIdx = -1;
@@ -272,7 +273,8 @@ public:
 private:
 	size_t m_wordIdx;
 	unsigned m_indexBits;
-	DictionaryNode** m_children;
+//	DictionaryNode** m_children;
+	DictionaryNode *m_children[kAlphaRange];
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -304,7 +306,7 @@ class DictionaryLock {};
 #endif // NED_FLANDERS
 
 // Tells us if a word adheres to the rules.
-inline bool IsWordValid(const std::string& word)
+static bool IsWordValid(const std::string& word)
 {
 	const size_t length = word.length();
 
@@ -635,8 +637,8 @@ private:
 		auto* sanitized = context->sanitized;
 		auto* visited = context->visited;
 
-		std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
-		// DictionaryNode* root = s_dictRoots[iThread];
+		// std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
+		DictionaryNode* root = s_dictRoots[iThread];
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;

@@ -4,7 +4,8 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 3 /* For some reason, 3 seems to be the sweet spot. */
+#define NUM_QUERIES 1 /* Only works becaue I disabled per-thread DeepCopy */
+// #define NUM_QUERIES 3 /* For some reason, 3 seems to be the sweet spot. */
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -141,6 +142,8 @@ int main(int argC, char **arguments)
 	const float time = (float) timing.count();
 	const float avgTime = time/NUM_QUERIES;
 	printf("\nSolver ran %u times for avg. %.2f MS or approx. %.2f second(s)\n", (unsigned) NUM_QUERIES, avgTime, avgTime*0.001f);
+
+	// __debugbreak();
 
 	return 0;
 }
