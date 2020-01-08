@@ -187,11 +187,9 @@ public:
 		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
+#if 0
 	static __inline DictionaryNode* DeepCopy(DictionaryNode* parent)
 	{
-//		if (nullptr == parent)
-//			return nullptr;
-
 		DictionaryNode* node = new DictionaryNode();
 		node->m_wordIdx = parent->m_wordIdx;
 		unsigned indexBits = node->m_indexBits = parent->m_indexBits;
@@ -211,15 +209,16 @@ public:
 
 		return node;
 	}
+#endif
 
 	~DictionaryNode()
 	{
 		// FIXME: C++11-ify
-		for (unsigned iChild = 0; iChild < kAlphaRange; ++iChild)
-		{
-			auto* child = m_children[iChild];
-			delete child;
-		}
+//		for (unsigned iChild = 0; iChild < kAlphaRange; ++iChild)
+//		{
+//			auto* child = m_children[iChild];
+//			delete child;
+//		}
 
 //		delete[] m_children;
 
@@ -268,17 +267,20 @@ public:
 		return m_children[index];
 	}
 
-	__inline size_t GetWordIndex() const
+	__inline size_t GetWordIndex() // const
 	{
 		// The idea here is that if a word index is not -1, it is found and thus should be eliminated directly
-		return m_wordIdx;
+		auto index = m_wordIdx;
+		m_wordIdx = -1;
+		return index;
+//		return m_wordIdx;
 	}
 
-	__inline void OnWordFound()
-	{
-		Assert(true == IsWord());
-		m_wordIdx = -1;
-	}
+//	__inline void OnWordFound()
+//	{
+//		Assert(true == IsWord());
+//		m_wordIdx = -1;
+//	}
 
 private:
 	size_t m_wordIdx;
@@ -647,8 +649,10 @@ private:
 		auto* sanitized = context->sanitized;
 		auto* visited = context->visited;
 
-		std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
-		// DictionaryNode* root = s_dictRoots[iThread];
+		// In hindsight this seems and is utterly unnecessary :-)
+		// std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
+
+		DictionaryNode* root = s_dictRoots[iThread];
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -819,7 +823,7 @@ private:
 
 		// Found a word.
 		context.wordsFound.emplace_back(wordIdx);
-		node->OnWordFound(); 
+//		node->OnWordFound(); 
 
 #if defined(DEBUG_STATS)
 		context.isDeadEnd = 0;
