@@ -243,6 +243,7 @@ public:
 
 		// Copy words to Results structure and calculate the score.
 		m_results.Count = (unsigned) m_wordsFound.size();
+		debug_print("Words found: %u", m_results.Count);
 		m_results.Words = new char*[m_results.Count];
 		m_results.Score = 0;
 		

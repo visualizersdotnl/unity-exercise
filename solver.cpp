@@ -118,7 +118,7 @@ typedef uint64_t morton_t;
 // Undef. to kill assertions.
 // #define ASSERTIONS
 
-#if defined(_DEBUG) || defined(ASSERTIONS)
+#if defined(ASSERTIONS)
 	#define Assert assert
 #else
 	inline void Assert(bool condition) {}
@@ -134,7 +134,7 @@ typedef uint64_t morton_t;
 	constexpr size_t kNumThreads = 1;
 #else
 	const unsigned kNumCores = std::thread::hardware_concurrency();
-	const unsigned kNumThreads = kNumCores*2; // FIXME: this speeds things up on my Intel I7, I have to investigate the exact cause.
+	const unsigned kNumThreads = (kNumCores*2); // Suppose this accounts for hyperthreading, works well on my I7
 #endif
 
 const size_t kCacheLine = sizeof(size_t)<<3;
@@ -148,12 +148,12 @@ class ThreadInfo
 public:
 	ThreadInfo() : 
 		load(0)
-,		nodeCount(1) // Each thread has at least 1 root node.
+//,		nodeCount(1) // Each thread has at least 1 root node.
 	{
 	}
 
 	size_t load;
-	size_t nodeCount;
+//	size_t nodeCount;
 };
 
 static std::vector<ThreadInfo> s_threadInfo;
@@ -161,12 +161,15 @@ static std::vector<ThreadInfo> s_threadInfo;
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
 __inline unsigned LetterToIndex(char letter)
 {
-	return letter - 'A';
+	letter = letter - 'A';
+	Assert('U' != letter);
+	return letter;
 }
 
 // FWD.
 static void AddWordToDictionary(const std::string& word);
 
+// FIXME: under construction (hacky) to see if my DeepCopy() idea works out
 class DictionaryNode
 {
 	friend void AddWordToDictionary(const std::string& word);
@@ -179,13 +182,16 @@ public:
 	DictionaryNode() : 
 		m_wordIdx(-1)
 ,		m_indexBits(0)
-// ,		m_children(new DictionaryNode*[kAlphaRange])
+//,		m_children(new DictionaryNode*[kAlphaRange])
 	{
 		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
-	static DictionaryNode* DeepCopy(DictionaryNode* parent)
+	static __inline DictionaryNode* DeepCopy(DictionaryNode* parent)
 	{
+//		if (nullptr == parent)
+//			return nullptr;
+
 		DictionaryNode* node = new DictionaryNode();
 		node->m_wordIdx = parent->m_wordIdx;
 		unsigned indexBits = node->m_indexBits = parent->m_indexBits;
@@ -195,7 +201,8 @@ public:
 		{
 			if (indexBits & 1)
 			{
-				node->m_children[index] = DeepCopy(parent->GetChild(index));
+				auto *child = parent->GetChild(index);
+				node->m_children[index] = DeepCopy(child);
 			}
 
 			indexBits >>= 1;
@@ -214,7 +221,9 @@ public:
 			delete child;
 		}
 
-		// delete[] m_children;
+//		delete[] m_children;
+
+		// FIXME: since I disabled freeing pointers in the custom allocator, the above is not necessary
 	}
 
 private:
@@ -232,7 +241,7 @@ private:
 	}
 
 public:
-	__inline unsigned HasChildren() const { return m_indexBits; } // Non-zero.
+	__inline bool HasChildren() const { return 0 != m_indexBits; } // Non-zero.
 	__inline bool IsWord() const { return -1 != m_wordIdx; }
 	__inline int IsVoid() const { return int(m_indexBits+m_wordIdx)>>31; } // Is 1 (sign bit) if zero children (0) and no word (-1).
 
@@ -241,8 +250,8 @@ public:
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
-		m_indexBits ^= bit;
-		return m_indexBits;
+		m_indexBits &= ~bit;
+		return 0 != m_indexBits || false == IsWord();
 	}
 
 	// Returns non-zero if true.
@@ -261,6 +270,7 @@ public:
 
 	__inline size_t GetWordIndex() const
 	{
+		// The idea here is that if a word index is not -1, it is found and thus should be eliminated directly
 		return m_wordIdx;
 	}
 
@@ -274,7 +284,7 @@ private:
 	size_t m_wordIdx;
 	unsigned m_indexBits;
 //	DictionaryNode** m_children;
-	DictionaryNode *m_children[kAlphaRange];
+	DictionaryNode* m_children[kAlphaRange];
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -362,7 +372,7 @@ static void AddWordToDictionary(const std::string& word)
 
 		// Get or create child node.
 		node = node->AddChild(letter);
-		++s_threadInfo[iThread].nodeCount;
+//		++s_threadInfo[iThread].nodeCount;
 
 		// Handle 'Qu' rule.
 		if ('Q' == letter)
@@ -637,8 +647,8 @@ private:
 		auto* sanitized = context->sanitized;
 		auto* visited = context->visited;
 
-		// std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
-		DictionaryNode* root = s_dictRoots[iThread];
+		std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
+		// DictionaryNode* root = s_dictRoots[iThread];
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -727,14 +737,13 @@ private:
 	{
 		Assert(nullptr != node);
 
-		// Branching is slower than just going for it.
-		// if (node->HasChildren())
+		// if (false == node->HasChildren())
+		//	return;
 
 		// So we use this as the recursion loop counter below instead.
 		// const unsigned count = IsNotZero(node->HasChildren()) << 3;
 
 		constexpr unsigned count = 8;
-
 
 #if defined(DEBUG_STATS)
 		Assert(depth < s_longestWord);
@@ -792,7 +801,7 @@ private:
 			// Remove visit flag;
 			visited[nbMorton] = false;
 
-				// Child node exhausted?
+			// Child node exhausted?
 			if (child->IsVoid())
 			{
 				const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
@@ -870,14 +879,15 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 #ifdef NED_FLANDERS
 		// Sanitize that checks for illegal input and uppercases.
-		morton_t mortonY = ulMC2Dencode(0, 0);
+//		morton_t mortonY = ulMC2Dencode(0, 0);
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			morton_t morton2D = mortonY;
+			morton_t morton2D = ulMC2Dencode(0, iY); // mortonY;
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
-				// FIXME: does not check for 'u'!
+				// FIXME: does not check for 'U'!
 				const char letter = *board++;
+
 				if (0 != isalpha((unsigned char) letter))
 				{
 					const unsigned sanity = LetterToIndex(toupper(letter));
@@ -892,14 +902,14 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
 
-			mortonY = ulMC2Dyplusv(mortonY, 1);
+//			mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
 #else
 		// Sanitize that just reorders and expects uppercase.
-		morton_t mortonY = ulMC2Dencode(0, 0);
+//		morton_t mortonY = ulMC2Dencode(0, 0);
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			morton_t morton2D = mortonY;
+			morton_t morton2D = ulMC2Dencode(0, iY); // mortonY;
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
 				const char letter = *board++;
@@ -909,7 +919,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
 
-			mortonY = ulMC2Dyplusv(mortonY, 1);
+			// mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
 #endif
 
