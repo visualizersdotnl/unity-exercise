@@ -4,7 +4,8 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 3
+// Be careful, the TLSF allocatr has "just" a 2GB pool, so enough (large) queries will go out of bounds
+#define NUM_QUERIES 1 /* Can only be more if DeepCopy is enabled */
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 

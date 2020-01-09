@@ -34,13 +34,13 @@ public:
 
 	__inline void* Allocate(size_t size)
 	{
-		std::lock_guard<std::mutex> lock(m_mutex);
 		return tlsf_malloc(m_instance, size);
 	}
 
 	__inline void* Allocate(size_t size, size_t align)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
+		
 		void *address = tlsf_memalign(m_instance, align, size);
 		return address;
 	}

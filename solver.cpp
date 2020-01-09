@@ -24,10 +24,10 @@
 
 	To do (high priority):
 		- Profile and optimize:
-		  - One index is never used (letter 'u').
 		  - Different 'visited' strategy.
-		  - Bigger free()-granularity.
-		  - Cache issues.
+		  - Bigger free()-granularity (sort of fixed).
+		  - Cache issues & dictionary node optimization.
+		  - Scoring seems one off with the submitted version; weird.
 		- Always check for leaks (Windows debug build does it automatically).
 		- FIXMEs.
 
@@ -130,30 +130,28 @@ typedef uint64_t morton_t;
 	inline void debug_print(const char* format, ...) {}
 #endif
 
+const size_t kCacheLine = sizeof(size_t)<<3;
+
+const unsigned kAlphaRange  = ('Z'-'A');
+const unsigned kPaddingTile = 0xff;
+
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
 #else
-	const unsigned kNumCores = std::thread::hardware_concurrency();
-	const unsigned kNumThreads = (kNumCores*2); // Suppose this accounts for hyperthreading, works well on my I7
+	const size_t kNumCores = std::thread::hardware_concurrency();
+	const size_t kNumThreads = kNumCores*2;
 #endif
 
-const size_t kCacheLine = sizeof(size_t)<<3;
-
-const unsigned kAlphaRange  = ('Z'-'A')+1;
-const unsigned kPaddingTile = 0xff;
-
-// Number of words and number of nodes (1 for root) per thread.
+// Number of words per thread
 class ThreadInfo
 {
 public:
 	ThreadInfo() : 
 		load(0)
-//,		nodeCount(1) // Each thread has at least 1 root node.
 	{
 	}
 
 	size_t load;
-//	size_t nodeCount;
 };
 
 static std::vector<ThreadInfo> s_threadInfo;
@@ -161,9 +159,8 @@ static std::vector<ThreadInfo> s_threadInfo;
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
 __inline unsigned LetterToIndex(char letter)
 {
-	letter = letter - 'A';
-	Assert('U' != letter);
-	return letter;
+	auto index = letter - 'A';
+	return index;
 }
 
 // FWD.
@@ -182,12 +179,10 @@ public:
 	DictionaryNode() : 
 		m_wordIdx(-1)
 ,		m_indexBits(0)
-//,		m_children(new DictionaryNode*[kAlphaRange])
 	{
 		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
-#if 0
 	static __inline DictionaryNode* DeepCopy(DictionaryNode* parent)
 	{
 		DictionaryNode* node = new DictionaryNode();
@@ -209,7 +204,6 @@ public:
 
 		return node;
 	}
-#endif
 
 	~DictionaryNode()
 	{
@@ -273,19 +267,12 @@ public:
 		auto index = m_wordIdx;
 		m_wordIdx = -1;
 		return index;
-//		return m_wordIdx;
 	}
 
-//	__inline void OnWordFound()
-//	{
-//		Assert(true == IsWord());
-//		m_wordIdx = -1;
-//	}
 
 private:
 	size_t m_wordIdx;
 	unsigned m_indexBits;
-//	DictionaryNode** m_children;
 	DictionaryNode* m_children[kAlphaRange];
 };
 
@@ -359,11 +346,19 @@ static void AddWordToDictionary(const std::string& word)
 		s_longestWord = length;
 	}
 
-	// As a first strategy we'll split at the root.
-	// As it turns out this simple way of dividing the load works fairly well, but it's up for review (FIXME).
-	const char firstLetter = word[0];
-	const unsigned iThread = LetterToIndex(firstLetter)%kNumThreads;
+	unsigned iThread;
+	if (word[0] == 'Q' && word[1] == 'U')
+	{
+		// A super hacky way to divide the 'Qu' cases between two threads allocated for both letters (FIXME)
+		iThread = (word.size() & 1) ? 20 : 16;
+	}
+	else
+	{
+		const char letter = word[0];
+		iThread = LetterToIndex(letter)%kNumThreads;
+	}
 
+	// This performs extremely poorly:
 	// const unsigned iThread = mt_randu32()%kNumThreads;
 	
 	DictionaryNode* node = s_dictRoots[iThread];
@@ -374,7 +369,6 @@ static void AddWordToDictionary(const std::string& word)
 
 		// Get or create child node.
 		node = node->AddChild(letter);
-//		++s_threadInfo[iThread].nodeCount;
 
 		// Handle 'Qu' rule.
 		if ('Q' == letter)
@@ -410,8 +404,7 @@ void LoadDictionary(const char* path)
 
 	DictionaryLock lock;
 	{
-		size_t iThread = kNumThreads;
-		while (iThread-- > 0)
+		for (unsigned iThread = 0; iThread < kAlphaRange; ++iThread)
 			s_dictRoots.emplace_back(new DictionaryNode());
 
 		int character;
@@ -463,7 +456,7 @@ void FreeDictionary()
 
 		s_dictRoots.clear();
 
-		// Reset thread information.		
+		// Reset thread information
 		s_threadInfo.resize(kNumThreads, ThreadInfo());
 
 		// Reset counters.
@@ -546,7 +539,6 @@ private:
 
 #if defined(DEBUG_STATS)
 		unsigned maxDepth;
-		unsigned isDeadEnd;
 #endif
 	}; 
 
@@ -564,7 +556,7 @@ public:
 			std::vector<std::thread> threads;
 			std::vector<std::unique_ptr<ThreadContext>> contexts;
 
-			debug_print("Kicking off %u threads.\n", kNumThreads);
+			debug_print("Kicking off %zu threads.\n", kNumThreads);
 
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
@@ -649,10 +641,10 @@ private:
 		auto* sanitized = context->sanitized;
 		auto* visited = context->visited;
 
-		// In hindsight this seems and is utterly unnecessary :-)
-		// std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
+		// A necessary evil to support multiple runs
+		std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
 
-		DictionaryNode* root = s_dictRoots[iThread];
+		// auto *root = s_dictRoots[iThread];
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -661,26 +653,20 @@ private:
 		debug_print("Thread %u has a load of %zu words.\n", iThread, s_threadInfo[iThread].load);
 
 		context->maxDepth = 0;
-		unsigned deadEnds = 0;
 #endif
 		morton_t mortonY = ulMC2Dencode(0, 0);
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			morton_t morton2D = mortonY;
+			morton_t morton2D = ulMC2Dencode(0, iY); // mortonY;
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
-#if defined(DEBUG_STATS)
-				context->isDeadEnd = 1;
-#endif
-
 				const unsigned index = sanitized[morton2D];
-
-				// Flag tile as visited.
-				visited[morton2D] = true;
 
 				// FIXME: this only works as long as the children array is initialized with null pointers.
 				if (root->HasChild(index))
 				{
+					// Flag tile as visited.
+					visited[morton2D] = true;
 
 					DictionaryNode* child = root->GetChild(index);
 #if defined(DEBUG_STATS)
@@ -690,21 +676,15 @@ private:
 					TraverseBoard(*context, morton2D, child);
 #endif
 
-#if defined(DEBUG_STATS)
-					deadEnds += !context->isDeadEnd;
-#endif
+					// Remove visit flag.
+					visited[morton2D] = false;
 				}
-
-				// Remove visit flag.
-				visited[morton2D] = false;
 
 				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
 
 			// This stabilizes thread load a little.
 			std::this_thread::yield();
-
-			mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
 
 		// Sorting the indices into the full word list improves execution time a little.
@@ -720,13 +700,13 @@ private:
 		}
 		
 #if defined(DEBUG_STATS)
-		const float deadPct = ((float)deadEnds/query.m_gridSize)*100.f;
-		debug_print("Thread %u has max. traversal depth %u (longest %u), %u dead ends (%.2f percent).\n", iThread, context->maxDepth, s_longestWord, deadEnds, deadPct);
+		const float ratio = 100.f*float(wordsFound.size())/s_threadInfo[iThread].load;
+		debug_print("Thread %u has max. traversal depth %u (longest %u), success rate %.2f percent.\n", iThread, context->maxDepth, s_longestWord, ratio);
 #endif
 	}
 
 private:
-	inline static unsigned GetWordScore(size_t length) /* const */
+	__inline static unsigned GetWordScore(size_t length) /* const */
 	{
 		const unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
 		if (length > 8) length = 8;
@@ -734,13 +714,14 @@ private:
 	}
 
 #if defined(DEBUG_STATS)
-	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node, unsigned& depth)
+	static bool TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node, unsigned& depth)
 #else
-	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node)
+	static bool TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node)
 #endif
 	{
 		Assert(nullptr != node);
 
+		// This branch is expensive
 		// if (false == node->HasChildren())
 		//	return;
 
@@ -819,15 +800,11 @@ private:
 
 		const size_t wordIdx = node->GetWordIndex();
 		if (-1 == wordIdx)
-			return;
+			return false;
 
-		// Found a word.
+		// Found a word!
 		context.wordsFound.emplace_back(wordIdx);
-//		node->OnWordFound(); 
-
-#if defined(DEBUG_STATS)
-		context.isDeadEnd = 0;
-#endif
+		return true;
 	}
 
 	Results& m_results;
@@ -844,7 +821,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	static bool warned = false;
 	if (false == warned)
 	{
-		printf("Built without the NED_FLANDERS define, so the safety measures are largely off.\n");
+		debug_print("Built without the NED_FLANDERS define, so the safety measures are largely off.\n");
 		warned = true;
 	}
 #endif
@@ -883,10 +860,9 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 #ifdef NED_FLANDERS
 		// Sanitize that checks for illegal input and uppercases.
-//		morton_t mortonY = ulMC2Dencode(0, 0);
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			morton_t morton2D = ulMC2Dencode(0, iY); // mortonY;
+			morton_t morton2D = ulMC2Dencode(0, iY);
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
 				// FIXME: does not check for 'U'!
@@ -905,15 +881,12 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
-
-//			mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
 #else
 		// Sanitize that just reorders and expects uppercase.
-//		morton_t mortonY = ulMC2Dencode(0, 0);
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			morton_t morton2D = ulMC2Dencode(0, iY); // mortonY;
+			morton_t morton2D = ulMC2Dencode(0, iY);
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
 				const char letter = *board++;
@@ -922,8 +895,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 				morton2D = ulMC2Dxplusv(morton2D, 1);
 			}
-
-			// mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
 #endif
 
