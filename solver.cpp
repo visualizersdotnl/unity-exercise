@@ -24,8 +24,7 @@
 
 	To do (high priority):
 		- Profile and optimize:
-		  - Different 'visited' strategy.
-		  - Bigger free()-granularity (sort of fixed).
+		  - Bigger free()-granularity (sort of fixed); done now by letting the custom allocator handle it.
 		  - Cache issues & dictionary node optimization.
 		  - Scoring seems one off with the submitted version; weird.
 		- Always check for leaks (Windows debug build does it automatically).
@@ -132,14 +131,15 @@ typedef uint64_t morton_t;
 
 const size_t kCacheLine = sizeof(size_t)<<3;
 
-const unsigned kAlphaRange  = ('Z'-'A');
-const unsigned kPaddingTile = 0xff;
+const unsigned kAlphaRange  = ('Z'-'A')+1;
+const unsigned kPaddingTile = (1<<7);
+const unsigned kVisitedTile = (1<<6);
 
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
 #else
 	const size_t kNumCores = std::thread::hardware_concurrency();
-	const size_t kNumThreads = kNumCores*2;
+	const size_t kNumThreads = std::max<size_t>(kAlphaRange, kNumCores*2);
 #endif
 
 // Number of words per thread
@@ -179,12 +179,15 @@ public:
 	DictionaryNode() : 
 		m_wordIdx(-1)
 ,		m_indexBits(0)
+,		m_children(new DictionaryNode*[kAlphaRange])
 	{
 		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
-	static __inline DictionaryNode* DeepCopy(DictionaryNode* parent)
+	static DictionaryNode* DeepCopy(DictionaryNode* parent)
 	{
+		Assert(nullptr != parent);
+
 		DictionaryNode* node = new DictionaryNode();
 		node->m_wordIdx = parent->m_wordIdx;
 		unsigned indexBits = node->m_indexBits = parent->m_indexBits;
@@ -216,7 +219,8 @@ public:
 
 //		delete[] m_children;
 
-		// FIXME: since I disabled freeing pointers in the custom allocator, the above is not necessary
+		// FIXME: since I disabled freeing pointers in the custom allocator, the above is not necessary,
+		//        I do however have to watch my memory usage a bit ;)
 	}
 
 private:
@@ -250,7 +254,7 @@ public:
 	// Returns non-zero if true.
 	__inline unsigned HasChild(unsigned index)
 	{
-		Assert(index < kAlphaRange || index == kPaddingTile /* Saves checking for it since it'll just result in zilch. */);
+		Assert(index < kAlphaRange || 0 != (index & kPaddingTile) /* Saves checking for it since it'll just result in zilch. */);
 		const unsigned bit = 1 << index;
 		return m_indexBits & bit;
 	}
@@ -273,7 +277,7 @@ public:
 private:
 	size_t m_wordIdx;
 	unsigned m_indexBits;
-	DictionaryNode* m_children[kAlphaRange];
+	DictionaryNode** m_children; // [kAlphaRange];
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -350,7 +354,10 @@ static void AddWordToDictionary(const std::string& word)
 	if (word[0] == 'Q' && word[1] == 'U')
 	{
 		// A super hacky way to divide the 'Qu' cases between two threads allocated for both letters (FIXME)
-		iThread = (word.size() & 1) ? 20 : 16;
+		if (kNumThreads >= 20)
+			iThread = (mt_rand32() & 1) ? 20 : 16;
+		else
+			iThread = kNumThreads-1;
 	}
 	else
 	{
@@ -465,6 +472,43 @@ void FreeDictionary()
 	}
 }
 
+// Fast-ish memcpy() for boards
+// Ripped from uhm, StackExchange? Though I wrote these myself in the past just as well
+
+#include <xmmintrin.h>
+#include <emmintrin.h>
+
+void memcpy_fast(char *dst, const  char *src, size_t size)
+{
+	__m128i c0, c1, c2, c3, c4, c5, c6, c7;
+
+		_mm_prefetch((const char*)(src), _MM_HINT_NTA);
+
+		if ((((size_t)src) & 15) == 0) {	// source aligned
+			for (; size >= 128; size -= 128) {
+				c0 = _mm_load_si128(((const __m128i*)src) + 0);
+				c1 = _mm_load_si128(((const __m128i*)src) + 1);
+				c2 = _mm_load_si128(((const __m128i*)src) + 2);
+				c3 = _mm_load_si128(((const __m128i*)src) + 3);
+				c4 = _mm_load_si128(((const __m128i*)src) + 4);
+				c5 = _mm_load_si128(((const __m128i*)src) + 5);
+				c6 = _mm_load_si128(((const __m128i*)src) + 6);
+				c7 = _mm_load_si128(((const __m128i*)src) + 7);
+				_mm_prefetch((const char*)(src + 256), _MM_HINT_NTA);
+				src += 128;
+				_mm_stream_si128((((__m128i*)dst) + 0), c0);
+				_mm_stream_si128((((__m128i*)dst) + 1), c1);
+				_mm_stream_si128((((__m128i*)dst) + 2), c2);
+				_mm_stream_si128((((__m128i*)dst) + 3), c3);
+				_mm_stream_si128((((__m128i*)dst) + 4), c4);
+				_mm_stream_si128((((__m128i*)dst) + 5), c5);
+				_mm_stream_si128((((__m128i*)dst) + 6), c6);
+				_mm_stream_si128((((__m128i*)dst) + 7), c7);
+				dst += 128;
+			}
+		}
+}
+
 // This class contains the actual solver and it's entire context, including a local copy of the dictionary.
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
@@ -500,29 +544,22 @@ private:
 		instance(instance)
 ,		iThread(iThread)
 ,		gridSize(instance->m_gridSize)
-,		sanitized(instance->m_sanitized)
-,		visited(static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine)))
-//,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool), kCacheLine)))
+,		board(static_cast<char*>(s_customAlloc.Allocate(gridSize*sizeof(char), kCacheLine)))
+,		sanitized(const_cast<char*>(instance->m_sanitized))
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
 			assert(nullptr != instance);
 
-//			memset(visited, 0, gridSize*sizeof(bool));
-
-			size_t numStreams = gridSize*sizeof(bool);
-			numStreams >>= 2;
-			int* pWrite = reinterpret_cast<int*>(visited);
-			while (numStreams--)
-				_mm_stream_si32(pWrite++, 0);
+			// FIXME: optimize
+			memcpy_fast(board, sanitized, gridSize*sizeof(char));
 
 			wordsFound.reserve(s_threadInfo[iThread].load); // FIXME: if the grid size is small this is obviously too much, but in the "worst" case we won't re-allocate.
 		}
 
 		~ThreadContext()
 		{
-			s_customAlloc.Free(visited);
-//			freeAligned(visited);
+			s_customAlloc.Free(board);
 		}
 
 		// Input/Temp
@@ -530,7 +567,7 @@ private:
 		const unsigned iThread;
 		const size_t gridSize;
 		const char* sanitized;
-		bool* visited;
+		char* board;
 
 		// Output
 		std::vector<size_t> wordsFound;
@@ -638,13 +675,11 @@ private:
 	{
 		auto& query = *context->instance;
 		const unsigned iThread = context->iThread;
-		auto* sanitized = context->sanitized;
-		auto* visited = context->visited;
+		auto* board = context->board;
 
 		// A necessary evil to support multiple runs
 		std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
-
-		// auto *root = s_dictRoots[iThread];
+//		auto *root = s_dictRoots[iThread];
 			
 		const unsigned width = query.m_width;
 		const unsigned height = query.m_height;
@@ -660,13 +695,13 @@ private:
 			morton_t morton2D = ulMC2Dencode(0, iY); // mortonY;
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
-				const unsigned index = sanitized[morton2D];
+				const unsigned index = board[morton2D];
 
 				// FIXME: this only works as long as the children array is initialized with null pointers.
 				if (root->HasChild(index))
 				{
 					// Flag tile as visited.
-					visited[morton2D] = true;
+					board[morton2D] |= kVisitedTile;
 
 					DictionaryNode* child = root->GetChild(index);
 #if defined(DEBUG_STATS)
@@ -677,7 +712,7 @@ private:
 #endif
 
 					// Remove visit flag.
-					visited[morton2D] = false;
+					board[morton2D] &= ~kVisitedTile;
 				}
 
 				morton2D = ulMC2Dxplusv(morton2D, 1);
@@ -736,7 +771,7 @@ private:
 		++depth;
 #endif
 
-		morton_t mortonCodes[count];
+		alignas(16) morton_t mortonCodes[count];
 
 		// Left, Right
 		const morton_t left  = ulMC2Dxminusv(mortonCode, 1);
@@ -755,8 +790,7 @@ private:
 
 		// Recurse, as we've got a node that might be going somewhewre.
 
-		auto* board = context.sanitized;
-		auto* visited = context.visited;
+		auto* board = context.board;
 		const size_t gridSize = context.gridSize;
 
 		for (unsigned iDir = 0; iDir < 8; ++iDir)
@@ -769,11 +803,11 @@ private:
 			if (!node->HasChild(nbIndex))
 				continue;
 
-			if (true == visited[nbMorton])
+			if (board[nbMorton] & kVisitedTile)
 				continue;
 
 			// Flag new tile as visited.
-			visited[nbMorton] = true;
+			board[nbMorton] |= kVisitedTile;
 
 			auto* child = node->GetChild(nbIndex);
 
@@ -784,7 +818,7 @@ private:
 #endif
 
 			// Remove visit flag;
-			visited[nbMorton] = false;
+			board[nbMorton] &= ~kVisitedTile;
 
 			// Child node exhausted?
 			if (child->IsVoid())
@@ -850,7 +884,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
 		const unsigned gridSize = pow2Width*pow2Height;
-//		char* sanitized = static_cast<char*>(mallocAligned(gridSize*sizeof(char), kCacheLine));
 		char* sanitized = static_cast<char*>(s_customAlloc.Allocate(gridSize*sizeof(char), kCacheLine));
 
 		// FIXME: easy way to set all padding tiles, won't notice it with boards that are large, but it'd be at least
@@ -901,7 +934,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		Query query(results, sanitized, pow2Width, pow2Height);
 		query.Execute();
 
-//		freeAligned(sanitized);
 		s_customAlloc.Free(sanitized);
 	}
 
