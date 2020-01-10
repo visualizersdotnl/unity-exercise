@@ -32,24 +32,23 @@ public:
 		freeAligned(m_pool);
 	}
 
-	__inline void* Allocate(size_t size)
+	inline void* Allocate(size_t size)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		return tlsf_malloc(m_instance, size);
 	}
 
-	__inline void* Allocate(size_t size, size_t align)
+	inline void* Allocate(size_t size, size_t align)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-		
 		void *address = tlsf_memalign(m_instance, align, size);
 		return address;
 	}
 
-	__inline void Free(void* address)
+	inline void Free(void* address)
 	{
-		// FIXME: don't free, not necessary :)
-		// std::lock_guard<std::mutex> lock(m_mutex);
-		// tlsf_free(m_instance, address);
+		std::lock_guard<std::mutex> lock(m_mutex);
+		tlsf_free(m_instance, address);
 	}
 
 	inline tlsf_t Get() { return m_instance; }
@@ -61,6 +60,6 @@ private:
 	std::mutex m_mutex;
 } static s_customAlloc;
 
-#define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size, sizeof(16)); }
+#define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size, sizeof(size_t)); } // RoundPow2_32(20 /* size of DictionaryNode in x64 */)); }
 // #define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size); }
 #define CUSTOM_DELETE void operator delete(void* address) { return s_customAlloc.Free(address); }

@@ -4,8 +4,8 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-// Be careful, the TLSF allocatr has "just" a 2GB pool, so enough (large) queries will go out of bounds
-#define NUM_QUERIES 1 /* Can only be more if DeepCopy is enabled */
+#define NUM_QUERIES 1 /* Only works becaue I disabled per-thread DeepCopy */
+// #define NUM_QUERIES 3 /* For some reason, 3 seems to be the sweet spot. */
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -28,8 +28,7 @@ int main(int argC, char **arguments)
 	
 #if defined(_DEBUG) && defined(_WIN32)
 	// Dump leak report at any possible exit.
-	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | 
-	_CRTDBG_LEAK_CHECK_DF);
+	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 	
 	// Report all to debug pane.
 	_CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_DEBUG);
@@ -98,6 +97,7 @@ int main(int argC, char **arguments)
 #endif
 
 	printf("- Loading dictionary...\n");
+//	const char *dictPath = "dictionary-short.txt";
 	const char *dictPath = "dictionary.txt";
 //	const char *dictPath = "dictionary-bigger.txt";
 	LoadDictionary(dictPath);
@@ -142,8 +142,6 @@ int main(int argC, char **arguments)
 	const float time = (float) timing.count();
 	const float avgTime = time/NUM_QUERIES;
 	printf("\nSolver ran %u times for avg. %.2f MS or approx. %.2f second(s)\n", (unsigned) NUM_QUERIES, avgTime, avgTime*0.001f);
-
-	// __debugbreak();
 
 	return 0;
 }

@@ -48,6 +48,10 @@
 		could improve performance, but for now I feel confident this is sufficient.
 
 		There's a lot of pre- and post-query copying going on I'm not too happy about.
+
+	** 10/01/2020 **
+
+	Testbed for "hat-trie" data structure.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -63,13 +67,18 @@
 #include <string>
 #include <map>
 #include <mutex>
+#include <iterator>
 
 #include "api.h"
 
-// #define debug_print printf
-inline void debug_print(const char* format, ...) {}
+#define debug_print printf
+// inline void debug_print(const char* format, ...) {}
 
 // We'll be using a word tree built out of these simple nodes.
+
+#include "../../hat-trie/include/tsl/htrie_map.h"
+#include "../../hat-trie/include/tsl/htrie_set.h"
+
 struct DictionaryNode
 {
 	bool IsWord() const
@@ -79,11 +88,18 @@ struct DictionaryNode
 
 	std::string word;
 	std::map<char, DictionaryNode> children;
+//	tsl::htrie_map<char, DictionaryNode> children;
+//	tsl::htrie_set<char> children; 
+//	tsl::htrie_map<char, int> children;
 };
 
 // We keep one dictionary at a time, but it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 static DictionaryNode s_dictTree;
+
+// Longest word & total count.
+static size_t s_longestWord;
+static size_t s_wordCount;
 
 // Scoped lock for all dictionary globals.
 class DictionaryLock
@@ -97,7 +113,7 @@ private:
 };
 
 // Input word must be lowercase!
-static void AddWordToDictionary(const std::string& word, size_t& longestWord, size_t& wordCount)
+static void AddWordToDictionary(const std::string& word)
 {
 	const size_t length = word.length();
 
@@ -108,18 +124,19 @@ static void AddWordToDictionary(const std::string& word, size_t& longestWord, si
 		return;
 	}
 
-	if (length > longestWord)
+	if (length > s_longestWord)
 	{
-		// Longest word thusfar (just a print statistic).
-		longestWord = length;
+		s_longestWord = length;
 	}
 
+#if 1 // Old method & dumb 'hat-trie' (maps).
 	DictionaryNode* current = &s_dictTree;
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
 		const char letter = *iLetter;
 		current = &current->children[letter];
+		// current = &current->children[std::to_string(letter)];
 
 		// Handle 'Qu' rule.
 		if ('q' == letter)
@@ -141,7 +158,43 @@ static void AddWordToDictionary(const std::string& word, size_t& longestWord, si
 	}
 
 	current->word = word;
-	++wordCount;
+	++s_wordCount;
+#endif
+
+#if 0 // For single 'hat-trie' map & set (slow!).
+	std::string wordQu;
+
+	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
+	{
+		const char letter = *iLetter;
+
+		// Handle 'Qu' rule.
+		if ('q' == letter)
+		{
+			auto next = iLetter+1;
+			if (next == word.end() || *next != 'u') 
+			{
+				debug_print("Skipped word due to 'Qu' rule: %s\n", word.c_str());
+
+				// This word can't be made with the boggle tiles due to the 'Qu' rule.
+				return;
+			}
+			else
+			{
+				// Write 'q', skip over 'u'.
+				wordQu.append(&letter, 1);
+				++iLetter;
+			}
+		}
+		else
+			wordQu.append(&letter, 1);
+	}
+
+//	s_dictTree.children.insert(wordQu);
+	s_dictTree.children[wordQu] = 1;
+
+	++s_wordCount;
+#endif
 }
 
 void LoadDictionary(const char* path)
@@ -163,7 +216,9 @@ void LoadDictionary(const char* path)
 
 	int character;
 	std::string word;
-	size_t longestWord = 0, wordCount = 0;
+
+	s_longestWord = 0;
+	s_wordCount = 0;
 
 	do
 	{
@@ -178,7 +233,7 @@ void LoadDictionary(const char* path)
 			// We've hit EOF or a non-alphanumeric character.
 			if (false == word.empty()) // Got a word?
 			{
-				AddWordToDictionary(word, longestWord, wordCount);
+				AddWordToDictionary(word);
 				word.clear();
 			}
 		}
@@ -186,8 +241,13 @@ void LoadDictionary(const char* path)
 	while (EOF != character);
 
 	fclose(file);
+	
+	// Tweak container
+//	s_dictTree.children.shrink_to_fit();
+//	s_dictTree.children.burst_threshold(10);
 
-	debug_print("Dictionary loaded. %zu words, longest being %zu characters.\n", wordCount, longestWord);
+
+	debug_print("Dictionary loaded. %zu words, longest being %zu characters.\n", s_wordCount, s_longestWord);
 }
 
 void FreeDictionary()
@@ -202,7 +262,7 @@ void FreeDictionary()
 // calls cause any fuzz due to globals and such.
 
 // I'm flagging tiles of my sanitized copy of the board to prevent reuse of letters in a word.
-const unsigned kTileVisitedBit = 128;
+const unsigned kTileVisitedBit = 1<<7;
 
 class Query
 {
@@ -226,30 +286,45 @@ public:
 
 		// Get a copy of the current dictionary.
 		// TraverseBoard() changes the local copy at runtime, so we need this in case of multiple Execute() calls.
-		GetLatestDictionary();
+		// GetLatestDictionary();
+		// ^ FIXME!
 
 		m_wordsFound.clear();
 
-		if (false == m_tree.children.empty())
+		// if (false == m_tree.children.empty())
 		{
 			for (unsigned iY = 0; iY < m_height; ++iY)
 			{
 				for (unsigned iX = 0; iX < m_width; ++iX)
 				{
-					TraverseBoard(iY, iX, &m_tree);
+					std::string letters;
+//					TraverseBoard(iY, iX, letters);
+//					TraverseBoard(iY, iX, &m_tree);
+					TraverseBoard(iY, iX, &s_dictTree);
 				}
 			}
 		}
 
 		// Copy words to Results structure and calculate the score.
 		m_results.Count = (unsigned) m_wordsFound.size();
-		debug_print("Words found: %u", m_results.Count);
 		m_results.Words = new char*[m_results.Count];
 		m_results.Score = 0;
 		
 		char** words = const_cast<char**>(m_results.Words); // After all I own this data.
-		for (const std::string& word:m_wordsFound)
+		for (std::string& word:m_wordsFound)
 		{
+
+#if 0 // Not needed with std::map impl.
+			// FIXME: perhaps keep a list of the *actual* full words on the side
+			auto iQ = word.find_first_of('q');
+			while (std::string::npos != iQ)
+			{
+				// We'll need to re-insert a 'u' here
+				word.insert(iQ+1, 1, 'u');
+				iQ = word.substr(iQ+1).find_first_of('q');
+			}
+#endif
+
 			// Uses full word to get the correct score.
 			m_results.Score += GetWordScore(word);
 
@@ -275,19 +350,23 @@ private:
 		return LUT[length-3];
 	}
 
-	inline void TraverseBoard(unsigned iY, unsigned iX, DictionaryNode* parent)
+	__inline void TraverseBoard(unsigned iY, unsigned iX, DictionaryNode* parent)
+//	__inline void TraverseBoard(unsigned iY, unsigned iX, const std::string& parentLetters)
 	{
 		const unsigned iBoard = iY*m_width + iX;
 
-		const char letter = m_board[iBoard];
+		char letter = m_board[iBoard];
 
 		// Using the MSB of the board to indicate if this tile has to be skipped (to avoid reuse of a letter).
 		if (letter & kTileVisitedBit)
-		{
 			return;
-		}
+		
+		// Actual letter please.
+		letter &= ~kTileVisitedBit;
 
+#if 1 // Map & 'hat-trie'-Set method(s)
 		auto iNode = parent->children.find(letter);
+//		auto iNode = parent->children.find(std::to_string(letter));
 		if (iNode == parent->children.end())
 		{
 			// This letter doesn't yield anything from this point onward.
@@ -295,6 +374,7 @@ private:
 		}
 
 		DictionaryNode* node = &iNode->second;
+//		DictionaryNode* node = &iNode.value();
 		if (node->IsWord())
 		{
 			// Found a word.
@@ -304,7 +384,29 @@ private:
 			// In this run we don't want to find this word again, so wipe it.
 			node->word.clear();
 		}
+#endif
 
+//		std::string letters = parentLetters;
+//		letters.append(&letter, 1);
+
+#if 0 // Total tree find & erase method: slow!
+		{
+//			auto iNode = s_dictTree.children.find(letters);
+//			if (s_dictTree.children.end() != iNode && s_dictTree.children[letters] == 1)
+			auto node = s_dictTree.children[letters];
+			if (1 == node)
+			{
+				m_wordsFound.push_back(letters);
+//				debug_print("Word found: %s\n", letters.c_str());
+
+//				s_dictTree.children.erase(iNode);
+				s_dictTree.children.erase(letters);
+//				s_dictTree.children[letters] = 0;
+			}
+		}
+#endif
+
+#if 1 // Map/Set method(s)
 		// Recurse if necessary (i.e. more letters to look for).
 		if (false == node->children.empty())
 		{
@@ -348,8 +450,54 @@ private:
 			// Open up this position on the board again.
 			m_board[iBoard] &= ~kTileVisitedBit;
 		}
-	}
+#endif
 
+#if 0   // Complete dict. ('hat-trie') lookup recursion
+		// Recurse if necessary (i.e. more letters to look for).
+		if (letters.length() < s_longestWord)
+		{
+			// Before recursion, mark this board position as evaluated.
+			m_board[iBoard] |= kTileVisitedBit;
+
+			const unsigned boundY = m_height-1;
+			const unsigned boundX = m_width-1;
+
+			// Left and right won't kill the cache rightaway, not on bigger boards either.
+			// But still, this needs swizzling.
+
+			if (iX > 0)
+			{
+				// Left.
+				TraverseBoard(iY, iX-1, letters);
+			}
+
+			if (iX < boundX)
+			{
+				// Right.
+				TraverseBoard(iY, iX+1, letters);
+			}
+
+			// Top row.
+			if (iY > 0) 
+			{
+				TraverseBoard(iY-1, iX, letters);
+				if (iX > 0) TraverseBoard(iY-1, iX-1, letters);
+				if (iX < boundX) TraverseBoard(iY-1, iX+1, letters);
+			}
+
+			// Bottom row.
+			if (iY < boundY)
+			{
+				TraverseBoard(iY+1, iX, letters); 
+				if (iX > 0) TraverseBoard(iY+1, iX-1, letters); 
+				if (iX < boundX) TraverseBoard(iY+1, iX+1, letters); 
+			}
+
+			// Open up this position on the board again.
+			m_board[iBoard] &= ~kTileVisitedBit;
+		}
+#endif
+	}
 
 	Results& m_results;
 	char* const m_board;
