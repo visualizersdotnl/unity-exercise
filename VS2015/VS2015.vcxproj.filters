@@ -77,6 +77,9 @@
     <ClCompile Include="..\solver_submitted.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\solver_morton.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\tlsf\README.md">
