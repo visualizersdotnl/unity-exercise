@@ -60,6 +60,6 @@ private:
 	std::mutex m_mutex;
 } static s_customAlloc;
 
-#define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size, sizeof(size_t)); } // RoundPow2_32(20 /* size of DictionaryNode in x64 */)); }
+#define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size, sizeof(16)); }
 // #define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size); }
 #define CUSTOM_DELETE void operator delete(void* address) { return s_customAlloc.Free(address); }

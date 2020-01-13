@@ -236,16 +236,20 @@ public:
 		return m_children[index];
 	}
 
-	__inline size_t GetWordIndex() const
+	__inline size_t GetWordIndex() /*  const */
 	{
-		return m_wordIdx;
+		const auto index = m_wordIdx;
+		m_wordIdx = -1;
+		return index;
 	}
 
+	/*
 	__inline void OnWordFound()
 	{
 		Assert(true == IsWord());
 		m_wordIdx = -1;
 	}
+	*/
 
 private:
 	size_t m_wordIdx;
@@ -620,12 +624,11 @@ private:
 	}
 
 #if defined(DEBUG_STATS)
-	// FIXME: depth, iX, iY
-//	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node, unsigned& depth);
-	static void TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node);
+	static void __inline TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth);
+	static void __inline TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth);
 #else
 	static void __inline TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node);
-	static void TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node);
+	static void __inline TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node);
 #endif
 
 	Results& m_results;
@@ -663,8 +666,8 @@ private:
 			{
 				DictionaryNode* child = root->GetChild(index);
 #if defined(DEBUG_STATS)
-//				unsigned depth = 0;
-				TraverseBoard(*context, iX, iY, child); // FIXME: depth
+				unsigned depth = 0;
+				TraverseBoard(*context, iX, iY, child, depth);
 #else
 				TraverseBoard(*context, iX, iY, child);
 #endif
@@ -689,11 +692,15 @@ private:
 		
 #if defined(DEBUG_STATS)
 	const float missesPct = ((float)wordsFound.size()/s_threadInfo[iThread].load)*100.f;
-	debug_print("Thread %u has max. traversal depth %u (longest %u), misses: %.2f percent of load.\n", iThread, context->maxDepth, s_longestWord, missesPct);
+	debug_print("Thread %u has max. traversal depth %u (max. %u), misses: %.2f percent of load.\n", iThread, context->maxDepth, s_longestWord, missesPct);
 #endif
 }
 
+#if defined(DEBUG_STATS)
+/* static */ void __inline Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
+#else
 /* static */ void __inline Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node)
+#endif
 {
 	// FIXME: I might not want to go through 2 pointers for context-related
 
@@ -707,7 +714,11 @@ private:
 	if (0 != node->HasChild(nbIndex))
 	{
 		auto* child = node->GetChild(nbIndex);
+#if defined(DEBUG_STATS)
+		TraverseBoard(context, iX, iY, child, depth);
+#else
 		TraverseBoard(context, iX, iY, child);
+#endif
 
 		// Child node exhausted?
 		if (child->IsVoid())
@@ -718,7 +729,11 @@ private:
 	}
 }
 
+#if defined(DEBUG_STATS)
+/* static */ void __inline Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
+#else
 /* static */ void __inline Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node)
+#endif
 {
 	Assert(nullptr != node);
 
@@ -730,27 +745,47 @@ private:
 	if (true == visited[boardIdx])
 		return;
 
-	const size_t wordIdx = node->GetWordIndex();
-	if (-1 != wordIdx)
-	{
-		context.wordsFound.emplace_back(wordIdx);
-		node->OnWordFound(); 
-	}
-
+	// Apparently this just costs time?
 //	if (0 == node->HasChildren())
 //		return;
 
 #if defined(DEBUG_STATS)
-//  FIXME:
-//	Assert(depth < s_longestWord);
-//	context.maxDepth = std::max(context.maxDepth, depth);
-//	++depth;
+	Assert(depth < s_longestWord);
+	context.maxDepth = std::max(context.maxDepth, depth);
+	++depth;
 #endif
 
 	// Recurse, as we've got a node that might be going somewhewre.
 
 	visited[boardIdx] = true;
 
+#if defined(DEBUG_STATS)
+	if (iX > 0)
+	{
+		TraverseCall(context, iX-1, iY, node, depth);
+		if (iY < height-1)
+			TraverseCall(context, iX-1, iY+1, node, depth);
+		if (iY > 0) 
+			TraverseCall(context, iX-1, iY-1, node, depth);
+	}
+
+	if (iX < width-1)
+	{
+		TraverseCall(context, iX+1, iY, node, depth);
+		if (iY < height-1) 
+			TraverseCall(context, iX+1, iY+1, node, depth);
+		if (iY > 0)
+			TraverseCall(context, iX+1, iY-1, node, depth);
+	}
+				
+	if (iY > 0)
+		TraverseCall(context, iX, iY-1, node, depth);
+		
+	if (iY < height-1)
+		TraverseCall(context, iX, iY+1, node, depth);
+
+		--depth;
+#else
 	if (iX > 0)
 	{
 		TraverseCall(context, iX-1, iY, node);
@@ -774,12 +809,13 @@ private:
 		
 	if (iY < height-1)
 		TraverseCall(context, iX, iY+1, node);
-
-#if defined(DEBUG_STATS)
-//		--depth;
 #endif
 		
 	visited[boardIdx] = false;
+
+	const size_t wordIdx = node->GetWordIndex();
+	if (-1 != wordIdx)
+		context.wordsFound.emplace_back(wordIdx);
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
@@ -804,49 +840,26 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	results.Score = 0;
 	results.UserData = nullptr; // Didn't need it in this implementation.
 
-	// FIXME: remove all this logic!
-	// FIXME: check if board fits in 32 bits.
-	// FIXME: this is a cheap fix, but keeping the Morton-arithmetic light during traversal is worth something.
-	const unsigned pow2Width = RoundPow2_32(width);
-	const unsigned pow2Height = RoundPow2_32(height);
-
-#ifdef NON_POW2_BOARDS	
-	if (pow2Width != width || pow2Height != height)
-		debug_print("Rounding board dimensions to %u*%u.\n", pow2Width, pow2Height);
-
-	const unsigned xPadding = pow2Width-width;
-	const unsigned yPadding = pow2Height-height;
-#endif
-
 	// Board parameters check out?
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
-/*
-		const unsigned gridSize = pow2Width*pow2Height;
+		const unsigned gridSize = width*height;
 //		char* sanitized = static_cast<char*>(mallocAligned(gridSize*sizeof(char), kCacheLine));
 		char* sanitized = static_cast<char*>(s_customAlloc.Allocate(gridSize*sizeof(char), kCacheLine));
 
-#ifdef NON_POW2_BOARDS
-		// FIXME: easy way to set all padding tiles, won't notice it with boards that are large, but it'd be at least
-		//        better to do this with a write-combined memset().
-		if (xPadding+yPadding > 0)
-			memset(sanitized, kPaddingTile, gridSize*sizeof(char));
-#endif
-
 #ifdef NED_FLANDERS
 		// Sanitize that checks for illegal input and uppercases.
-		morton_t mortonY = ulMC2Dencode(0, 0);
+		size_t index = 0;
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			morton_t morton2D = mortonY;
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
 				// FIXME: does not check for 'u'!
-				const char letter = *board++;
+				const char letter = board[index];
 				if (0 != isalpha((unsigned char) letter))
 				{
 					const unsigned sanity = LetterToIndex(toupper(letter));
-					sanitized[morton2D] = sanity;
+					sanitized[index] = sanity;
 				}
 				else
 				{
@@ -854,46 +867,30 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 					return results;
 				}
 
-				morton2D = ulMC2Dxplusv(morton2D, 1);
+				++index;
 			}
-
-			mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
 #else
 		// Sanitize that just reorders and expects uppercase.
-		morton_t mortonY = ulMC2Dencode(0, 0);
+		size_t index = 0;
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			morton_t morton2D = mortonY;
 			for (unsigned iX = 0; iX < width; ++iX)
 			{
-				const char letter = *board++;
+				const char letter = board[index];
 				const unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
-				sanitized[morton2D] = sanity;
+				sanitized[index] = sanity;
 
-				morton2D = ulMC2Dxplusv(morton2D, 1);
+				++index;
 			}
-
-			mortonY = ulMC2Dyplusv(mortonY, 1);
 		}
 #endif
-*/
-		// FIXME: reinstate what happens above, just dump the Morton ordering!
-		auto* cheatPtr = const_cast<char*>(board);
-		for (unsigned iY = 0; iY < height; ++iY)
-			for (unsigned iX = 0; iX < width; ++iX)
-			{
-				const auto index = iY*width + iX;
-				cheatPtr[index] = LetterToIndex(cheatPtr[index]);
-			}
 
-
-//		Query query(results, sanitized, pow2Width, pow2Height);
-		Query query(results, board, width, height);
+		Query query(results, (nullptr == sanitized) ? board : sanitized, width, height);
 		query.Execute();
 
 //		freeAligned(sanitized);
-//		s_customAlloc.Free(sanitized);
+		s_customAlloc.Free(sanitized);
 	}
 
 	return results;

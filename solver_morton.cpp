@@ -179,7 +179,6 @@ public:
 	DictionaryNode() : 
 		m_wordIdx(-1)
 ,		m_indexBits(0)
-,		m_children(new DictionaryNode*[kAlphaRange])
 	{
 		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
@@ -210,8 +209,6 @@ public:
 	{
 		for (auto iChar = 0; iChar < kAlphaRange; ++iChar)
 			delete m_children[iChar];
-
-		delete[] m_children;
 	}
 
 private:
@@ -270,7 +267,7 @@ public:
 private:
 	size_t m_wordIdx;
 	unsigned m_indexBits;
-	DictionaryNode** m_children;
+	DictionaryNode* m_children[kAlphaRange];
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -703,7 +700,7 @@ private:
 		
 #if defined(DEBUG_STATS)
 		const float missesPct = ((float)wordsFound.size()/s_threadInfo[iThread].load)*100.f;
-		debug_print("Thread %u has max. traversal depth %u (longest %u), misses: %.2f percent of load.\n", iThread, context->maxDepth, s_longestWord, missesPct);
+		debug_print("Thread %u has max. traversal depth %u (max. %u), misses: %.2f percent of load.\n", iThread, context->maxDepth, s_longestWord, missesPct);
 #endif
 	}
 
@@ -716,9 +713,9 @@ private:
 	}
 
 #if defined(DEBUG_STATS)
-	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node, unsigned& depth)
+	static void __inline TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node, unsigned& depth)
 #else
-	static void TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node)
+	static void __inline TraverseBoard(ThreadContext& context, morton_t mortonCode, DictionaryNode* node)
 #endif
 	{
 		Assert(nullptr != node);
@@ -766,9 +763,9 @@ private:
 			const morton_t nbMorton = mortonCodes[iDir];
 			if (nbMorton >= gridSize)
 				continue;
-			
-			const unsigned nbIndex = board[nbMorton];
 
+			const unsigned nbIndex = board[nbMorton];
+			
 #ifdef NON_POW2_BOARDS
 			// No padding and the route towards this word continues *and* we're not revisiting a tile?
 			if (nbIndex & kPaddingTile)
@@ -778,33 +775,28 @@ private:
 			if (false == node->HasChild(nbIndex))
 				continue;
 
-//			if (true == visited[nbMorton])
-//				continue;
+			if (true == visited[nbMorton])
+				continue;
 
 //			// Flag new tile as visited.
-//			visited[nbMorton] = true;
+			visited[nbMorton] = true;
 
-			if (false == visited[nbMorton])
-			{
-				visited[nbMorton] = true;
-
-				auto* child = node->GetChild(nbIndex);
+			auto* child = node->GetChild(nbIndex);
 
 	#if defined(DEBUG_STATS)
-				TraverseBoard(context, nbMorton, child, depth);
+			TraverseBoard(context, nbMorton, child, depth);
 	#else
-				TraverseBoard(context, nbMorton, child);
+			TraverseBoard(context, nbMorton, child);
 	#endif
 
-				// Remove visit flag.
-				visited[nbMorton] = false;
+			// Remove visit flag.
+			visited[nbMorton] = false;
 
-				// Child node exhausted?
-				if (child->IsVoid())
-				{
-					const unsigned isZero = IsZero(node->RemoveChild(nbIndex));
-					iDir = isZero<<3; // Break out of loop without extra branch.
-				}
+			// Child node exhausted?
+			if (child->IsVoid())
+			{		
+				const auto exhausted = IsZero(node->RemoveChild(nbIndex)) << 3;
+				iDir |= exhausted;
 			}
 		}
 
