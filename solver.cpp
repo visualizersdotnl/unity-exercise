@@ -57,8 +57,9 @@
 	the code, so you're warned.
 
 	- This is a non-Morton version that I'll try to get to performe close or equal, or maybe better?
-	- Try a pool of nodes, with a dictionary instance as their parent.
+	- I must try a pool of sequential nodes instead of loose allocations, with a dictionary instance as their parent.
 	- I've used "__forceinline", which obviously won't fly on OSX/Linux.
+	- There's quite a bit of branching going on but trying to be smart doesn't always please the predictor/pipeline the best way.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -478,6 +479,8 @@ public:
 ,		sanitized(instance->m_sanitized)
 ,		visited(static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine)))
 //,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool), kCacheLine)))
+,		width(instance->m_width)
+,		height(instance->m_height)
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
@@ -500,12 +503,13 @@ public:
 //			freeAligned(visited);
 		}
 
-		// Input/Temp
+		// Inputs & Temp. storage
 		const Query* instance;
 		const unsigned iThread;
 		const size_t gridSize;
 		const char* sanitized;
 		bool* visited;
+		const unsigned width, height;
 
 		// Output
 		std::vector<size_t> wordsFound;
@@ -660,6 +664,7 @@ private:
 			if (root->HasChild(index))
 			{
 				DictionaryNode* child = root->GetChild(index);
+
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, iX, iY, child, depth);
@@ -697,10 +702,7 @@ private:
 /* static */ __forceinline void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node)
 #endif
 {
-	// FIXME: I might not want to go through 2 pointers for context-related
-
-	const auto width = context.instance->m_width;
-	const auto height = context.instance->m_height;
+	const auto width = context.width;
 	const unsigned nbBoardIdx = iY*width + iX;
 
 	auto* board = context.sanitized;
@@ -719,6 +721,7 @@ private:
 		if (child->IsVoid())
 		{
 			node->RemoveChild(nbIndex);
+			// FIXME: find a way to bail out of recursion
 		}
 	}
 }
@@ -731,8 +734,9 @@ private:
 {
 	Assert(nullptr != node);
 
-	const auto width = context.instance->m_width;
-	const auto height = context.instance->m_height;
+	const auto width = context.width;
+	const auto height = context.height;
+
 	const unsigned boardIdx = iY*width + iX;
 
 	auto* visited = context.visited;
@@ -753,69 +757,68 @@ private:
 	
 	visited[boardIdx] = true;
 
+	const bool xSafe = iX < width-1;
+	const bool ySafe = iY < height-1;
+
 #if defined(DEBUG_STATS)
-	// Different order than below!
-	if (iX > 0)
+	if (ySafe)
 	{
-		TraverseCall(context, iX-1, iY, node, depth);
-		if (iY < height-1)
-			TraverseCall(context, iX-1, iY+1, node, depth);
-		if (iY > 0) 
+		TraverseCall(context, iX, iY+1, node, depth);
+		
+		if (xSafe) 
+			TraverseCall(context, iX+1, iY+1, depth);
+		if (iX > 0)
+			TraverseCall(context, iX-1, iY+1, depth);
+	}
+
+	if (iY > 0)
+	{
+		TraverseCall(context, iX, iY-1, node, depth);
+		
+		if (xSafe)
+			TraverseCall(context, iX+1, iY-1, node, depth);
+		if (iX > 0) 
 			TraverseCall(context, iX-1, iY-1, node, depth);
 	}
 
-	if (iX < width-1)
-	{
+	if (xSafe)
 		TraverseCall(context, iX+1, iY, node, depth);
-		if (iY < height-1) 
-			TraverseCall(context, iX+1, iY+1, node, depth);
-		if (iY > 0)
-			TraverseCall(context, iX+1, iY-1, node, depth);
-	}
-				
-	if (iY > 0)
-		TraverseCall(context, iX, iY-1, node, depth);
-		
-	if (iY < height-1)
-		TraverseCall(context, iX, iY+1, node, depth);
+
+	if (iX > 0)
+		TraverseCall(context, iX-1, iY, node, depth);
 
 		--depth;
 #else
-	const bool xBound = iX == width-1;
-//	const bool yBound = iY == height-1;
-
-	if (iY < height-1)
-	{
+	if (ySafe) {
 		TraverseCall(context, iX, iY+1, node);
-		
-		if (!xBound) 
-			TraverseCall(context, iX+1, iY+1, node);
-		if (iX > 0)
-			TraverseCall(context, iX-1, iY+1, node);
+
+	if (xSafe) 
+		TraverseCall(context, iX+1, iY+1, node);
+	if (iX > 0)
+		TraverseCall(context, iX-1, iY+1, node);
 	}
 
-	if (iY > 0)
-	{
+	if (iY > 0) {
 		TraverseCall(context, iX, iY-1, node);
-		
-		if (!xBound)
-			TraverseCall(context, iX+1, iY-1, node);
-		if (iX > 0) 
-			TraverseCall(context, iX-1, iY-1, node);
-	}
 
-	if (!xBound)
-		TraverseCall(context, iX+1, iY, node);
+	if (xSafe)
+		TraverseCall(context, iX+1, iY-1, node);
+	if (iX > 0) 
+		TraverseCall(context, iX-1, iY-1, node);
+	}
 
 	if (iX > 0)
 		TraverseCall(context, iX-1, iY, node);
+
+	if (xSafe)
+		TraverseCall(context, iX+1, iY, node);
 #endif
-		
-	visited[boardIdx] = false;
 
 	const size_t wordIdx = node->GetWordIndex();
 	if (-1 != wordIdx)
 		context.wordsFound.emplace_back(wordIdx);
+		
+	visited[boardIdx] = false;
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
