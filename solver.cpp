@@ -56,7 +56,9 @@
 	Fiddling around to make this faster; I have a few obvious things in mind; I won't be beautifying
 	the code, so you're warned.
 
-	This is a non-Morton version that I'll try to get to performe close or equal, or maybe better?
+	- This is a non-Morton version that I'll try to get to performe close or equal, or maybe better?
+	- Try a pool of nodes, with a dictionary instance as their parent.
+	- I've used "__forceinline", which obviously won't fly on OSX/Linux.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -127,7 +129,7 @@
 
 const size_t kCacheLine = sizeof(size_t)<<3;
 
-const unsigned kAlphaRange  = ('Z'-'A')+1;
+constexpr unsigned kAlphaRange  = ('Z'-'A')+1;
 
 // Number of words and number of nodes (1 for root) per thread.
 class ThreadInfo
@@ -218,7 +220,7 @@ public:
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
-		m_indexBits &= ~bit;
+		m_indexBits ^= bit;
 		return m_indexBits;
 	}
 
@@ -236,20 +238,13 @@ public:
 		return m_children[index];
 	}
 
+	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
 	__inline size_t GetWordIndex() /*  const */
 	{
 		const auto index = m_wordIdx;
 		m_wordIdx = -1;
 		return index;
 	}
-
-	/*
-	__inline void OnWordFound()
-	{
-		Assert(true == IsWord());
-		m_wordIdx = -1;
-	}
-	*/
 
 private:
 	size_t m_wordIdx;
@@ -624,11 +619,11 @@ private:
 	}
 
 #if defined(DEBUG_STATS)
-	static void __inline TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth);
-	static void __inline TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth);
+	static void __forceinline TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth);
+	static void __forceinline TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth);
 #else
-	static void __inline TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node);
-	static void __inline TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node);
+	static void __forceinline TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node);
+	static void __forceinline TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node);
 #endif
 
 	Results& m_results;
@@ -697,9 +692,9 @@ private:
 }
 
 #if defined(DEBUG_STATS)
-/* static */ void __inline Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
+/* static */ __forceinline void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
 #else
-/* static */ void __inline Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node)
+/* static */ __forceinline void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node)
 #endif
 {
 	// FIXME: I might not want to go through 2 pointers for context-related
@@ -724,15 +719,14 @@ private:
 		if (child->IsVoid())
 		{
 			node->RemoveChild(nbIndex);
-			// FIXME: see if you can somehow stop further traversal early on
 		}
 	}
 }
 
 #if defined(DEBUG_STATS)
-/* static */ void __inline Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
+/* static */ void __forceinline Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
 #else
-/* static */ void __inline Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node)
+/* static */ void __forceinline Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node)
 #endif
 {
 	Assert(nullptr != node);
@@ -745,7 +739,7 @@ private:
 	if (true == visited[boardIdx])
 		return;
 
-	// Apparently this just costs time?
+	// Why does this eat such a vile amount of cycles?
 //	if (0 == node->HasChildren())
 //		return;
 
@@ -756,10 +750,11 @@ private:
 #endif
 
 	// Recurse, as we've got a node that might be going somewhewre.
-
+	
 	visited[boardIdx] = true;
 
 #if defined(DEBUG_STATS)
+	// Different order than below!
 	if (iX > 0)
 	{
 		TraverseCall(context, iX-1, iY, node, depth);
@@ -786,29 +781,34 @@ private:
 
 		--depth;
 #else
-	if (iX > 0)
+	const bool xBound = iX == width-1;
+//	const bool yBound = iY == height-1;
+
+	if (iY < height-1)
 	{
-		TraverseCall(context, iX-1, iY, node);
-		if (iY < height-1)
+		TraverseCall(context, iX, iY+1, node);
+		
+		if (!xBound) 
+			TraverseCall(context, iX+1, iY+1, node);
+		if (iX > 0)
 			TraverseCall(context, iX-1, iY+1, node);
-		if (iY > 0) 
+	}
+
+	if (iY > 0)
+	{
+		TraverseCall(context, iX, iY-1, node);
+		
+		if (!xBound)
+			TraverseCall(context, iX+1, iY-1, node);
+		if (iX > 0) 
 			TraverseCall(context, iX-1, iY-1, node);
 	}
 
-	if (iX < width-1)
-	{
+	if (!xBound)
 		TraverseCall(context, iX+1, iY, node);
-		if (iY < height-1) 
-			TraverseCall(context, iX+1, iY+1, node);
-		if (iY > 0)
-			TraverseCall(context, iX+1, iY-1, node);
-	}
-				
-	if (iY > 0)
-		TraverseCall(context, iX, iY-1, node);
-		
-	if (iY < height-1)
-		TraverseCall(context, iX, iY+1, node);
+
+	if (iX > 0)
+		TraverseCall(context, iX-1, iY, node);
 #endif
 		
 	visited[boardIdx] = false;
@@ -872,17 +872,11 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		}
 #else
 		// Sanitize that just reorders and expects uppercase.
-		size_t index = 0;
-		for (unsigned iY = 0; iY < height; ++iY)
+		for (unsigned index = 0; index < gridSize; ++index)
 		{
-			for (unsigned iX = 0; iX < width; ++iX)
-			{
-				const char letter = board[index];
-				const unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
-				sanitized[index] = sanity;
-
-				++index;
-			}
+			const char letter = *board++;
+			const unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
+			sanitized[index] = sanity;
 		}
 #endif
 

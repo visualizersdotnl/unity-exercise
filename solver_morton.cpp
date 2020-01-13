@@ -235,7 +235,7 @@ public:
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
-		m_indexBits &= ~bit;
+		m_indexBits ^= bit;
 		return m_indexBits;
 	}
 
