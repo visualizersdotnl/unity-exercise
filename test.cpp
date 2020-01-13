@@ -24,6 +24,7 @@
 
 int main(int argC, char **arguments)
 {
+	printf("Boggle assignment solver by Niels J. de Wit, the undisputed heavyweight boggle champion!\n");
 	
 #if defined(_DEBUG) && defined(_WIN32)
 	// Dump leak report at any possible exit.

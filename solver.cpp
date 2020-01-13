@@ -56,10 +56,11 @@
 	Fiddling around to make this faster; I have a few obvious things in mind; I won't be beautifying
 	the code, so you're warned.
 
-	- This is a non-Morton version that I'll try to get to performe close or equal, or maybe better?
-	- I must try a pool of sequential nodes instead of loose allocations, with a dictionary instance as their parent.
+	- This is a non-Morton version that now outperforms the Morton version.
+	- I must try a pool of sequential nodes instead of loose allocations, with a dictionary instance as their parent, which causes cache misses.
 	- I've used "__forceinline", which obviously won't fly on OSX/Linux.
-	- There's quite a bit of branching going on but trying to be smart doesn't always please the predictor/pipeline the best way.
+	- There's quite a bit of branching going on but trying to be smart doesn't always please the predictor/pipeline the best way, rather it's quite fast
+	  in critical places because the predictor can do it's work very well (i.e. the cases lean 99% towards one side).
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -766,9 +767,9 @@ private:
 		TraverseCall(context, iX, iY+1, node, depth);
 		
 		if (xSafe) 
-			TraverseCall(context, iX+1, iY+1, depth);
+			TraverseCall(context, iX+1, iY+1, node, depth);
 		if (iX > 0)
-			TraverseCall(context, iX-1, iY+1, depth);
+			TraverseCall(context, iX-1, iY+1, node, depth);
 	}
 
 	if (iY > 0)
@@ -781,14 +782,18 @@ private:
 			TraverseCall(context, iX-1, iY-1, node, depth);
 	}
 
-	if (xSafe)
-		TraverseCall(context, iX+1, iY, node, depth);
-
 	if (iX > 0)
 		TraverseCall(context, iX-1, iY, node, depth);
 
+	if (xSafe)
+		TraverseCall(context, iX+1, iY, node, depth);
+
 		--depth;
 #else
+	// This has been ordered specifically to be as cache friendly as possible,
+	// plus due to the enormous advantage that the branching goes 1 way (everywhere but on the edges)
+	// the predictor does it's job and the branches aren't expensive at all.
+
 	if (ySafe) {
 		TraverseCall(context, iX, iY+1, node);
 
