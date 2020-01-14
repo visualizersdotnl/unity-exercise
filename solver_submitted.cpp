@@ -1,5 +1,7 @@
 
 /*
+	!! FIXME: CUSTOM ALLOC !!
+
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
 	Please take a minute to read this piece of text.
 

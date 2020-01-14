@@ -48,6 +48,9 @@
     <ClInclude Include="..\simple-tlsf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\spinlock.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\dictionary-bigger.txt">

@@ -53,9 +53,6 @@
 
 	** 10/01/2020 **
 
-	Fiddling around to make this faster; I have a few obvious things in mind; I won't be beautifying
-	the code, so you're warned.
-
 	Abandoned for now, as the regular grid solver seems to be faster; that doesn't have to mean this
 	one can't beat it but not in it's current state.
 */

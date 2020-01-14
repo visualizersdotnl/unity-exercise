@@ -23,18 +23,18 @@
 	Rules and scoring taken from Wikipedia.
 
 	To do (high priority):
-		- Optimization & clean up: I'm thinking profiling and improving "early outs"
+		- Optimization & clean up.
 		- Always check for leaks (Windows debug build does it automatically).
 		- FIXMEs.
 
 	To do (low priority):
-		- Check compile & run status on Linux.
+		- Check compile & run status on Linux and OSX.
 		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver.
 		- Fix class members (notation).
 
 	There's this idea floating that if you have a hash and eliminate a part of the dict. tree that way
-	by special-casing the first 3 characters you're golden, but you're not if you do it right really.
-	Or it at the very least hardly helps.
+	by special-casing the first 3 characters you're golden, but it did not really help at all plus it 
+	makes the algorithm less flexible. What if someone decides to change the rules? ;)
 
 	Notes:
 		- ** Currently only tested on Windows 10, VS2017 + OSX **
@@ -51,16 +51,19 @@
 		
 		** Some of these stability claims only work if NED_FLANDERS (see below) is defined! **
 
-	** 10/01/2020 **
+	** 14/01/2020 **
 
 	Fiddling around to make this faster; I have a few obvious things in mind; I won't be beautifying
 	the code, so you're warned.
 
-	- This is a non-Morton version that now outperforms the Morton version.
+	- This is a non-Morton version that now handily outperforms the Morton version.
 	- I must try a pool of sequential nodes instead of loose allocations, with a dictionary instance as their parent, which causes cache misses.
-	- I've used "__forceinline", which obviously won't fly on OSX/Linux.
+	- I've used "__forceinline" to manhandle MSVC, which obviously won't fly on OSX/Linux.
 	- There's quite a bit of branching going on but trying to be smart doesn't always please the predictor/pipeline the best way, rather it's quite fast
 	  in critical places because the predictor can do it's work very well (i.e. the cases lean 99% towards one side).
+	- Just loosely using per-thread instances of CustomAlloc doesn't improve performance, I still think it could work because it enhances
+	  locality and eliminates the need for those mutex locks.
+	- What *would* help is getting rid of all those copied DictionaryNode instances in one go instead of that horrendous delete chain.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -84,9 +87,9 @@
 // #include <list>
 // #include <set>
 // #include <stack>
-#include <unordered_set>
+// #include <unordered_set>
 #include <vector>
-#include <array>
+// #include <array>
 #include <algorithm>
 
 #include <cassert>
@@ -129,9 +132,9 @@
 	const size_t kNumThreads = kNumCores*2; // FIXME: this speeds things up on my Intel I7
 #endif
 
-const size_t kCacheLine = sizeof(size_t)<<3;
+constexpr size_t kCacheLine = sizeof(size_t)*8;
 
-constexpr unsigned kAlphaRange  = ('Z'-'A')+1;
+constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 
 // Number of words and number of nodes (1 for root) per thread.
 class ThreadInfo
@@ -146,7 +149,7 @@ public:
 static std::vector<ThreadInfo> s_threadInfo;
 
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
-__inline unsigned LetterToIndex(char letter)
+__forceinline unsigned LetterToIndex(char letter)
 {
 	return letter - 'A';
 }
@@ -170,11 +173,19 @@ public:
 		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
+	DictionaryNode(size_t wordIdx, unsigned indexBits) :
+		m_wordIdx(wordIdx)
+,		m_indexBits(indexBits)
+	{
+		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
+	}
+
+	// This copy function uses the global (custom) allocator
 	static DictionaryNode* DeepCopy(DictionaryNode* parent)
 	{
-		DictionaryNode* node = new DictionaryNode();
-		node->m_wordIdx    = parent->m_wordIdx;
-		node->m_indexBits  = parent->m_indexBits;
+		Assert(nullptr != parent);
+
+		DictionaryNode* node = new DictionaryNode(parent->m_wordIdx, parent->m_indexBits);
 
 		unsigned indexBits = node->m_indexBits;
 		unsigned index = 0;
@@ -194,7 +205,12 @@ public:
 
 	~DictionaryNode()
 	{
-		for (auto iChar = 0; iChar < kAlphaRange; ++iChar)
+		// FIXME
+		// This just looks awful and performs likewise; I need to use a separate allocator
+		// to allocate all children so I can discard them in 1 go.
+		// Just ignoring this because the allocator cleans up after itself anyway don't work
+		// either as it's performance drops due to all the abandoned allocations.
+		for (unsigned iChar = 0; iChar < kAlphaRange; ++iChar)
 			delete m_children[iChar];
 	}
 
@@ -474,43 +490,47 @@ public:
 		CUSTOM_DELETE
 
 		ThreadContext(unsigned iThread, const Query* instance) :
-		instance(instance)
-,		iThread(iThread)
+		iThread(iThread)
 ,		gridSize(instance->m_gridSize)
 ,		sanitized(instance->m_sanitized)
-,		visited(static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine)))
-//,		visited(static_cast<bool*>(mallocAligned(gridSize*sizeof(bool), kCacheLine)))
 ,		width(instance->m_width)
 ,		height(instance->m_height)
+,		visited(static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine)))
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
 			assert(nullptr != instance);
 
-//			memset(visited, 0, gridSize*sizeof(bool));
+			// I've done some testing and both allocating and clearing memory in the constructor (so in the main thread)
+			// is actually faster than doing it upon entering the thread.
 
-			size_t numStreams = gridSize*sizeof(bool);
-			numStreams >>= 2;
-			int* pWrite = reinterpret_cast<int*>(visited);
-			while (numStreams--)
-				_mm_stream_si32(pWrite++, 0);
+			wordsFound.reserve(s_threadInfo[iThread].load /* If a thread finds 50% of the load that's pretty good! */); 
 
-			wordsFound.reserve(s_threadInfo[iThread].load); // FIXME: if the grid size is small this is obviously too much, but in the "worst" case we won't re-allocate.
+			if (gridSize >= 32)
+			{
+				// This has proven to be a little faster than memset().
+				size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
+				int* pWrite = reinterpret_cast<int*>(visited);
+				while (numStreams--)
+					_mm_stream_si32(pWrite++, 0);
+			}
+			else
+				memset(visited, 0, gridSize*sizeof(bool));
 		}
 
 		~ThreadContext()
 		{
 			s_customAlloc.Free(visited);
-//			freeAligned(visited);
 		}
 
-		// Inputs & Temp. storage
-		const Query* instance;
+		// Input
 		const unsigned iThread;
 		const size_t gridSize;
 		const char* sanitized;
-		bool* visited;
 		const unsigned width, height;
+		
+		// Grid to flag visited tiles.
+		bool* visited;
 
 		// Output
 		std::vector<size_t> wordsFound;
@@ -616,7 +636,7 @@ private:
 	static void ExecuteThread(ThreadContext* context);
 
 private:
-	inline static unsigned GetWordScore(size_t length) /* const */
+	__forceinline static unsigned GetWordScore(size_t length) /* const */
 	{
 		const unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
 		if (length > 8) length = 8;
@@ -639,19 +659,35 @@ private:
 
 /* static */ void Query::ExecuteThread(ThreadContext* context)
 {
-	auto& query = *context->instance;
 	const unsigned iThread = context->iThread;
 	auto* sanitized = context->sanitized;
 
+/*
+	auto* visited = context->visited;
+	unsigned gridSize = context->gridSize;
+
+	if (gridSize >= 128)
+	{
+		// This has proven to be a little faster than memset().
+		size_t numStreams = gridSize*sizeof(bool) / sizeof(__m128i);
+		__m128i* pWrite = reinterpret_cast<__m128i*>(visited);
+		const __m128i zero = _mm_setzero_si128();
+		while (numStreams--)
+			_mm_stream_si128(pWrite++, zero);
+	}
+	else
+		memset(visited, 0, gridSize*sizeof(bool));
+*/
+
 	std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
+	// DictionaryNode* root = s_dictRoots[iThread];
 			
-	const unsigned width = query.m_width;
-	const unsigned height = query.m_height;
+	const unsigned width  = context->width;
+	const unsigned height = context->height;
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words.\n", iThread, s_threadInfo[iThread].load);
 
-	// FIXME: depth!
 	context->maxDepth = 0;
 #endif
 
@@ -674,9 +710,6 @@ private:
 #endif
 			}
 		}
-
-		// This stabilizes thread load a little.
-		std::this_thread::yield();
 	}
 
 	// Sorting the indices into the full word list improves execution time a little.
@@ -853,7 +886,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	{
 		const unsigned gridSize = width*height;
 //		char* sanitized = static_cast<char*>(mallocAligned(gridSize*sizeof(char), kCacheLine));
-		char* sanitized = static_cast<char*>(s_customAlloc.Allocate(gridSize*sizeof(char), kCacheLine));
+		char* sanitized = static_cast<char*>(s_customAlloc.AllocateUnsafe(gridSize*sizeof(char), kCacheLine));
 
 #ifdef NED_FLANDERS
 		// Sanitize that checks for illegal input and uppercases.
@@ -891,7 +924,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		Query query(results, (nullptr == sanitized) ? board : sanitized, width, height);
 		query.Execute();
 
-//		freeAligned(sanitized);
 		s_customAlloc.Free(sanitized);
 	}
 
