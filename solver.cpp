@@ -47,6 +47,16 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 	- Just loosely using per-thread instances of CustomAlloc doesn't improve performance, I still think it could work because it enhances
 	  locality and eliminates the need for those mutex locks.
 	- What *would* help is getting rid of all those copied DictionaryNode instances in one go instead of that horrendous delete chain.
+
+	Threading problems (as seen in/by Superluminal), please research:
+
+	- An even distribution of loads (words) does *not* work well, I can drum up theories (see below) but don't know 100% sure why yet.
+	- Twice the amount of threads the system can "handle" works better than spreading the load over all available cores minus one: why?
+	- There is code in place to do it "the old way", though Superluminal correctly shows threads *not* running concurrently, as expected.
+	- DeepCopy() fights over the allocator, and that destructor makes things even worse. It's disabled for now, so only call FindWords() once!
+
+	Maybe smaller sub-dictionaries all starting with the same letter make for shorter recursion paths?
+	That's a very good possibility, but is doing it the way I do now the only way to fix that?
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -101,8 +111,13 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
 #else
-	const size_t kNumCores = std::thread::hardware_concurrency();
-	const size_t kNumThreads = kNumCores*2; // *2; // FIXME: this speeds things up on my Intel I7
+	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
+	
+	// FIXME: this *should* be correct
+//	const size_t kNumThreads = kNumConcurrrency-1;
+	
+	// FIXME: but *this* is fast, more chunks!
+	const size_t kNumThreads = kNumConcurrrency*2;
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
@@ -246,7 +261,7 @@ private:
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 
-// A root per thread.
+// A tree root per thread.
 static std::vector<DictionaryNode*> s_dictRoots;
 
 // Sequential dictionary of all full words (FIXME: yet unsorted).
@@ -313,19 +328,21 @@ static void AddWordToDictionary(const std::string& word)
 		s_longestWord = length;
 	}
 
-	// As a first strategy we'll split at the root.
-	// As it turns out this simple way of dividing the load works fairly well, but it's up for review (FIXME).
+	// FIXME: this distributes by letter, which does a better job at containing the amount of traversal
 	const char firstLetter = word[0];
 	unsigned iThread = 0;
 	if ('Q' == firstLetter)
 	{
 		// Otherwise this thread, for 'U', would remain unused.
 		if (kNumThreads > 20)
-			iThread = (rand() > 16384) ? 16 : 20;
+			iThread = (rand() & 1) ? 16 : 20;
 	}
 	else
 		iThread = LetterToIndex(firstLetter)%kNumThreads;
 	
+	// This distributes evenly, but makes things dreadfully slow (see above)
+//	unsigned iThread = s_wordCount%kNumThreads;
+
 	DictionaryNode* node = s_dictRoots[iThread];
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
@@ -468,18 +485,18 @@ public:
 ,		sanitized(instance->m_sanitized)
 ,		width(instance->m_width)
 ,		height(instance->m_height)
+//,		visited(nullptr)
 ,		visited(static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine)))
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
-			assert(nullptr != instance);
+			Assert(nullptr != instance);
 
 			// I've done some testing and both allocating and clearing memory in the constructor (so in the main thread)
-			// is actually faster than doing it upon entering the thread, which most likely has to do with threads fighting
-			// over the same allocator all at once.
+			// is actually faster than doing it upon entering the thread, which likely has to do with threads fighting
+			// over the same resources at once.
 
-			wordsFound.reserve(s_threadInfo[iThread].load /* If a thread finds 50% of the load that's pretty good! */); 
-
+			// Clearing the memory in the same thread (and thus on the same core) is also quicker than doing it on thread initialization.
 			if (gridSize >= 32)
 			{
 				// This has proven to be a little faster than memset().
@@ -490,12 +507,37 @@ public:
 			}
 			else
 				memset(visited, 0, gridSize*sizeof(bool));
+
+			// If a thread finds 50% it's pretty good.
+			wordsFound.reserve(s_threadInfo[iThread].load >> 1); 
 		}
 
 		~ThreadContext()
 		{
 			s_customAlloc.Free(visited);
 		}
+
+/*
+		void OnExecuteThread()
+		{
+			visited = static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine));
+
+			// Clearing the memory in the same thread (and thus on the same core) is also quicker than doing it on thread initialization.
+			if (gridSize >= 32)
+			{
+				// This has proven to be a little faster than memset().
+				size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
+				int* pWrite = reinterpret_cast<int*>(visited);
+				while (numStreams--)
+					_mm_stream_si32(pWrite++, 0);
+			}
+			else
+				memset(visited, 0, gridSize*sizeof(bool));
+
+			// If a thread finds 50% it's pretty good.
+			wordsFound.reserve(s_threadInfo[iThread].load >> 1); 
+		}
+*/
 
 		// Input
 		const unsigned iThread;
@@ -531,13 +573,13 @@ public:
 			std::vector<std::unique_ptr<ThreadContext>> contexts;
 
 			debug_print("Kicking off %zu threads.\n", kNumThreads);
-
+			
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
 				contexts.emplace_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
 				threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
 			}
-
+			
 			for (auto& thread : threads)
 				thread.join();
 
@@ -621,28 +663,16 @@ private:
 
 /* static */ void Query::ExecuteThread(ThreadContext* context)
 {
+//	context->OnExecuteThread();
+
 	const unsigned iThread = context->iThread;
-	auto* sanitized = context->sanitized;
+	const auto* sanitized = context->sanitized;
 
-/*
 	auto* visited = context->visited;
-	unsigned gridSize = context->gridSize;
+	const unsigned gridSize = context->gridSize;
 
-	if (gridSize >= 128)
-	{
-		// This has proven to be a little faster than memset().
-		size_t numStreams = gridSize*sizeof(bool) / sizeof(__m128i);
-		__m128i* pWrite = reinterpret_cast<__m128i*>(visited);
-		const __m128i zero = _mm_setzero_si128();
-		while (numStreams--)
-			_mm_stream_si128(pWrite++, zero);
-	}
-	else
-		memset(visited, 0, gridSize*sizeof(bool));
-*/
-
-	std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
-	// DictionaryNode* root = s_dictRoots[iThread];
+	// std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
+	DictionaryNode* root = s_dictRoots[iThread];
 			
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
@@ -673,10 +703,9 @@ private:
 			}
 		}
 
-//		std::this_thread::yield();
+		std::this_thread::yield();
 	}
 
-	// Sorting the indices into the full word list improves execution time a little.
 	auto& wordsFound = context->wordsFound;
 	std::sort(wordsFound.begin(), wordsFound.end());
 
@@ -720,7 +749,7 @@ private:
 		{
 			node->RemoveChild(nbIndex);
 
-			// FIXME: find a way to bail out of recursion
+			// FIXME: find a way to bail out of recursion, or isn't this a big problem?
 		}
 	}
 }

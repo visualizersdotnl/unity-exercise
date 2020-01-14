@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 3
+#define NUM_QUERIES 1
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -104,9 +104,10 @@ int main(int argC, char **arguments)
 
 	printf("- Finding in %ux%u... (%u iterations)\n", xSize, ySize, NUM_QUERIES);
 
+	Results results[NUM_QUERIES];
+
 	auto start = std::chrono::high_resolution_clock::now();
 
-	Results results[NUM_QUERIES];
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 		results[iQuery] = FindWords(board.get(), xSize, ySize);
 
