@@ -5,6 +5,7 @@
 	This is an optimized version.
 
 	To do (high priority):
+		- See below!
 		- Recursive deletion of nodes of copied dictionary trees is evil and must be handled in 1 pass.
 		- Always check for leaks (Windows debug build does it automatically).
 		- FIXMEs.
@@ -48,15 +49,21 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 	  locality and eliminates the need for those mutex locks.
 	- What *would* help is getting rid of all those copied DictionaryNode instances in one go instead of that horrendous delete chain.
 
-	Threading problems (as seen in/by Superluminal), please research:
+	Threading issues (as seen in/by Superluminal):
 
-	- An even distribution of loads (words) does *not* work well, I can drum up theories (see below) but don't know 100% sure why yet.
-	- Twice the amount of threads the system can "handle" works better than spreading the load over all available cores minus one: why?
-	- There is code in place to do it "the old way", though Superluminal correctly shows threads *not* running concurrently, as expected.
-	- DeepCopy() fights over the allocator, and that destructor makes things even worse. It's disabled for now, so only call FindWords() once!
+	- Even distribution of words does not work well, but distributing them by letter is faster even though the thread loads are
+	  uneven.
+	- Using twice the amount of threads that would be sensible works way faster than bigger loads (once again, loads matter).
+	- Currently there is code in place to use the "right" amount of threads and distribute words evenly but it is commented out.
+	- DeepCopy() is always a pain in the ass. It's disabled for now which restricts us to one FindWords() call.
+	- I could add an option to sort the main dictionary, though currently I am loading a sorted version.
 
-	Maybe smaller sub-dictionaries all starting with the same letter make for shorter recursion paths?
-	That's a very good possibility, but is doing it the way I do now the only way to fix that?
+	Use profilers (MSVC & Superluminal) to really figure out what either works so well by accident or what could be fixed
+	to use the "normal" amount of threads, evenly distributing the load. My gut says it's a matter of recursion.
+
+	Thinking out loud: let's say I end up at the point of traversal with only one letter constantly being asked for (since the
+	only child of the root node is 1 single letter), that probably means I ask for the same piece of memory again and again and
+	cause less cache misses and less needless traversal.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -113,7 +120,7 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 #else
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
-	// FIXME: this *should* be correct
+	// FIXME: this *should* be correct for "normal" algorithms
 //	const size_t kNumThreads = kNumConcurrrency-1;
 	
 	// FIXME: but *this* is fast, more chunks!
@@ -193,11 +200,10 @@ public:
 
 	~DictionaryNode()
 	{
-		// FIXME
-		// This just looks awful and performs likewise; I need to use a separate allocator
-		// to allocate all children so I can discard them in 1 go.
-		// Just ignoring this because the allocator cleans up after itself anyway don't work
-		// either as it's performance drops due to all the abandoned allocations.
+		// FIXME:
+		// This just looks awful and performs likewise; I need a way
+		// to allocate these children from a sequential pool and let go of them
+		// all at once.
 		for (unsigned iChar = 0; iChar < kAlphaRange; ++iChar)
 			delete m_children[iChar];
 	}
