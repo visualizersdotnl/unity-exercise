@@ -18,7 +18,7 @@ class CustomAlloc
 {
 public:
 	CustomAlloc() :
-		CustomAlloc(0x7d000000 >> 1 /* 1GB */) {}
+		CustomAlloc(0x7d000000 /* 2GB */) {}
 
 	CustomAlloc(size_t poolSize)
 	{
