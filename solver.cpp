@@ -102,7 +102,7 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 	constexpr size_t kNumThreads = 1;
 #else
 	const size_t kNumCores = std::thread::hardware_concurrency();
-	const size_t kNumThreads = kNumCores*2; // FIXME: this speeds things up on my Intel I7
+	const size_t kNumThreads = kNumCores*2; // *2; // FIXME: this speeds things up on my Intel I7
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
@@ -475,7 +475,8 @@ public:
 			assert(nullptr != instance);
 
 			// I've done some testing and both allocating and clearing memory in the constructor (so in the main thread)
-			// is actually faster than doing it upon entering the thread.
+			// is actually faster than doing it upon entering the thread, which most likely has to do with threads fighting
+			// over the same allocator all at once.
 
 			wordsFound.reserve(s_threadInfo[iThread].load /* If a thread finds 50% of the load that's pretty good! */); 
 
@@ -536,21 +537,9 @@ public:
 				contexts.emplace_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
 				threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
 			}
-			
-			size_t busy = kNumThreads;
-			while (busy)
-			{
-				for (auto& thread : threads)
-				{
-					if (thread.joinable())
-					{
-						thread.join();
-						--busy;
-					}
 
-					std::this_thread::yield();
-				}
-			}
+			for (auto& thread : threads)
+				thread.join();
 
 			m_results.Count  = 0;
 			m_results.Score  = 0;
@@ -683,6 +672,8 @@ private:
 #endif
 			}
 		}
+
+//		std::this_thread::yield();
 	}
 
 	// Sorting the indices into the full word list improves execution time a little.
@@ -728,6 +719,7 @@ private:
 		if (child->IsVoid())
 		{
 			node->RemoveChild(nbIndex);
+
 			// FIXME: find a way to bail out of recursion
 		}
 	}
