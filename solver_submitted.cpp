@@ -1,6 +1,6 @@
 
 /*
-	-- ORIGINAL VERSION AS SUBMITTED FOR UNITY JOB APPLICATION PROCESS --
+	-- ORIGINAL VERSION AS SUBMITTED FOR UNITY JOB APPLICATION PROCESS, PLEASE READ/USE SOLVER.CPP! --
 
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
 	Please take a minute to read this piece of text.

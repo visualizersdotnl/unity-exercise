@@ -23,6 +23,7 @@
 		- It's currently faster on a proper multi-core CPU than the Core M, probably due to those allocator locks.
 		- Compile with full optimization (-O3 for ex.) for best performance.
 		  Disabling C++ exceptions helps too, as they hinder inlining and are not used.
+		  Please look at Albert's makefile for Linux/OSX optimal parameters!
 		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
 		  ** I violate this to tell if this was compiled with or without NED_FLANDERS (see below).
 		- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
