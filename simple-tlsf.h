@@ -10,7 +10,8 @@
 
 #include "alloc-aligned.h"
 #include "bit-tricks.h"
-#include "spinlock.h"
+// #include "spinlock.h"
+#include "inline.h"
 
 const size_t kPageSize = 4096; // Usually right ;)
 
@@ -32,13 +33,13 @@ public:
 		freeAligned(m_pool);
 	}
 
-	__forceinline void* AllocateUnsafe(size_t size, size_t align)
+	BOGGLE_INLINE void* AllocateUnsafe(size_t size, size_t align)
 	{
 		void* address = tlsf_memalign(m_instance, align, size);
 		return address;
 	}
 
-	__forceinline void* Allocate(size_t size, size_t align)
+	BOGGLE_INLINE void* Allocate(size_t size, size_t align)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 //		m_lock.lock();
@@ -47,7 +48,7 @@ public:
 		return address;
 	}
 
-	__forceinline void Free(void* address)
+	BOGGLE_INLINE void Free(void* address)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 //		m_lock.lock();

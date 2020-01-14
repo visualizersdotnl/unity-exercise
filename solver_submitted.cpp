@@ -55,6 +55,7 @@
 
 	- Testbed for "hat-trie" data structure (slow to just hack in due to <analyze>, must use in sane way).
 	- There's a bug in here: 1 word extra (or short, depending on which impl. you trust): why?
+	- Could possibly be faster on Windows/MSVC by using BOGGLE_INLINE.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -345,7 +346,7 @@ private:
 		m_tree = s_dictTree;
 	}
 
-	inline unsigned GetWordScore(const std::string& word) const
+	__inline unsigned GetWordScore(const std::string& word) const
 	{
 		const unsigned LUT[] = { 1, 1, 2, 3, 5, 11 };
 		size_t length = word.length();

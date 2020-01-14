@@ -182,6 +182,7 @@
     <ClInclude Include="..\alloc-aligned.h" />
     <ClInclude Include="..\api.h" />
     <ClInclude Include="..\bit-tricks.h" />
+    <ClInclude Include="..\inline.h" />
     <ClInclude Include="..\random.h" />
     <ClInclude Include="..\simple-tlsf.h" />
     <ClInclude Include="..\spinlock.h" />

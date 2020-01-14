@@ -10,7 +10,7 @@
 		- FIXMEs.
 
 	To do (low priority):
-		- Check compile & run status on Linux and OSX: @Albert!
+		- Check compile & run status on OSX.
 		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver.
 		- Fix class members (notation).
 
@@ -19,12 +19,13 @@
 	makes the algorithm less flexible. What if someone decides to change the rules? ;)
 
 	Notes:
-		- Currently tested on Windows 10, VS2017 + Linux & OSX.
+		- Currently tested on Windows 10 (VS2017), Linux & OSX.
 		- It's currently faster on a proper multi-core CPU than the Core M, probably due to those allocator locks.
 		- Compile with full optimization (-O3 for ex.) for best performance.
 		  Disabling C++ exceptions helps too, as they hinder inlining and are not used.
 		  Please look at Albert's makefile for Linux/OSX optimal parameters!
-		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
+		  And don't hesitate to play with them a little!
+q		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
 		  ** I violate this to tell if this was compiled with or without NED_FLANDERS (see below).
 		- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
 		- All these functions can be called at any time from any thread as the single shared resource, the dictionary,
@@ -61,26 +62,16 @@
 #include <iostream>
 #include <mutex>
 #include <thread>
-// #include <atomic>
-
-// #include <unordered_map>
-// #include <unordered_set>
-// #include <deque>
-// #include <list>
-// #include <set>
-// #include <stack>
-// #include <unordered_set>
 #include <vector>
-// #include <array>
 #include <algorithm>
-
 #include <cassert>
 	
 #include "api.h"
+
 #include "random.h"
-// #include "alloc-aligned.h"
 #include "bit-tricks.h"
 #include "simple-tlsf.h"
+#include "inline.h"
 
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
@@ -131,7 +122,7 @@ public:
 static std::vector<ThreadInfo> s_threadInfo;
 
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
-__forceinline unsigned LetterToIndex(char letter)
+BOGGLE_INLINE unsigned LetterToIndex(char letter)
 {
 	return letter - 'A';
 }
@@ -618,7 +609,7 @@ private:
 	static void ExecuteThread(ThreadContext* context);
 
 private:
-	__forceinline static unsigned GetWordScore(size_t length) /* const */
+	BOGGLE_INLINE static unsigned GetWordScore(size_t length) /* const */
 	{
 		const unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
 		if (length > 8) length = 8;
@@ -626,11 +617,11 @@ private:
 	}
 
 #if defined(DEBUG_STATS)
-	static void __forceinline TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth);
-	static void __forceinline TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth);
 #else
-	static void __forceinline TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node);
-	static void __forceinline TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node);
 #endif
 
 	Results& m_results;
@@ -713,9 +704,9 @@ private:
 }
 
 #if defined(DEBUG_STATS)
-/* static */ __forceinline void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
 #else
-/* static */ __forceinline void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node)
 #endif
 {
 	const auto width = context.width;
@@ -743,9 +734,9 @@ private:
 }
 
 #if defined(DEBUG_STATS)
-/* static */ void __forceinline Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
 #else
-/* static */ void __forceinline Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node)
 #endif
 {
 	Assert(nullptr != node);
