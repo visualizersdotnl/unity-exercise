@@ -7,12 +7,8 @@
 
 #pragma once
 
-#ifndef __forceinline
-#define __forceinline
-#endif
-
 // #include <mutex>
-#
+
 #include "tlsf/tlsf.h"
 
 #include "alloc-aligned.h"

@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-// #define SINGLE_QUERY
+#define NUM_QUERIES 3
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -102,34 +102,19 @@ int main(int argC, char **arguments)
 //	const char *dictPath = "dictionary-bigger.txt";
 	LoadDictionary(dictPath);
 
-#ifdef SINGLE_QUERY
-	printf("- Finding in %ux%u...\n", xSize, ySize);
-#else
-	printf("- Finding in %ux%u... (3 iterations)\n", xSize, ySize);
-#endif
+	printf("- Finding in %ux%u... (%u iterations)\n", xSize, ySize, NUM_QUERIES);
 
 	auto start = std::chrono::high_resolution_clock::now();
 
-#ifdef SINGLE_QUERY
-	Results results[1];
-	results[0] = FindWords(board.get(), xSize, ySize);
-#else
-	Results results[3]; // 3 queries is the sweet spot.
-	results[0] = FindWords(board.get(), xSize, ySize);
-	results[1] = FindWords(board.get(), xSize, ySize);
-	results[2] = FindWords(board.get(), xSize, ySize);
-#endif
+	Results results[NUM_QUERIES];
+	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
+		results[iQuery] = FindWords(board.get(), xSize, ySize);
 
 	auto end = std::chrono::high_resolution_clock::now();
 	auto timing = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
 	printf("-- Results (first run) --\n");
 	printf("Count: %u Score: %u\n", results[0].Count, results[0].Score);
-
-#ifndef SINGLE_QUERY	
-	printf("-- Results (second run) --\n");
-	printf("Count: %u Score: %u\n", results[1].Count, results[1].Score);
-#endif
 
 #ifdef PRINT_WORDS
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 
@@ -149,22 +134,14 @@ int main(int argC, char **arguments)
 	}
 #endif
 
-	FreeWords(results[0]);
-
-#ifndef SINGLE_QUERY
-	FreeWords(results[1]);
-	FreeWords(results[2]);
-#endif
+	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
+		FreeWords(results[iQuery]);
 	
 	FreeDictionary();
 
 	const float time = (float) timing.count();
-#ifdef SINGLE_QUERY
-	printf("\nSolver ran 1 time for avg. %.2f MS or approx. %.3f second(s)\n", time, avgTime*0.001f);
-#else
-	const float avgTime = time/3.f;
-	printf("\nSolver ran 3 times for avg. %.2f MS or approx. %.3f second(s)\n", avgTime, avgTime*0.001f);
-#endif
+	const float avgTime = time/NUM_QUERIES;
+	printf("\nSolver ran %u times for avg. %.2f MS or approx. %.2f second(s)\n", (unsigned) NUM_QUERIES, avgTime, avgTime*0.001f);
 
 	return 0;
 }

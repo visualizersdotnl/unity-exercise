@@ -28,7 +28,7 @@
 		- FIXMEs.
 
 	To do (low priority):
-		- Check compile & run status on Linux and OSX.
+		- Check compile & run status on Linux and OSX: @Albert!
 		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver.
 		- Fix class members (notation).
 
@@ -37,7 +37,7 @@
 	makes the algorithm less flexible. What if someone decides to change the rules? ;)
 
 	Notes:
-		- ** Currently only tested on Windows 10, VS2017 + OSX **
+		- ** Currently only tested on Windows 10, VS2017 + Linux & OSX **
 		- It's currently faster on a proper multi-core CPU than the Core M, probably due to those allocator locks.
 		- Compile with full optimization (-O3 for ex.) for best performance.
 		  Disabling C++ exceptions helps too, as they hinder inlining and are not used.
@@ -68,6 +68,11 @@
 
 // Make VC++ 2015 shut up and walk in line.
 #define _CRT_SECURE_NO_WARNINGS 
+
+/*
+	Albert: at this point detect that you're using GNU C or whatever, but don't just kill __forceinline like you did in the
+	        simple allocator header because that doesn't work.
+*/
 
 #include <stdlib.h>
 #include <stdio.h>
