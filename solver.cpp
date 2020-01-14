@@ -51,11 +51,6 @@
 // Make VC++ 2015 shut up and walk in line.
 #define _CRT_SECURE_NO_WARNINGS 
 
-/*
-	Albert: at this point detect that you're using GNU C or whatever, but don't just kill __forceinline like you did in the
-	        simple allocator header because that doesn't work.
-*/
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
