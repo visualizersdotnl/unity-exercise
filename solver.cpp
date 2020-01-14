@@ -1,29 +1,11 @@
 /*
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
-	Then improved more than a few times later.
-	
-	Please take a minute to read this piece of text.
+	Please check 'solver_submitted.cpp' for original information.
 
-	Rules:
-		- Only use the same word once.
-		- Can't reuse a letter in the same word.
-		- There's no 'Q', but there is 'Qu'.
-		- Words must be at least 3 letters long.
-
-	Scoring (original):
-		- 3, 4 = 1
-		- 5 = 2
-		- 6 = 3
-		- 7 = 5
-		- >7 = 11
-
-	"For the purposes of scoring Qu counts as two letters: squid would score two points (for a five-letter word) despite being formed from a 
-	chain of only four cubes."
-
-	Rules and scoring taken from Wikipedia.
+	This is an optimized version.
 
 	To do (high priority):
-		- Optimization & clean up.
+		- Recursive deletion of nodes of copied dictionary trees is evil and must be handled in 1 pass.
 		- Always check for leaks (Windows debug build does it automatically).
 		- FIXMEs.
 
@@ -37,7 +19,7 @@
 	makes the algorithm less flexible. What if someone decides to change the rules? ;)
 
 	Notes:
-		- ** Currently only tested on Windows 10, VS2017 + Linux & OSX **
+		- Currently tested on Windows 10, VS2017 + Linux & OSX.
 		- It's currently faster on a proper multi-core CPU than the Core M, probably due to those allocator locks.
 		- Compile with full optimization (-O3 for ex.) for best performance.
 		  Disabling C++ exceptions helps too, as they hinder inlining and are not used.
@@ -56,9 +38,8 @@
 	Fiddling around to make this faster; I have a few obvious things in mind; I won't be beautifying
 	the code, so you're warned.
 
-	- This is a non-Morton version that now handily outperforms the Morton version.
+	- This is a non-Morton version that now handily outperforms the Morton version, so I deleted that one.
 	- I must try a pool of sequential nodes instead of loose allocations, with a dictionary instance as their parent, which causes cache misses.
-	- I've used "__forceinline" to manhandle MSVC, which obviously won't fly on OSX/Linux.
 	- There's quite a bit of branching going on but trying to be smart doesn't always please the predictor/pipeline the best way, rather it's quite fast
 	  in critical places because the predictor can do it's work very well (i.e. the cases lean 99% towards one side).
 	- Just loosely using per-thread instances of CustomAlloc doesn't improve performance, I still think it could work because it enhances

@@ -30,12 +30,6 @@
     <ClInclude Include="..\random.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\MZC2D32.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\MZC2D64.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\tlsf\tlsf.h">
       <Filter>tlsf</Filter>
     </ClInclude>
@@ -78,9 +72,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\solver_submitted.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\solver_morton.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

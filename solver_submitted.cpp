@@ -1,6 +1,6 @@
 
 /*
-	!! FIXME: CUSTOM ALLOC !!
+	-- ORIGINAL VERSION AS SUBMITTED FOR UNITY JOB APPLICATION PROCESS --
 
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
 	Please take a minute to read this piece of text.
@@ -27,7 +27,7 @@
 		- https://fgiesen.wordpress.com/2011/01/17/texture-tiling-and-swizzling/
 
 	Notes:
-		- Compile with full optimization (-O3 for ex.) for best performance.
+		- Compile with full optimization (-O3 for ex.) for best performance; tweak per platform/compiler.
 		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
 		- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
 		- All these functions can be called at any time from any thread as the single shared resource, the dictionary,

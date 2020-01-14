@@ -1,9 +1,6 @@
 
-//
 // Simple-as-fuck thread-safe TLSF wrapper.
 // Only use *after* static initialization.
-// For testing purposes.
-//
 
 #pragma once
 
