@@ -792,10 +792,9 @@ private:
 	visited[boardIdx] = true;
 
 	const bool xSafe = iX < width-1;
-	const bool ySafe = iY < height-1;
 
 #if defined(DEBUG_STATS)
-	if (ySafe)
+	if (iY < height-1)
 	{
 		TraverseCall(context, iX, iY+1, node, depth);
 		
@@ -827,22 +826,23 @@ private:
 	// plus due to the enormous advantage that the branching goes 1 way (everywhere but on the edges)
 	// the predictor does it's job and the branches aren't expensive at all.
 
-	if (ySafe) {
+	if (iY < height-1)
+	{
 		TraverseCall(context, iX, iY+1, node);
 
-	if (xSafe) 
-		TraverseCall(context, iX+1, iY+1, node);
-	if (iX > 0)
-		TraverseCall(context, iX-1, iY+1, node);
+		if (xSafe) 
+			TraverseCall(context, iX+1, iY+1, node);
+		if (iX > 0)
+			TraverseCall(context, iX-1, iY+1, node);
 	}
 
 	if (iY > 0) {
 		TraverseCall(context, iX, iY-1, node);
 
-	if (xSafe)
-		TraverseCall(context, iX+1, iY-1, node);
-	if (iX > 0) 
-		TraverseCall(context, iX-1, iY-1, node);
+		if (xSafe)
+			TraverseCall(context, iX+1, iY-1, node);
+		if (iX > 0) 
+			TraverseCall(context, iX-1, iY-1, node);
 	}
 
 	if (iX > 0)
@@ -885,7 +885,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
 		const unsigned gridSize = width*height;
-//		char* sanitized = static_cast<char*>(mallocAligned(gridSize*sizeof(char), kCacheLine));
 		char* sanitized = static_cast<char*>(s_customAlloc.AllocateUnsafe(gridSize*sizeof(char), kCacheLine));
 
 #ifdef NED_FLANDERS
