@@ -64,6 +64,11 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 	Thinking out loud: let's say I end up at the point of traversal with only one letter constantly being asked for (since the
 	only child of the root node is 1 single letter), that probably means I ask for the same piece of memory again and again and
 	cause less cache misses and less needless traversal.
+
+	Conclusion for now: this model works because multiple smaller threads have a smaller footprint due to touching less memory,
+	traversing less and thus are likely to be done much faster. The fact that some sleep more than others might just have to be
+	taken for granted. That however does not mean that the memory allocation strategy for the tree must be altered by using sequential
+	pools.
 */
 
 // Make VC++ 2015 shut up and walk in line.
