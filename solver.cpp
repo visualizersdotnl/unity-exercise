@@ -73,6 +73,9 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 // Make VC++ 2015 shut up and walk in line.
 #define _CRT_SECURE_NO_WARNINGS 
 
+// We don't do C++ exceptions, so don't moan.
+#pragma warning(disable : 4530)
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -208,7 +211,7 @@ public:
 			s_customAlloc.Free(m_root);
 		}
 
-		DictionaryNode* GetRoot() /* const */
+		DictionaryNode* Get() /* const */
 		{
 			return m_root;
 		}
@@ -337,6 +340,7 @@ private:
 	std::lock_guard<std::mutex> m_lock;
 };
 #else
+#pragma warning(disable : 4101)
 class DictionaryLock {};
 #endif // NED_FLANDERS
 
@@ -387,7 +391,7 @@ static void AddWordToDictionary(const std::string& word)
 	if ('Q' == letter)
 		letter = (mt_rand32() & 1) ? 'Q' : 'U';
 
-	const auto iThread = LetterToIndex(letter)%kNumThreads;
+	const unsigned iThread = LetterToIndex(letter)%kNumThreads;
 	
 	// This distributes evenly, but makes things dreadfully slow (see above)
 //	unsigned iThread = s_wordCount%kNumThreads;
@@ -409,7 +413,7 @@ static void AddWordToDictionary(const std::string& word)
 			++iLetter;
 		}
 	}
-
+	
 	// Store.
 	s_dictionary.emplace_back(word);
 	node->m_wordIdx = s_wordCount;
@@ -699,11 +703,11 @@ private:
 	const auto* sanitized = context->sanitized;
 
 	auto* visited = context->visited;
-	const unsigned gridSize = context->gridSize;
+	const auto gridSize = context->gridSize;
 
 	// Create copy of source dictionary tree
 	auto threadCopy = DictionaryNode::ThreadCopy(iThread);
-	DictionaryNode* root = threadCopy.GetRoot();
+	auto* root = threadCopy.Get();
 			
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
