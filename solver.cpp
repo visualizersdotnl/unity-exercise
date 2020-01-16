@@ -701,11 +701,9 @@ private:
 	auto* visited = context->visited;
 	const unsigned gridSize = context->gridSize;
 
+	// Create copy of source dictionary tree
 	auto threadCopy = DictionaryNode::ThreadCopy(iThread);
 	DictionaryNode* root = threadCopy.GetRoot();
-
-	// Don't copy, only works if you do a single query, since the process alters the tree(s)!
-//	DictionaryNode* root = s_dictRoots[iThread];
 			
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
