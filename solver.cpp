@@ -97,7 +97,7 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
 
-// Undef. to enable all the work I put in to please a, as it turns out, very forgiving test harness.
+// Undef. to enable all the work I put in to place a, as it turns out, very forgiving test harness.
 // But basically the only gaurantee here is that this works with my own test!
 // #define NED_FLANDERS
 
