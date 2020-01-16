@@ -715,27 +715,32 @@ private:
 
 	context->maxDepth = 0;
 #endif
-
+	
+	size_t boardIdx = 0;
 	for (unsigned iY = 0; iY < height; ++iY)
 	{
 		for (unsigned iX = 0; iX < width; ++iX)
 		{
-			const size_t boardIdx = iY*width + iX;
-			const unsigned index = sanitized[boardIdx];
+			const unsigned index = sanitized[boardIdx++];
 
-			if (root->HasChild(index))
+			// We know, for now, that the root won't be removed, so we can just get the child node pointer
+			// and see if it's NULL instead of calling 2 functions to get to the same conclusion.
+//			if (root->HasChild(index))
 			{
 				DictionaryNode* child = root->GetChild(index);
-
+				if (nullptr != child)
+				{
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, iX, iY, child, depth);
 #else
 				TraverseBoard(*context, iX, iY, child);
 #endif
+				}
 			}
 		}
-
+		
+		// Yielding at this point saves time, but is it the best place? (FIXME)
 		std::this_thread::yield();
 	}
 

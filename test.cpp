@@ -112,7 +112,7 @@ int main(int argC, char **arguments)
 		results[iQuery] = FindWords(board.get(), xSize, ySize);
 
 	auto end = std::chrono::high_resolution_clock::now();
-	auto timing = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+	auto timing = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
@@ -147,7 +147,7 @@ int main(int argC, char **arguments)
 
 	const float time = (float) timing.count();
 	const float avgTime = time/NUM_QUERIES;
-	printf("\nSolver ran %u times for avg. %.2f MS or approx. %.2f second(s)\n", (unsigned) NUM_QUERIES, avgTime, avgTime*0.001f);
+	printf("\nSolver ran %u times for avg. %.f microsec. or approx. %.2f second(s)\n", (unsigned) NUM_QUERIES, avgTime, avgTime*0.000001f);
 
 	return 0;
 }
