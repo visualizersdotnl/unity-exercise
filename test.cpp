@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 1
+#define NUM_QUERIES 3
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -114,8 +114,13 @@ int main(int argC, char **arguments)
 	auto end = std::chrono::high_resolution_clock::now();
 	auto timing = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
-	printf("-- Results (first run) --\n");
-	printf("Count: %u Score: %u\n", results[0].Count, results[0].Score);
+	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
+	{
+		const auto count  = results[iQuery].Count;
+		const auto score = results[iQuery].Score;
+		printf("Results (run %zu): ", iQuery+1);
+		printf("count: %u, score: %u\n", count, score);
+	}
 
 #ifdef PRINT_WORDS
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 

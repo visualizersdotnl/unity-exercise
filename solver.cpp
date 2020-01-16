@@ -4,11 +4,8 @@
 
 	This is an optimized version.
 
-	To do (high priority):
-		- See below!
-		- Recursive deletion of nodes of copied dictionary trees is evil and must be handled in 1 pass.
-		- Always check for leaks (Windows debug build does it automatically).
-		- FIXMEs.
+	- Always check for leaks (Windows debug build does it automatically).
+	- FIXMEs.
 
 	To do (low priority):
 		- Check compile & run status on OSX.
@@ -42,20 +39,17 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 	the code, so you're warned.
 
 	- This is a non-Morton version that now handily outperforms the Morton version, so I deleted that one.
-	- I must try a pool of sequential nodes instead of loose allocations, with a dictionary instance as their parent, which causes cache misses.
 	- There's quite a bit of branching going on but trying to be smart doesn't always please the predictor/pipeline the best way, rather it's quite fast
 	  in critical places because the predictor can do it's work very well (i.e. the cases lean 99% towards one side).
 	- Just loosely using per-thread instances of CustomAlloc doesn't improve performance, I still think it could work because it enhances
 	  locality and eliminates the need for those mutex locks.
-	- What *would* help is getting rid of all those copied DictionaryNode instances in one go instead of that horrendous delete chain.
 
 	Threading issues (as seen in/by Superluminal):
 
 	- Even distribution of words does not work well, but distributing them by letter is faster even though the thread loads are
-	  uneven.
+	  uneven; it's a matter of how much traversal is done and the impact that has.
 	- Using twice the amount of threads that would be sensible works way faster than bigger loads (once again, loads matter).
 	- Currently there is code in place to use the "right" amount of threads and distribute words evenly but it is commented out.
-	- DeepCopy() is always a pain in the ass. It's disabled for now which restricts us to one FindWords() call.
 	- I could add an option to sort the main dictionary, though currently I am loading a sorted version.
 
 	Use profilers (MSVC & Superluminal) to really figure out what either works so well by accident or what could be fixed
@@ -69,6 +63,11 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 	traversing less and thus are likely to be done much faster. The fact that some sleep more than others might just have to be
 	taken for granted. That however does not mean that the memory allocation strategy for the tree must be altered by using sequential
 	pools.
+
+	** 16/01/2020 **
+
+	I replaced DeepCopy for ThreadCopy, which keeps a sequential list of nodes and hands them out as needed, and releases the
+	entire block of memory when the thread is done. I can see a speed increase without breaking consistent results.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -120,30 +119,32 @@ q		- I could not assume anything about the test harness, so I did not; if you wa
 	inline void debug_print(const char* format, ...) {}
 #endif
 
+constexpr unsigned kAlphaRange = ('Z'-'A')+1;
+
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
 #else
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
-	// FIXME: this *should* be correct for "normal" algorithms
+	// FIXME: this *would* be correct for a "normal" algorithms
 //	const size_t kNumThreads = kNumConcurrrency-1;
 	
-	// FIXME: but *this* is fast, more chunks!
+	// FIXME: but *this*, more threads with lower loads, is faster!
 	const size_t kNumThreads = kNumConcurrrency*2;
+//	const size_t kNumThreads = std::max<size_t>(kAlphaRange-1, (kNumConcurrrency*2) - 1);
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
-
-constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 
 // Number of words and number of nodes (1 for root) per thread.
 class ThreadInfo
 {
 public:
 	ThreadInfo() : 
-		load(0) {}
+		load(0), nodes(1) {}
 
 	size_t load;
+	size_t nodes;
 };
 
 static std::vector<ThreadInfo> s_threadInfo;
@@ -156,6 +157,10 @@ BOGGLE_INLINE unsigned LetterToIndex(char letter)
 
 // FWD.
 static void AddWordToDictionary(const std::string& word);
+class DictionaryNode;
+
+// A tree root per thread.
+static std::vector<DictionaryNode*> s_threadDicts;
 
 class DictionaryNode
 {
@@ -180,83 +185,124 @@ public:
 		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
-	// This copy function uses the global (custom) allocator
-	static DictionaryNode* DeepCopy(DictionaryNode* parent)
+	class ThreadCopy
 	{
-		Assert(nullptr != parent);
+	public:
+		CUSTOM_NEW
+		CUSTOM_DELETE
 
-		DictionaryNode* node = new DictionaryNode(parent->m_wordIdx, parent->m_indexBits);
-
-		unsigned indexBits = node->m_indexBits;
-		unsigned index = 0;
-		while (indexBits)
+		ThreadCopy(unsigned iThread) : 
+			m_iThread(iThread), m_root(nullptr), m_iAlloc(0)
 		{
-			if (indexBits & 1)
-			{
-				node->m_children[index] = DeepCopy(parent->GetChild(index));
-			}
+			// Allocate pool for all necessary nodes.
+			const auto numNodes = s_threadInfo[iThread].nodes;
+			const auto size = numNodes*sizeof(DictionaryNode);
+			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, 16));
 
-			indexBits >>= 1;
-			++index;
+			// Recursively copy them.
+			m_root = Copy(s_threadDicts[iThread]);						
 		}
 
-		return node;
-	}
+		~ThreadCopy()
+		{
+			s_customAlloc.Free(m_root);
+		}
 
+		DictionaryNode* GetRoot() /* const */
+		{
+			return m_root;
+		}
+
+	private:
+		DictionaryNode* Copy(DictionaryNode* parent)
+		{
+			DictionaryNode& node = m_pool[m_iAlloc++];
+			Assert(m_iAlloc < s_threadInfo[m_iThread].nodes);
+
+			node.m_wordIdx   = parent->m_wordIdx;
+			node.m_indexBits = parent->m_indexBits;
+			memset(node.m_children, 0, kAlphaRange*sizeof(DictionaryNode*));
+
+			unsigned indexBits = node.m_indexBits;
+			unsigned index = 0;
+			while (indexBits)
+			{
+				if (indexBits & 1)
+					node.m_children[index] = Copy(parent->GetChild(index));
+
+				indexBits >>= 1;
+				++index;
+			}
+
+			return &node;
+		}
+
+		const unsigned m_iThread;
+
+		DictionaryNode* m_pool;
+		size_t m_iAlloc;
+
+		DictionaryNode* m_root;
+	};
+
+	// Destructor is not called when using ThreadCopy!
 	~DictionaryNode()
 	{
-		// FIXME:
-		// This just looks awful and performs likewise; I need a way
-		// to allocate these children from a sequential pool and let go of them
-		// all at once.
 		for (unsigned iChar = 0; iChar < kAlphaRange; ++iChar)
 			delete m_children[iChar];
 	}
 
 private:
 	// Only called from LoadDictionary().
-	DictionaryNode* AddChild(char letter)
+	DictionaryNode* AddChild(char letter, unsigned iThread)
 	{
 		const unsigned index = LetterToIndex(letter);
 
 		const unsigned bit = 1 << index;
 		if (m_indexBits & bit)
+		{
 			return m_children[index];
+		}
 
+		++s_threadInfo[iThread].nodes;
+			
 		m_indexBits |= bit;
 		return m_children[index] = new DictionaryNode();
 	}
 
 public:
-	__inline unsigned HasChildren() const { return m_indexBits;                    } // Non-zero.
-	__inline bool     IsWord()      const { return -1 != m_wordIdx;                }
-	__inline int      IsVoid()      const { return int(m_indexBits+m_wordIdx)>>31; } // Is 1 (sign bit) if zero children (0) and no word (-1).
+	BOGGLE_INLINE unsigned HasChildren() const { return m_indexBits;                    } // Non-zero.
+	BOGGLE_INLINE bool     IsWord()      const { return -1 != m_wordIdx;                }
+	BOGGLE_INLINE int      IsVoid()      const { return int(m_indexBits+m_wordIdx)>>31; } // Is 1 (sign bit) if zero children (0) and no word (-1).
 
 	// Returns zero if node is now a dead end.
-	__inline unsigned RemoveChild(unsigned index)
+	BOGGLE_INLINE unsigned RemoveChild(unsigned index)
 	{
 		Assert(index < kAlphaRange);
+		Assert(HasChild(index));
+
 		const unsigned bit = 1 << index;
 		m_indexBits ^= bit;
+
 		return m_indexBits;
 	}
 
 	// Returns non-zero if true.
-	__inline unsigned HasChild(unsigned index)
+	BOGGLE_INLINE unsigned HasChild(unsigned index)
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
 		return m_indexBits & bit;
 	}
 
-	__inline DictionaryNode* GetChild(unsigned index)
+	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
 	{
 		Assert(HasChild(index));
 		return m_children[index];
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
-	__inline size_t GetWordIndex() /*  const */
+	BOGGLE_INLINE size_t GetWordIndex() /*  const */
 	{
 		const auto index = m_wordIdx;
 		m_wordIdx = -1;
@@ -272,10 +318,7 @@ private:
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 
-// A tree root per thread.
-static std::vector<DictionaryNode*> s_dictRoots;
-
-// Sequential dictionary of all full words (FIXME: yet unsorted).
+// Sequential dictionary of all full words (FIXME: might be unsorted, depends on dictionary loaded).
 static std::vector<std::string> s_dictionary;
 
 // Counters, the latter being useful to reserve space.
@@ -340,28 +383,23 @@ static void AddWordToDictionary(const std::string& word)
 	}
 
 	// FIXME: this distributes by letter, which does a better job at containing the amount of traversal
-	const char firstLetter = word[0];
-	unsigned iThread = 0;
-	if ('Q' == firstLetter)
-	{
-		// Otherwise this thread, for 'U', would remain unused.
-		if (kNumThreads > 20)
-			iThread = (rand() & 1) ? 16 : 20;
-	}
-	else
-		iThread = LetterToIndex(firstLetter)%kNumThreads;
+	char letter = word[0];
+	if ('Q' == letter)
+		letter = (mt_rand32() & 1) ? 'Q' : 'U';
+
+	const auto iThread = LetterToIndex(letter)%kNumThreads;
 	
 	// This distributes evenly, but makes things dreadfully slow (see above)
 //	unsigned iThread = s_wordCount%kNumThreads;
 
-	DictionaryNode* node = s_dictRoots[iThread];
+	DictionaryNode* node = s_threadDicts[iThread];
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
 		const char letter = *iLetter;
 
 		// Get or create child node.
-		node = node->AddChild(letter);
+		node = node->AddChild(letter, iThread);
 
 		// Handle 'Qu' rule.
 		if ('Q' == letter)
@@ -399,7 +437,7 @@ void LoadDictionary(const char* path)
 	{
 		size_t iThread = kNumThreads;
 		while (iThread-- > 0)
-			s_dictRoots.emplace_back(new DictionaryNode());
+			s_threadDicts.emplace_back(new DictionaryNode());
 
 		int character;
 		std::string word;
@@ -426,15 +464,17 @@ void LoadDictionary(const char* path)
 
 		fclose(file);
 
+#ifdef NED_FLANDERS		
 		// Check thread load total.
 		size_t count = 0;
 		for (auto& info : s_threadInfo)
 		{
 			count += info.load;
 		}
-		
+
 		if (count != s_wordCount)
 			debug_print("Thread word count %zu != total word count %zu!", count, s_wordCount);
+#endif
 	}
 
 	debug_print("Dictionary loaded. %zu words, longest being %u characters\n", s_wordCount, s_longestWord);
@@ -445,10 +485,10 @@ void FreeDictionary()
 	DictionaryLock lock;
 	{
 		// Delete roots;
-		for (auto* root : s_dictRoots) 
+		for (auto* root : s_threadDicts) 
 			delete root;
 
-		s_dictRoots.clear();
+		s_threadDicts.clear();
 
 		// Reset thread information.		
 		s_threadInfo.resize(kNumThreads, ThreadInfo());
@@ -496,31 +536,11 @@ public:
 ,		sanitized(instance->m_sanitized)
 ,		width(instance->m_width)
 ,		height(instance->m_height)
-//,		visited(nullptr)
-,		visited(static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine)))
+,		visited(nullptr)
 ,		score(0)
 ,		reqStrBufLen(0)
 		{
 			Assert(nullptr != instance);
-
-			// I've done some testing and both allocating and clearing memory in the constructor (so in the main thread)
-			// is actually faster than doing it upon entering the thread, which likely has to do with threads fighting
-			// over the same resources at once.
-
-			// Clearing the memory in the same thread (and thus on the same core) is also quicker than doing it on thread initialization.
-			if (gridSize >= 32)
-			{
-				// This has proven to be a little faster than memset().
-				size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
-				int* pWrite = reinterpret_cast<int*>(visited);
-				while (numStreams--)
-					_mm_stream_si32(pWrite++, 0);
-			}
-			else
-				memset(visited, 0, gridSize*sizeof(bool));
-
-			// If a thread finds 50% it's pretty good.
-			wordsFound.reserve(s_threadInfo[iThread].load >> 1); 
 		}
 
 		~ThreadContext()
@@ -528,12 +548,12 @@ public:
 			s_customAlloc.Free(visited);
 		}
 
-/*
 		void OnExecuteThread()
 		{
+			// Handle allocation and initialization of memory.
+
 			visited = static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine));
 
-			// Clearing the memory in the same thread (and thus on the same core) is also quicker than doing it on thread initialization.
 			if (gridSize >= 32)
 			{
 				// This has proven to be a little faster than memset().
@@ -548,7 +568,6 @@ public:
 			// If a thread finds 50% it's pretty good.
 			wordsFound.reserve(s_threadInfo[iThread].load >> 1); 
 		}
-*/
 
 		// Input
 		const unsigned iThread;
@@ -674,7 +693,7 @@ private:
 
 /* static */ void Query::ExecuteThread(ThreadContext* context)
 {
-//	context->OnExecuteThread();
+	context->OnExecuteThread();
 
 	const unsigned iThread = context->iThread;
 	const auto* sanitized = context->sanitized;
@@ -682,14 +701,17 @@ private:
 	auto* visited = context->visited;
 	const unsigned gridSize = context->gridSize;
 
-	// std::unique_ptr<DictionaryNode> root(DictionaryNode::DeepCopy(s_dictRoots[iThread]));
-	DictionaryNode* root = s_dictRoots[iThread];
+	auto threadCopy = DictionaryNode::ThreadCopy(iThread);
+	DictionaryNode* root = threadCopy.GetRoot();
+
+	// Don't copy, only works if you do a single query, since the process alters the tree(s)!
+//	DictionaryNode* root = s_dictRoots[iThread];
 			
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
 
 #if defined(DEBUG_STATS)
-	debug_print("Thread %u has a load of %zu words.\n", iThread, s_threadInfo[iThread].load);
+	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", iThread, s_threadInfo[iThread].load, s_threadInfo[iThread].nodes);
 
 	context->maxDepth = 0;
 #endif
@@ -759,8 +781,6 @@ private:
 		if (child->IsVoid())
 		{
 			node->RemoveChild(nbIndex);
-
-			// FIXME: find a way to bail out of recursion, or isn't this a big problem?
 		}
 	}
 }
@@ -781,10 +801,6 @@ private:
 	auto* visited = context.visited;
 	if (true == visited[boardIdx])
 		return;
-
-	// Why does this eat such a vile amount of cycles?
-//	if (0 == node->HasChildren())
-//		return;
 
 #if defined(DEBUG_STATS)
 	Assert(depth < s_longestWord);
@@ -856,12 +872,14 @@ private:
 	if (xSafe)
 		TraverseCall(context, iX+1, iY, node);
 #endif
+		
+	visited[boardIdx] = false;
 
+	// It's faster to do this *after* traversal; I haven't looked at why exactly that is, might have to do with the
+	// branch predictor again.
 	const size_t wordIdx = node->GetWordIndex();
 	if (-1 != wordIdx)
 		context.wordsFound.emplace_back(wordIdx);
-		
-	visited[boardIdx] = false;
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
