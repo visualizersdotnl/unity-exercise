@@ -755,9 +755,11 @@ private:
 		// Yielding at this point saves time, but is it the best place? (FIXME)
 		std::this_thread::yield();
 	}
-
+	
 	auto& wordsFound = context->wordsFound;
-	std::sort(wordsFound.begin(), wordsFound.end());
+
+	// Due to current circumstances (locality?) this doesn't do well for performance.
+//	std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
 	for (auto wordIdx : wordsFound)
