@@ -290,9 +290,8 @@ public:
 
 		// Get a copy of the current dictionary.
 		// TraverseBoard() changes the local copy at runtime, so we need this in case of multiple Execute() calls.
-		// GetLatestDictionary();
-		// ^ FIXME!
-
+		GetLatestDictionary();
+	
 		m_wordsFound.clear();
 
 		// if (false == m_tree.children.empty())
@@ -303,8 +302,8 @@ public:
 				{
 					std::string letters;
 //					TraverseBoard(iY, iX, letters);
-//					TraverseBoard(iY, iX, &m_tree);
-					TraverseBoard(iY, iX, &s_dictTree);
+					TraverseBoard(iY, iX, &m_tree);
+//					TraverseBoard(iY, iX, &s_dictTree);
 				}
 			}
 		}

@@ -728,9 +728,9 @@ private:
 #endif
 	
 	size_t boardIdx = 0;
-	for (unsigned iY = 0; iY < height; ++iY)
+	for (unsigned iY = 0; iY < height; ++iY) // ++iY
 	{
-		for (unsigned iX = 0; iX < width; ++iX)
+		for (unsigned iX = 0; iX < width; iX++) // ++iX
 		{
 			const unsigned index = sanitized[boardIdx++];
 
@@ -749,16 +749,18 @@ private:
 #endif
 				}
 			}
-	
 		}
 		
 		// Yielding at this point saves time, but is it the best place? (FIXME)
 		std::this_thread::yield();
+
+		if (false == root->HasChildren())
+			break;
 	}
 	
 	auto& wordsFound = context->wordsFound;
 
-	// Due to current circumstances (locality?) this doesn't do well for performance.
+	// Due to current circumstances (locality?) this doesn't do well for performance.e
 //	std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
@@ -866,30 +868,34 @@ private:
 	// plus due to the enormous advantage that the branching goes 1 way (everywhere but on the edges)
 	// the predictor does it's job and the branches aren't expensive at all.
 
-	if (iY < height-1)
+	bool hasChildren = 0 != node->HasChildren(); // Checking here prior to traversal gives a small speed boost (18/01/2020)
+	if (true == hasChildren) 
 	{
-		TraverseCall(context, iX, iY+1, node);
+		if (iY < height-1)
+		{
+			TraverseCall(context, iX, iY+1, node);
 
-		if (xSafe) 
-			TraverseCall(context, iX+1, iY+1, node);
+			if (xSafe) 
+				TraverseCall(context, iX+1, iY+1, node);
+			if (iX > 0)
+				TraverseCall(context, iX-1, iY+1, node);
+		}
+	
+		if (iY > 0) {
+			TraverseCall(context, iX, iY-1, node);
+
+			if (xSafe)
+				TraverseCall(context, iX+1, iY-1, node);
+			if (iX > 0) 
+				TraverseCall(context, iX-1, iY-1, node);
+		}
+
 		if (iX > 0)
-			TraverseCall(context, iX-1, iY+1, node);
-	}
-
-	if (iY > 0) {
-		TraverseCall(context, iX, iY-1, node);
+			TraverseCall(context, iX-1, iY, node);
 
 		if (xSafe)
-			TraverseCall(context, iX+1, iY-1, node);
-		if (iX > 0) 
-			TraverseCall(context, iX-1, iY-1, node);
+			TraverseCall(context, iX+1, iY, node);
 	}
-
-	if (iX > 0)
-		TraverseCall(context, iX-1, iY, node);
-
-	if (xSafe)
-		TraverseCall(context, iX+1, iY, node);
 #endif
 		
 	visited[boardIdx] = false;
