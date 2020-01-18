@@ -133,8 +133,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 //	const size_t kNumThreads = kNumConcurrrency-1;
 	
 	// FIXME: but *this*, more threads with lower loads, is faster!
-	const size_t kNumThreads = kNumConcurrrency*2;
-//	const size_t kNumThreads = std::max<size_t>(kAlphaRange-1, (kNumConcurrrency*2) - 1);
+	const size_t kNumThreads = (kNumConcurrrency*2)-1;
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
@@ -614,8 +613,18 @@ public:
 				threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
 			}
 			
-			for (auto& thread : threads)
-				thread.join();
+//			auto busy = kNumThreads;
+//			while (busy)
+			{
+				for (auto& thread : threads)
+				{
+//					if (thread.joinable())
+					{
+						thread.join();
+//						--busy;
+					}
+				}
+			}
 
 			m_results.Count  = 0;
 			m_results.Score  = 0;
@@ -740,6 +749,7 @@ private:
 #endif
 				}
 			}
+	
 		}
 		
 		// Yielding at this point saves time, but is it the best place? (FIXME)
