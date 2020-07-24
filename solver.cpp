@@ -1,6 +1,6 @@
 /*
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
-	Please check 'solver_submitted.cpp' for original information.
+	Please check 'solver_submitted.cpp' for original submission version, this is the competition one.
 
 	This is an optimized version.
 
