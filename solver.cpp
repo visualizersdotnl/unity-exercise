@@ -23,7 +23,7 @@
 		  Disabling C++ exceptions helps too, as they hinder inlining and are not used.
 		  Please look at Albert's makefile for Linux/OSX optimal parameters!
 		  And don't hesitate to play with them a little!
-q		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
+		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
 		  ** I violate this to tell if this was compiled with or without NED_FLANDERS (see below).
 		- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
 		- All these functions can be called at any time from any thread as the single shared resource, the dictionary,
@@ -760,7 +760,7 @@ private:
 	
 	auto& wordsFound = context->wordsFound;
 
-	// Due to current circumstances (locality?) this doesn't do well for performance.e
+	// Due to current circumstances (locality?) this doesn't do well for performance.
 //	std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
