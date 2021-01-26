@@ -506,7 +506,7 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
-#include <emmintrin.h>
+// #include <emmintrin.h>
 
 class Query
 {
@@ -557,13 +557,14 @@ public:
 
 			visited = static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine));
 
-			if (gridSize >= 32)
+			if (false) // gridSize >= 32)
 			{
+				
 				// This has proven to be a little faster than memset().
-				size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
-				int* pWrite = reinterpret_cast<int*>(visited);
-				while (numStreams--)
-					_mm_stream_si32(pWrite++, 0);
+//				size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
+//				int* pWrite = reinterpret_cast<int*>(visited);
+//				while (numStreams--)
+//					_mm_stream_si32(pWrite++, 0);
 			}
 			else
 				memset(visited, 0, gridSize*sizeof(bool));
