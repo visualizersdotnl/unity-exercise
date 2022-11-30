@@ -129,11 +129,9 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #else
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
-	// FIXME: this *would* be correct for a "normal" algorithms
-//	const size_t kNumThreads = kNumConcurrrency-1;
-	
-	// FIXME: but *this*, more threads with lower loads, is faster!
-	const size_t kNumThreads = (kNumConcurrrency*2)-1;
+	// FIXME	
+	// const size_t kNumThreads = kNumConcurrrency;
+	const size_t kNumThreads = (kNumConcurrrency*4);
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
@@ -414,7 +412,7 @@ static void AddWordToDictionary(const std::string& word)
 	}
 	
 	// Store.
-	s_dictionary.emplace_back(word);
+	s_dictionary.push_back(word);
 	node->m_wordIdx = s_wordCount;
 
 	++s_threadInfo[iThread].load;
@@ -569,8 +567,8 @@ public:
 			else
 				memset(visited, 0, gridSize*sizeof(bool));
 
-			// If a thread finds 50% it's pretty good.
-			wordsFound.reserve(s_threadInfo[iThread].load >> 1); 
+			// Reserve for 100%
+			wordsFound.reserve(s_threadInfo[iThread].load); 
 		}
 
 		// Input
@@ -686,8 +684,8 @@ private:
 private:
 	BOGGLE_INLINE static unsigned GetWordScore(size_t length) /* const */
 	{
-		const unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
-		if (length > 8) length = 8;
+		constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11,  11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11 };
+		//if (length > 8) length = 8;
 		return kLUT[length-3];
 	}
 
@@ -736,7 +734,7 @@ private:
 			const unsigned index = sanitized[boardIdx++];
 
 			// We know, for now, that the root won't be removed, so we can just get the child node pointer
-			// and see if it's NULL instead of calling 2 functions to get to the same conclusion.
+			// and see if it's NULL instead of calling 2 functions to come to the same conclusion.
 //			if (root->HasChild(index))
 			{
 				DictionaryNode* child = root->GetChild(index);
@@ -773,7 +771,9 @@ private:
 	}
 		
 #if defined(DEBUG_STATS)
-	const float missesPct = ((float)wordsFound.size()/s_threadInfo[iThread].load)*100.f;
+	float missesPct = 0.f;
+	if (s_threadInfo[iThread].load > 0.f)
+		missesPct = ((float)wordsFound.size()/s_threadInfo[iThread].load)*100.f;
 	debug_print("Thread %u has max. traversal depth %u (max. %u), misses: %.2f percent of load.\n", iThread, context->maxDepth, s_longestWord, missesPct);
 #endif
 }
@@ -792,17 +792,21 @@ private:
 
 	if (0 != node->HasChild(nbIndex))
 	{
-		auto* child = node->GetChild(nbIndex);
+		auto* visited = context.visited;
+		if (false == visited[nbIndex])
+		{
+			auto* child = node->GetChild(nbIndex);
 #if defined(DEBUG_STATS)
-		TraverseBoard(context, iX, iY, child, depth);
+			TraverseBoard(context, iX, iY, child, depth);
 #else
-		TraverseBoard(context, iX, iY, child);
+			TraverseBoard(context, iX, iY, child);
 #endif
 
-		// Child node exhausted?
-		if (child->IsVoid())
-		{
-			node->RemoveChild(nbIndex);
+			// Child node exhausted?
+			if (child->IsVoid())
+			{
+				node->RemoveChild(nbIndex);
+			}
 		}
 	}
 }
@@ -821,8 +825,8 @@ private:
 	const unsigned boardIdx = iY*width + iX;
 
 	auto* visited = context.visited;
-	if (true == visited[boardIdx])
-		return;
+	// if (true == visited[boardIdx])
+	//	return;
 
 #if defined(DEBUG_STATS)
 	Assert(depth < s_longestWord);
