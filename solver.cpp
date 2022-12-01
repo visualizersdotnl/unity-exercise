@@ -749,12 +749,13 @@ private:
 				}
 			}
 		}
+
+		if (false == root->HasChildren())
+			break;
 		
 		// Yielding at this point saves time, but is it the best place? (FIXME)
 		std::this_thread::yield();
 
-		if (false == root->HasChildren())
-			break;
 	}
 	
 	auto& wordsFound = context->wordsFound;
