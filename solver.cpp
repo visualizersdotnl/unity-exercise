@@ -793,7 +793,7 @@ private:
 	if (0 != node->HasChild(nbIndex))
 	{
 		auto* visited = context.visited;
-		if (false == visited[nbIndex])
+		if (false == visited[nbBoardIdx])
 		{
 			auto* child = node->GetChild(nbIndex);
 #if defined(DEBUG_STATS)
