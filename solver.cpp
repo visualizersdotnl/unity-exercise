@@ -127,11 +127,11 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
 #else
-	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
+	// const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
 	// FIXME	
 	// const size_t kNumThreads = kNumConcurrrency;
-	const size_t kNumThreads = (kNumConcurrrency*4);
+	const size_t kNumThreads = kAlphaRange;
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
@@ -323,7 +323,7 @@ static std::vector<std::string> s_dictionary;
 
 // Counters, the latter being useful to reserve space.
 static unsigned s_longestWord;
-static unsigned s_longestWords[64] = { 0 }; // FIXME: just 64 cores, no more, no more :)
+static unsigned s_longestWords[kAlphaRange] = { 0 }; // FIXME: just 64 cores, no more, no more :)
 static size_t s_wordCount;
 
 #ifdef NED_FLANDERS
@@ -387,9 +387,10 @@ static void AddWordToDictionary(const std::string& word)
 	// FIXME: this distributes by letter, which does a better job at containing the amount of traversal
 	char letter = word[0];
 	if ('Q' == letter)
-		letter = (mt_rand32() & 1) ? 'Q' : 'U';
+		letter = (mt_rand32() & 3) ? 'Q' : 'U';
 
-	const unsigned iThread = LetterToIndex(letter)%kNumThreads;
+	const unsigned threadMul = 1; // mt_randu32()%kNumConcurrrency;
+	const unsigned iThread = (LetterToIndex(letter)%kNumThreads)*threadMul;
 	
 	// This distributes evenly, but makes things dreadfully slow (see above)
 //	unsigned iThread = s_wordCount%kNumThreads;
