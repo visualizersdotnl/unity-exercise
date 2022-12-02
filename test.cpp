@@ -153,7 +153,7 @@ int main(int argC, char **arguments)
 	std::sort(durations.begin(), durations.end());
 
 	const float time = (float) durations[0].count(); 
-	printf("\nSolver ran %u times for avg. %.f microsec. or approx. %.3f second(s)\n", (unsigned) NUM_QUERIES, time, time*0.000001f);
+	printf("\nSolver ran %u times, fastest: %.f microsec. or approx. %.3f second(s)\n", (unsigned) NUM_QUERIES, time, time*0.000001f);
 
 	return 0;
 }
