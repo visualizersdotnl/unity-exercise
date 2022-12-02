@@ -131,7 +131,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 	
 	// FIXME	
 	// const size_t kNumThreads = kNumConcurrrency;
-	const size_t kNumThreads = (kNumConcurrrency*4);
+	const size_t kNumThreads = (kNumConcurrrency*8);
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
@@ -323,6 +323,7 @@ static std::vector<std::string> s_dictionary;
 
 // Counters, the latter being useful to reserve space.
 static unsigned s_longestWord;
+static unsigned s_longestWords[64] = { 0 }; // FIXME!
 static size_t s_wordCount;
 
 #ifdef NED_FLANDERS
@@ -395,6 +396,7 @@ static void AddWordToDictionary(const std::string& word)
 
 	DictionaryNode* node = s_threadDicts[iThread];
 
+	unsigned letterLen = 0;
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
 		const char letter = *iLetter;
@@ -409,7 +411,13 @@ static void AddWordToDictionary(const std::string& word)
 			// Skip over 'U'.
 			++iLetter;
 		}
+
+
+		++letterLen;
 	}
+
+	if (s_longestWords[iThread] < letterLen)
+		s_longestWords[iThread] = letterLen;
 	
 	// Store.
 	s_dictionary.push_back(word);
@@ -692,13 +700,8 @@ private:
 		return kLUT[length-3];
 	}
 
-#if defined(DEBUG_STATS)
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth);
-#else
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node);
-#endif
 
 	Results& m_results;
 	const char* m_sanitized;
@@ -743,11 +746,11 @@ private:
 				DictionaryNode* child = root->GetChild(index);
 				if (nullptr != child)
 				{
+					unsigned depth = 0;
 #if defined(DEBUG_STATS)
-				unsigned depth = 0;
-				TraverseBoard(*context, iX, iY, child, depth);
+					TraverseBoard(*context, iX, iY, child, depth);
 #else
-				TraverseBoard(*context, iX, iY, child);
+					TraverseBoard(*context, iX, iY, child, depth);
 #endif
 				}
 			}
@@ -785,7 +788,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
 #endif
 {
 	const auto width = context.width;
@@ -803,7 +806,7 @@ private:
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, iX, iY, child, depth);
 #else
-			TraverseBoard(context, iX, iY, child);
+			TraverseBoard(context, iX, iY, child, depth);
 #endif
 
 			// Child node exhausted?
@@ -818,10 +821,15 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
 #endif
 {
 	Assert(nullptr != node);
+
+
+	if (depth > s_longestWords[context.iThread])
+		return;
+
 
 	const auto width = context.width;
 	const auto height = context.height;
@@ -835,10 +843,11 @@ private:
 #if defined(DEBUG_STATS)
 	Assert(depth < s_longestWord);
 	context.maxDepth = std::max(context.maxDepth, depth);
-	++depth;
 #endif
 
 	// Recurse, as we've got a node that might be going somewhewre.
+
+	++depth;
 	
 	visited[boardIdx] = true;
 
@@ -870,8 +879,6 @@ private:
 
 	if (xSafe)
 		TraverseCall(context, iX+1, iY, node, depth);
-
-		--depth;
 #else
 	// This has been ordered specifically to be as cache friendly as possible,
 	// plus due to the enormous advantage that the branching goes 1 way (everywhere but on the edges)
@@ -882,30 +889,32 @@ private:
 	{
 		if (iY < height-1)
 		{
-			TraverseCall(context, iX, iY+1, node);
+			TraverseCall(context, iX, iY+1, node, depth);
 
 			if (xSafe) 
-				TraverseCall(context, iX+1, iY+1, node);
+				TraverseCall(context, iX+1, iY+1, node, depth);
 			if (iX > 0)
-				TraverseCall(context, iX-1, iY+1, node);
+				TraverseCall(context, iX-1, iY+1, node, depth);
 		}
 	
 		if (iY > 0) {
-			TraverseCall(context, iX, iY-1, node);
+			TraverseCall(context, iX, iY-1, node, depth);
 
 			if (xSafe)
-				TraverseCall(context, iX+1, iY-1, node);
+				TraverseCall(context, iX+1, iY-1, node, depth);
 			if (iX > 0) 
-				TraverseCall(context, iX-1, iY-1, node);
+				TraverseCall(context, iX-1, iY-1, node, depth);
 		}
 
 		if (iX > 0)
-			TraverseCall(context, iX-1, iY, node);
+			TraverseCall(context, iX-1, iY, node, depth);
 
 		if (xSafe)
-			TraverseCall(context, iX+1, iY, node);
+			TraverseCall(context, iX+1, iY, node, depth);
 	}
 #endif
+
+	--depth;
 		
 	visited[boardIdx] = false;
 
