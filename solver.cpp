@@ -197,7 +197,7 @@ public:
 			// Allocate pool for all necessary nodes.
 			const auto numNodes = s_threadInfo[iThread].nodes;
 			const auto size = numNodes*sizeof(DictionaryNode);
-			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, 16));
+			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
 
 			// Recursively copy them.
 			m_root = Copy(s_threadDicts[iThread]);						
@@ -608,8 +608,11 @@ public:
 			
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
-				contexts.emplace_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
-				threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
+				if (s_threadInfo[iThread].load > 0) // This check is only useful if the distribution calc. cocks up (FIXME)
+				{
+					contexts.emplace_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
+					threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
+				}
 			}
 			
 //			auto busy = kNumThreads;
