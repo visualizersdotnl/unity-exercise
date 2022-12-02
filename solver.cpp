@@ -885,7 +885,7 @@ private:
 	// plus due to the enormous advantage that the branching goes 1 way (everywhere but on the edges)
 	// the predictor does it's job and the branches aren't expensive at all.
 
-	bool hasChildren = 0 != node->HasChildren(); // Checking here prior to traversal gives a small speed boost (18/01/2020)
+	const bool hasChildren = 0 != node->HasChildren(); // Checking here prior to traversal gives a small speed boost (18/01/2020)
 	if (true == hasChildren) 
 	{
 		if (iY < height-1)
