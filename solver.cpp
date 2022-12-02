@@ -127,11 +127,11 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
 #else
-	// const size_t kNumConcurrrency = std::thread::hardware_concurrency();
+	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
 	// FIXME	
-	// const size_t kNumThreads = kNumConcurrrency;
-	const size_t kNumThreads = kAlphaRange;
+	const size_t kNumThreads = 4*kNumConcurrrency;
+	// const size_t kNumThreads = kAlphaRange;
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
@@ -198,6 +198,7 @@ public:
 			const auto numNodes = s_threadInfo[iThread].nodes;
 			const auto size = numNodes*sizeof(DictionaryNode);
 			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
+			memset(m_pool, 0, size);
 
 			// Recursively copy them.
 			m_root = Copy(s_threadDicts[iThread]);						
@@ -221,7 +222,7 @@ public:
 
 			node.m_wordIdx   = parent->m_wordIdx;
 			node.m_indexBits = parent->m_indexBits;
-			memset(node.m_children, 0, kAlphaRange*sizeof(DictionaryNode*));
+			/// memset(node.m_children, 0, kAlphaRange*sizeof(DictionaryNode*));
 
 			unsigned indexBits = node.m_indexBits;
 			unsigned index = 0;
@@ -323,7 +324,7 @@ static std::vector<std::string> s_dictionary;
 
 // Counters, the latter being useful to reserve space.
 static unsigned s_longestWord;
-static unsigned s_longestWords[kAlphaRange] = { 0 }; // FIXME: just 64 cores, no more, no more :)
+static unsigned s_longestWords[64] = { 0 }; // FIXME: just 64 cores, no more, no more :)
 static size_t s_wordCount;
 
 #ifdef NED_FLANDERS
@@ -387,10 +388,9 @@ static void AddWordToDictionary(const std::string& word)
 	// FIXME: this distributes by letter, which does a better job at containing the amount of traversal
 	char letter = word[0];
 	if ('Q' == letter)
-		letter = (mt_rand32() & 3) ? 'Q' : 'U';
+		letter = (mt_rand32() & 1) ? 'Q' : 'U';
 
-	const unsigned threadMul = 1; // mt_randu32()%kNumConcurrrency;
-	const unsigned iThread = (LetterToIndex(letter)%kNumThreads)*threadMul;
+	const unsigned iThread = ((LetterToIndex(letter))%kNumThreads);
 	
 	// This distributes evenly, but makes things dreadfully slow (see above)
 //	unsigned iThread = s_wordCount%kNumThreads;
@@ -576,7 +576,7 @@ public:
 			else
 				memset(visited, 0, gridSize*sizeof(bool));
 
-			// Reserve for 100%
+			// Reserve for 50%
 			wordsFound.reserve(s_threadInfo[iThread].load); 
 		}
 
@@ -696,8 +696,11 @@ private:
 private:
 	BOGGLE_INLINE static unsigned GetWordScore(size_t length) /* const */
 	{
-		constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11,  11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11 };
-		//if (length > 8) length = 8;
+		if (length > 8)
+			length = 8;
+
+
+		constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
 		return kLUT[length-3];
 	}
 
@@ -753,22 +756,21 @@ private:
 #else
 					TraverseBoard(*context, iX, iY, child, depth);
 #endif
+
+					if (false == root->HasChildren())
+						break;
 				}
 			}
 		}
 
-		if (false == root->HasChildren())
-			break;
 		
-		// Yielding at this point saves time, but is it the best place? (FIXME)
-		std::this_thread::yield();
-
+		if (iY&1) std::this_thread::yield();
 	}
 	
 	auto& wordsFound = context->wordsFound;
 
-	// Due to current circumstances (locality?) this doesn't do well for performance.
-//	std::sort(wordsFound.begin(), wordsFound.end());
+	// Due to current circumstances (locality?) this doesn't do well for performance, or?
+	std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
 	for (auto wordIdx : wordsFound)
@@ -792,6 +794,7 @@ private:
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
 #endif
 {
+
 	const auto width = context.width;
 	const unsigned nbBoardIdx = iY*width + iX;
 
@@ -803,9 +806,8 @@ private:
 		auto* visited = context.visited;
 		if (false == visited[nbBoardIdx])
 		{
-			if (depth > s_longestWords[context.iThread])
-				return;
-
+		if (depth <= s_longestWords[context.iThread])
+		{
 			auto* child = node->GetChild(nbIndex);
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, iX, iY, child, depth);
@@ -818,6 +820,7 @@ private:
 			{
 				node->RemoveChild(nbIndex);
 			}
+		}
 		}
 	}
 }
@@ -855,6 +858,12 @@ private:
 	const bool xSafe = iX < width-1;
 
 #if defined(DEBUG_STATS)
+	if (iX > 0)
+		TraverseCall(context, iX-1, iY, node, depth);
+
+	if (xSafe)
+		TraverseCall(context, iX+1, iY, node, depth);
+
 	if (iY < height-1)
 	{
 		TraverseCall(context, iX, iY+1, node, depth);
@@ -874,20 +883,17 @@ private:
 		if (iX > 0) 
 			TraverseCall(context, iX-1, iY-1, node, depth);
 	}
-
-	if (iX > 0)
-		TraverseCall(context, iX-1, iY, node, depth);
-
-	if (xSafe)
-		TraverseCall(context, iX+1, iY, node, depth);
 #else
-	// This has been ordered specifically to be as cache friendly as possible,
-	// plus due to the enormous advantage that the branching goes 1 way (everywhere but on the edges)
-	// the predictor does it's job and the branches aren't expensive at all.
+	// USUALLY the predictor does it's job and the branches aren't expensive at all.
 
-	const bool hasChildren = 0 != node->HasChildren(); // Checking here prior to traversal gives a small speed boost (18/01/2020)
-	if (true == hasChildren) 
+//	if (0 != node->HasChildren()) // <- You'd think this is smart, but it's so much better if the CPU can just crunch along instead of evaluating branches
 	{
+		if (iX > 0)
+			TraverseCall(context, iX-1, iY, node, depth);
+
+		if (xSafe)
+			TraverseCall(context, iX+1, iY, node, depth);
+
 		if (iY < height-1)
 		{
 			TraverseCall(context, iX, iY+1, node, depth);
@@ -906,12 +912,6 @@ private:
 			if (iX > 0) 
 				TraverseCall(context, iX-1, iY-1, node, depth);
 		}
-
-		if (iX > 0)
-			TraverseCall(context, iX-1, iY, node, depth);
-
-		if (xSafe)
-			TraverseCall(context, iX+1, iY, node, depth);
 	}
 #endif
 
@@ -923,7 +923,7 @@ private:
 	// branch predictor again.
 	const size_t wordIdx = node->GetWordIndex();
 	if (-1 != wordIdx)
-		context.wordsFound.emplace_back(wordIdx);
+		context.wordsFound.push_back(wordIdx);
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
