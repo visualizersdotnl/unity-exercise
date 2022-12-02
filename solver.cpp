@@ -131,7 +131,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 	
 	// FIXME	
 	// const size_t kNumThreads = kNumConcurrrency;
-	const size_t kNumThreads = (kNumConcurrrency*8);
+	const size_t kNumThreads = (kNumConcurrrency*4);
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
@@ -323,7 +323,7 @@ static std::vector<std::string> s_dictionary;
 
 // Counters, the latter being useful to reserve space.
 static unsigned s_longestWord;
-static unsigned s_longestWords[64] = { 0 }; // FIXME!
+static unsigned s_longestWords[64] = { 0 }; // FIXME: just 64 cores, no more, no more :)
 static size_t s_wordCount;
 
 #ifdef NED_FLANDERS
@@ -802,6 +802,9 @@ private:
 		auto* visited = context.visited;
 		if (false == visited[nbBoardIdx])
 		{
+			if (depth > s_longestWords[context.iThread])
+				return;
+
 			auto* child = node->GetChild(nbIndex);
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, iX, iY, child, depth);
@@ -826,9 +829,6 @@ private:
 {
 	Assert(nullptr != node);
 
-
-	if (depth > s_longestWords[context.iThread])
-		return;
 
 
 	const auto width = context.width;
