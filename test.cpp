@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 3
+#define NUM_QUERIES 4 // Get things into cache nice 'n easy...
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -106,20 +106,24 @@ int main(int argC, char **arguments)
 
 	Results results[NUM_QUERIES];
 
-	auto start = std::chrono::high_resolution_clock::now();
+	std::vector<std::chrono::microseconds> durations;
+
 
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
+	{
+		auto start = std::chrono::high_resolution_clock::now();
 		results[iQuery] = FindWords(board.get(), xSize, ySize);
-
-	auto end = std::chrono::high_resolution_clock::now();
-	auto timing = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+		auto end = std::chrono::high_resolution_clock::now();
+		auto timing = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+		durations.push_back(timing);
+	}
 
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
 		const auto count  = results[iQuery].Count;
 		const auto score = results[iQuery].Score;
 		printf("Results (run %u): ", iQuery+1);
-		printf("count: %u, score: %u\n", count, score);
+		printf("count: %u, score: %u, duration %.3f\n", count, score, (float) durations[iQuery].count()*0.000001f);
 	}
 
 #ifdef PRINT_WORDS
@@ -145,9 +149,11 @@ int main(int argC, char **arguments)
 	
 	FreeDictionary();
 
-	const float time = (float) timing.count();
-	const float avgTime = time/NUM_QUERIES;
-	printf("\nSolver ran %u times for avg. %.f microsec. or approx. %.2f second(s)\n", (unsigned) NUM_QUERIES, avgTime, avgTime*0.000001f);
+	// Sort so we can conveniently pick the fastest run
+	std::sort(durations.begin(), durations.end());
+
+	const float time = (float) durations[0].count(); 
+	printf("\nSolver ran %u times for avg. %.f microsec. or approx. %.3f second(s)\n", (unsigned) NUM_QUERIES, time, time*0.000001f);
 
 	return 0;
 }
