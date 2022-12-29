@@ -68,6 +68,11 @@
 
 	I replaced DeepCopy for ThreadCopy, which keeps a sequential list of nodes and hands them out as needed, and releases the
 	entire block of memory when the thread is done. I can see a speed increase without breaking consistent results.
+
+	** 26/12/2022 **
+
+	Uncle Henrik pointed out clearly and justly that my load balancing is off. I'm also toying around with the allocation
+	and initialization of the node.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -150,9 +155,9 @@ public:
 static std::vector<ThreadInfo> s_threadInfo;
 
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
-BOGGLE_INLINE unsigned LetterToIndex(char letter)
+BOGGLE_INLINE unsigned LetterToIndex(unsigned letter)
 {
-	return letter - 'A';
+	return letter - static_cast<unsigned>('A');
 }
 
 // FWD.
@@ -171,18 +176,18 @@ public:
 	CUSTOM_NEW
 	CUSTOM_DELETE
 
-	DictionaryNode() : 
-		m_wordIdx(-1)
-,		m_indexBits(0)
+	DictionaryNode() // : 
+//		m_wordIdx(-1)
+//,		m_indexBits(0)
 	{
-		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
+//		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
 	DictionaryNode(size_t wordIdx, unsigned indexBits) :
 		m_wordIdx(wordIdx)
 ,		m_indexBits(indexBits)
 	{
-		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
+//		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
 	class ThreadCopy
@@ -222,16 +227,19 @@ public:
 
 			node.m_wordIdx   = parent->m_wordIdx;
 			node.m_indexBits = parent->m_indexBits;
-			/// memset(node.m_children, 0, kAlphaRange*sizeof(DictionaryNode*));
+			// memset(node.m_children, 0, kAlphaRange*sizeof(DictionaryNode*));
 
 			unsigned indexBits = node.m_indexBits;
 			unsigned index = 0;
-			while (indexBits)
+			while (1)
 			{
 				if (indexBits & 1)
 					node.m_children[index] = Copy(parent->GetChild(index));
 
 				indexBits >>= 1;
+				if (!indexBits)
+					break;
+
 				++index;
 			}
 
@@ -277,7 +285,8 @@ public:
 	BOGGLE_INLINE int      IsVoid()      const { return int(m_indexBits+m_wordIdx)>>31; } // Is 1 (sign bit) if zero children (0) and no word (-1).
 
 	// Returns zero if node is now a dead end.
-	BOGGLE_INLINE unsigned RemoveChild(unsigned index)
+//	BOGGLE_INLINE unsigned RemoveChild(unsigned index)
+	BOGGLE_INLINE void RemoveChild(unsigned index)
 	{
 		Assert(index < kAlphaRange);
 		Assert(HasChild(index));
@@ -285,7 +294,7 @@ public:
 		const unsigned bit = 1 << index;
 		m_indexBits ^= bit;
 
-		return m_indexBits;
+		// return m_indexBits;
 	}
 
 	// Returns non-zero if true.
@@ -311,9 +320,11 @@ public:
 	}
 
 private:
-	size_t m_wordIdx;
-	unsigned m_indexBits;
-	DictionaryNode* m_children[kAlphaRange];
+	size_t m_wordIdx = -1; // size_t m_wordIdx;
+	unsigned m_indexBits = 0;
+	DictionaryNode* m_children[kAlphaRange] = { nullptr };
+
+//	uint8_t m_padding[256-224];
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -619,11 +630,11 @@ public:
 			{
 				if (s_threadInfo[iThread].load > 0) // This check is only useful if the distribution calc. cocks up (FIXME)
 				{
-					contexts.emplace_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
-					threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
+					contexts.push_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
+					threads.push_back(std::thread(ExecuteThread, contexts[iThread].get()));
 				}
 			}
-			
+
 //			auto busy = kNumThreads;
 //			while (busy)
 			{
@@ -635,7 +646,7 @@ public:
 //						--busy;
 					}
 				}
-			}
+			} // Given the current way of doing thins just waiting for them to join one by one seems fastest, can't dispute it now
 
 			m_results.Count  = 0;
 			m_results.Score  = 0;
@@ -696,16 +707,26 @@ private:
 private:
 	BOGGLE_INLINE static unsigned GetWordScore(size_t length) /* const */
 	{
-		if (length > 8)
-			length = 8;
+//		if (length > 8)
+//			length = 8;
 
 
-		constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
-		return kLUT[length-3];
+		if (length <= 8)
+		{
+			constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
+			return kLUT[length-3];
+		}
+		else
+			return 11;
 	}
 
+#if defined(DEBUG_STATS)
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth);
+#else
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node);//, unsigned& depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node);//m, unsigned& depth);
+#endif
 
 	Results& m_results;
 	const char* m_sanitized;
@@ -754,7 +775,7 @@ private:
 #if defined(DEBUG_STATS)
 					TraverseBoard(*context, iX, iY, child, depth);
 #else
-					TraverseBoard(*context, iX, iY, child, depth);
+					TraverseBoard(*context, iX, iY, child);//, depth);
 #endif
 
 					if (false == root->HasChildren())
@@ -769,7 +790,7 @@ private:
 	
 	auto& wordsFound = context->wordsFound;
 
-	// Due to current circumstances (locality?) this doesn't do well for performance, or?
+	// Not sure if this helps or hurts (on paper it "should" help)
 	std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
@@ -791,7 +812,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node)//m, unsigned& depth)
 #endif
 {
 
@@ -806,20 +827,26 @@ private:
 		auto* visited = context.visited;
 		if (false == visited[nbBoardIdx])
 		{
-		if (depth <= s_longestWords[context.iThread])
+		//if (depth <= s_longestWords[context.iThread])
 		{
 			auto* child = node->GetChild(nbIndex);
+
+			if (!child->IsVoid())
+			{
+
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, iX, iY, child, depth);
 #else
-			TraverseBoard(context, iX, iY, child, depth);
+			TraverseBoard(context, iX, iY, child); // , depth);
 #endif
 
-			// Child node exhausted?
-			if (child->IsVoid())
-			{
-				node->RemoveChild(nbIndex);
+				// Child node exhausted?
+				if (!child->HasChildren()) // IsVoid())
+				{
+					node->RemoveChild(nbIndex);
+				}
 			}
+
 		}
 		}
 	}
@@ -828,7 +855,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node)//, unsigned& depth)
 #endif
 {
 	Assert(nullptr != node);
@@ -847,11 +874,11 @@ private:
 #if defined(DEBUG_STATS)
 	Assert(depth < s_longestWord);
 	context.maxDepth = std::max(context.maxDepth, depth);
+	++depth;
 #endif
 
 	// Recurse, as we've got a node that might be going somewhewre.
 
-	++depth;
 	
 	visited[boardIdx] = true;
 
@@ -889,33 +916,35 @@ private:
 //	if (0 != node->HasChildren()) // <- You'd think this is smart, but it's so much better if the CPU can just crunch along instead of evaluating branches
 	{
 		if (iX > 0)
-			TraverseCall(context, iX-1, iY, node, depth);
+			TraverseCall(context, iX-1, iY, node);
 
 		if (xSafe)
-			TraverseCall(context, iX+1, iY, node, depth);
+			TraverseCall(context, iX+1, iY, node);
 
 		if (iY < height-1)
 		{
-			TraverseCall(context, iX, iY+1, node, depth);
+			TraverseCall(context, iX, iY+1, node);
 
 			if (xSafe) 
-				TraverseCall(context, iX+1, iY+1, node, depth);
+				TraverseCall(context, iX+1, iY+1, node);
 			if (iX > 0)
-				TraverseCall(context, iX-1, iY+1, node, depth);
+				TraverseCall(context, iX-1, iY+1, node);
 		}
 	
 		if (iY > 0) {
-			TraverseCall(context, iX, iY-1, node, depth);
+			TraverseCall(context, iX, iY-1, node);
 
 			if (xSafe)
-				TraverseCall(context, iX+1, iY-1, node, depth);
+				TraverseCall(context, iX+1, iY-1, node);
 			if (iX > 0) 
-				TraverseCall(context, iX-1, iY-1, node, depth);
+				TraverseCall(context, iX-1, iY-1, node);
 		}
 	}
 #endif
 
+#if defined(DEBUG_STATS)
 	--depth;
+#endif
 		
 	visited[boardIdx] = false;
 
