@@ -600,7 +600,7 @@ public:
 			// Reserve
 			wordsFound.reserve(s_threadInfo[iThread].load>>1); 
 			
-			// log2Width = unsigned(log2f(width));
+			log2Width = unsigned(log2f(width));
 		}
 
 		// Input
@@ -608,7 +608,8 @@ public:
 		const size_t gridSize;
 		const char* sanitized;
 		const unsigned width, height;
-		// unsigned log2Width;
+		
+		unsigned log2Width;
 		
 		// Grid to flag visited tiles.
 		bool* visited;
@@ -647,16 +648,18 @@ public:
 				}
 			}
 
-//			auto busy = kNumThreads;
-//			while (busy)
+			auto busy = kNumThreads;
+			while (busy)
 			{
 				for (auto& thread : threads)
 				{
-//					if (thread.joinable())
+					if (thread.joinable())
 					{
 						thread.join();
-//						--busy;
+						--busy;
 					}
+					else
+						std::this_thread::yield();
 				}
 			} // Given the current way of doing thins just waiting for them to join one by one seems fastest, can't dispute it now
 
@@ -726,7 +729,7 @@ private:
 		return kLUT[length];
 	}
 
-	BOGGLE_INLINE static size_t GetWordScore(size_t length) /* const */
+	BOGGLE_INLINE static size_t GetWordScore_Albert_1(size_t length) /* const */
 	{
 		length = length > 8 ? 8 : length;
 		length -= 3;
@@ -741,7 +744,8 @@ private:
 		return Albert+1;
 	}
 
-	BOGGLE_INLINE static size_t GetWordScore_Albert_2(size_t length) /* const */
+//	BOGGLE_INLINE static size_t GetWordScore_Albert_2(size_t length) /* const */
+	BOGGLE_INLINE static size_t GetWordScore(size_t length) /* const */
 	{
 		length = length > 8 ? 8 : length;
 
@@ -817,7 +821,7 @@ private:
 			}
 		}
 
-		std::this_thread::yield();
+		// std::this_thread::yield();
 	}
 	
 	auto& wordsFound = context->wordsFound;
@@ -847,8 +851,8 @@ private:
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth)
 #endif
 {
-	const auto width = context.width;
-	const unsigned nbBoardIdx = iY*width + iX;
+//	const auto width = context.width;
+	const unsigned nbBoardIdx = (iY<<context.log2Width) + iX;
 //	const unsigned nbBoardIdx = (iY<<12) + iX;
 
 	auto* board = context.sanitized;
@@ -894,7 +898,7 @@ private:
 	const auto width = context.width;
 	const auto height = context.height;
 
-	const unsigned boardIdx = iY*width + iX;
+	const unsigned boardIdx = (iY<<context.log2Width) + iX;
 //	const unsigned boardIdx = (iY<<12) + iX;
 
 	auto* visited = context.visited;
