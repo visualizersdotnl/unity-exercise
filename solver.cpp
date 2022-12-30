@@ -946,7 +946,7 @@ private:
 	if (xSafe)
 		TraverseCall(context, node, iX+1, offsetY);
 
-	if (offsetY > width) {
+	if (offsetY >= width) {
 		TraverseCall(context, node, iX, offsetY-width);
 
 		if (xSafe)
