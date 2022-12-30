@@ -657,9 +657,9 @@ public:
 
 			for (auto& context : contexts)
 			{
-				const auto wordsFound = context->wordsFound.size();
+				const unsigned wordsFound = (unsigned) context->wordsFound.size();
 				const size_t score = context->score;
-				m_results.Count += (unsigned) wordsFound;
+				m_results.Count += wordsFound;
 				m_results.Score += (unsigned) score;
 				strBufLen += context->reqStrBufLen + wordsFound; // Add numWords for 0-string-terminator for each.
 
@@ -789,13 +789,13 @@ private:
 			const unsigned index = sanitized[boardIdx];
 
 #if defined(_WIN32)
-			if (root->HasChild(index))
+			//if (root->HasChild(index))
 #endif
 			{
 				DictionaryNode* child = root->GetChild(index);
-#if !defined(_WIN32)
+//#if !defined(_WIN32)
 				if (nullptr != child)
-#endif
+//#endif
 				{
 #if defined(DEBUG_STATS)
 					unsigned depth = 1;
