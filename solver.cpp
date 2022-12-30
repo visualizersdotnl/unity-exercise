@@ -533,6 +533,18 @@ void FreeDictionary()
 
 // #include <emmintrin.h>
 
+BOGGLE_INLINE static uint64_t PackXYD(unsigned iX, unsigned iY, unsigned depth)
+{
+	unsigned packed = iX;
+	packed |= iY << 16;
+	packed |= depth << 32;
+	return packed;
+}
+
+BOGGLE_INLINE static unsigned PackGetX(uint64_t packed) { return packed & 0xffff; }
+BOGGLE_INLINE static unsigned PackGetY(uint64_t packed) { return (packed >> 16) & 0xffff; }
+BOGGLE_INLINE static unsigned PackGetD(uint64_t packed) { return packed >> 32; }
+
 class Query
 {
 public:
@@ -738,11 +750,11 @@ private:
 	}
 
 #if defined(DEBUG_STATS)
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode *node, unsigned depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode* node, unsigned depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode *node, unsigned depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode* node, unsigned depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint64_t packed); // unsigned iX, unsigned iY, unsigned depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint64_t packed); // unsigned iX, unsigned iY, unsigned depth);
 #endif
 
 	Results& m_results;
@@ -792,9 +804,10 @@ private:
 				{
 					unsigned depth = 0;
 #if defined(DEBUG_STATS)
-					TraverseBoard(*context, iX, iY, child, depth);
+					TraverseBoard(*context, child, iX, iY, depth);
 #else
-					TraverseBoard(*context, iX, iY, child, depth);
+					const uint64_t packed = PackXYD(iX, iY, depth);
+					TraverseBoard(*context, child, packed); // iX, iY, depth);
 #endif
 				}
 			}
@@ -827,11 +840,14 @@ private:
 }
 
 #if defined(DEBUG_STATS)
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode *node, unsigned depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint64_t packed) // unsigned iX, unsigned iY, unsigned depth)
 #endif
 {
+	const unsigned iX = PackGetX(packed);
+	const unsigned iY = PackGetY(packed);
+	const unsigned depth = PackGetD(packed);
 
 	auto* visited = context.visited;
 
@@ -853,9 +869,9 @@ private:
 				{
 
 #if defined(DEBUG_STATS)
-				TraverseBoard(context, iX, iY, child, depth);
+				TraverseBoard(context, child, iX, iY, depth);
 #else
-				TraverseBoard(context, iX, iY, child, depth);
+				TraverseBoard(context, child, packed); // iX, iY, depth);
 #endif
 				}
 
@@ -870,12 +886,16 @@ private:
 }
 
 #if defined(DEBUG_STATS)
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned iY, unsigned depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode* node, unsigned depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint64_t packed) // unsigned iX, unsigned iY, unsigned depth)
 #endif
 {
 	Assert(nullptr != node);
+
+	const unsigned iX = PackGetX(packed);
+	const unsigned iY = PackGetY(packed);
+	unsigned depth = PackGetD(packed);
 
 	const auto width = context.width;
 	const auto height = context.height;
@@ -929,28 +949,28 @@ private:
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
 
 	if (iX > 0)
-		TraverseCall(context, iX-1, iY, node, depth);
+		TraverseCall(context, node, PackXYD(iX-1, iY, depth));
 
 	if (xSafe)
-		TraverseCall(context, iX+1, iY, node, depth);
+		TraverseCall(context, node, PackXYD(iX+1, iY, depth));
 
 	if (ySafe)
 	{
-		TraverseCall(context, iX, iY+1, node, depth);
+		TraverseCall(context, node, PackXYD(iX, iY+1, depth));
 
 		if (xSafe) 
-			TraverseCall(context, iX+1, iY+1, node, depth);
+			TraverseCall(context, node, PackXYD(iX+1, iY+1, depth));
 		if (iX > 0)
-			TraverseCall(context, iX-1, iY+1, node, depth);
+			TraverseCall(context, node, PackXYD(iX-1, iY+1, depth));
 	}
 	
 	if (iY > 0) {
-		TraverseCall(context, iX, iY-1, node, depth);
+		TraverseCall(context, node, PackXYD(iX, iY-1, depth));
 
 		if (xSafe)
-			TraverseCall(context, iX+1, iY-1, node, depth);
+			TraverseCall(context, node, PackXYD(iX+1, iY-1, depth));
 		if (iX > 0) 
-			TraverseCall(context, iX-1, iY-1, node, depth);
+			TraverseCall(context, node, PackXYD(iX-1, iY-1, depth));
 	}
 #endif
 
