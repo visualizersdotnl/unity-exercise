@@ -607,6 +607,8 @@ public:
 //				std::this_thread::yield();
 //			}
 //			while (spooling);
+
+			// log2Width = unsigned(log2f(width));
 		}
 
 //		const std::atomic_bool& spooling;
@@ -616,6 +618,7 @@ public:
 		const size_t gridSize;
 		const char* sanitized;
 		const unsigned width, height;
+		// unsigned log2Width;
 		
 		// Grid to flag visited tiles.
 		bool* visited;
@@ -733,11 +736,11 @@ private:
 private:
 	BOGGLE_INLINE static unsigned GetWordScore(size_t length) /* const */
 	{
-		if (length > 8)
-			length = 8;
+		length -= 1;
+		length &= 8-1;
 
 		constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
-		return kLUT[length-3];
+		return kLUT[length-2];
 	}
 
 #if defined(DEBUG_STATS)
@@ -862,7 +865,7 @@ private:
 				}
 
 				// Child node exhausted?
-				if (!child->HasChildren())
+				if (child->IsVoid())
 				{
 					node->RemoveChild(nbIndex);
 				}
@@ -968,7 +971,9 @@ private:
 	// branch predictor again.
 	const size_t wordIdx = node->GetWordIndex();
 	if (-1 != wordIdx)
+	{
 		context.wordsFound.push_back(wordIdx);
+	}
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
