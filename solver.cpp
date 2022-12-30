@@ -845,8 +845,8 @@ static unsigned s_log2Width;
 #endif
 {
 //	const auto width = context.width;
-	const unsigned nbBoardIdx = (iY<<s_log2Width) + iX;
-//	const unsigned nbBoardIdx = (iY<<12) + iX;
+//	const unsigned nbBoardIdx = (iY<<s_log2Width) + iX;
+	const unsigned nbBoardIdx = (iY<<12) + iX;
 
 	const auto* board = context.sanitized;
 	const unsigned nbIndex = board[nbBoardIdx];
