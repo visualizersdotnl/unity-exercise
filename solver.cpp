@@ -107,7 +107,7 @@
 #include "simple-tlsf.h"
 #include "inline.h"
 
-#include "spooling.h"
+// #include "spooling.h"
 
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
@@ -142,7 +142,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
 	// FIXME	
-	const size_t kNumThreads = kNumConcurrrency*3;
+	const size_t kNumThreads = kNumConcurrrency;
 	// const size_t kNumThreads = kAlphaRange;
 #endif
 
@@ -533,11 +533,6 @@ void FreeDictionary()
 
 // #include <emmintrin.h>
 
-
-BOGGLE_INLINE static unsigned PackCoord(unsigned iX, unsigned iY) { return iX | (iY<<16); }
-BOGGLE_INLINE static unsigned CoordGetX(unsigned Coord) { return Coord & 0xffff; }
-BOGGLE_INLINE static unsigned CoordGetY(unsigned Coord) { return Coord>>16; }
-
 class Query
 {
 public:
@@ -572,7 +567,7 @@ public:
 ,		visited(nullptr)
 ,		score(0)
 ,		reqStrBufLen(0)
-,		spooling(instance->m_spooling)
+//,		spooling(instance->m_spooling)
 		{
 			Assert(nullptr != instance);
 		}
@@ -604,14 +599,14 @@ public:
 			wordsFound.reserve(s_threadInfo[iThread].load); 
 			
 			// Spool thread
-			do
-			{
-				std::this_thread::yield();
-			}
-			while (spooling);
+//			do
+//			{
+//				std::this_thread::yield();
+//			}
+//			while (spooling);
 		}
 
-		const std::atomic_bool& spooling;
+//		const std::atomic_bool& spooling;
 
 		// Input
 		const unsigned iThread;
@@ -643,7 +638,7 @@ public:
 		{
 			// Kick off threads.
 
-			m_spooling = true;
+//			m_spooling = true;
 
 			std::vector<std::thread> threads;
 			std::vector<std::unique_ptr<ThreadContext>> contexts;
@@ -659,9 +654,9 @@ public:
 				}
 			}
 
-			std::this_thread::sleep_for(std::chrono::seconds(SPOOLING_TIME_IN_SEC));
+//			std::this_thread::sleep_for(std::chrono::seconds(SPOOLING_TIME_IN_SEC));
 
-			m_spooling = false;
+//			m_spooling = false;
 
 //			auto busy = kNumThreads;
 //			while (busy)
@@ -743,11 +738,11 @@ private:
 	}
 
 #if defined(DEBUG_STATS)
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode *node, unsigned depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode* node, unsigned depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode *node, unsigned depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode* node, unsigned depth);
 #endif
 
 	Results& m_results;
@@ -813,7 +808,7 @@ private:
 	auto& wordsFound = context->wordsFound;
 
 	// Not sure if this helps or hurts (on paper it "should" help)
-	//std::sort(wordsFound.begin(), wordsFound.end());
+	// std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
 	for (auto wordIdx : wordsFound)
@@ -824,28 +819,24 @@ private:
 	}
 		
 #if defined(DEBUG_STATS)
-	float missesPct = 0.f;
+	float hitPct = 0.f;
 	if (s_threadInfo[iThread].load > 0.f)
-		missesPct = ((float)wordsFound.size()/s_threadInfo[iThread].load)*100.f;
-	debug_print("Thread %u has max. traversal depth %u (max. %u), misses: %.2f percent of load.\n", iThread, context->maxDepth, s_longestWord, missesPct);
+		hitPct = ((float)wordsFound.size()/s_threadInfo[iThread].load)*100.f;
+	debug_print("Thread %u has max. traversal depth %u (max. %u), hit: %.2f percent of load.\n", iThread, context->maxDepth, s_longestWord, hitPct);
 #endif
 }
 
 #if defined(DEBUG_STATS)
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode *node, unsigned& depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode *node, unsigned depth)
 #endif
 {
-//	if (depth > s_longestWords[context.iThread])
-//m		return;
 
 	auto* visited = context.visited;
 
 	const auto width = context.width;
 	const unsigned nbBoardIdx = iY*width + iX;
-	//if (true == visited[nbBoardIdx])
-	//	return;
 
 	auto* board = context.sanitized;
 	const unsigned nbIndex = board[nbBoardIdx];
@@ -879,9 +870,9 @@ private:
 }
 
 #if defined(DEBUG_STATS)
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, unsigned iX, unsigned iY, DictionaryNode* node, unsigned& depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, const unsigned iX, const unsigned iY, DictionaryNode* node, unsigned depth)
 #endif
 {
 	Assert(nullptr != node);
@@ -896,6 +887,7 @@ private:
 #if defined(DEBUG_STATS)
 	Assert(depth < s_longestWord);
 	context.maxDepth = std::max(context.maxDepth, depth);
+	// ++depth;
 #endif
 
 	++depth;

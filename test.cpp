@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 4 // Get things into cache nice 'n easy...
+#define NUM_QUERIES 8 // Get things into cache nice 'n easy...
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -23,7 +23,7 @@
 #include "api.h"
 #include "random.h"
 
-#include "spooling.h"
+// #include "spooling.h"
 
 int main(int argC, char **arguments)
 {
@@ -126,7 +126,7 @@ int main(int argC, char **arguments)
 		const auto count  = results[iQuery].Count;
 		const auto score = results[iQuery].Score;
 		printf("Results (run %u): ", iQuery+1);
-		printf("count: %u, score: %u, duration %.3f\n", count, score, (float) durations[iQuery].count()*0.000001f - float(SPOOLING_TIME_IN_SEC));
+		printf("count: %u, score: %u, duration %.3f\n", count, score, (float) durations[iQuery].count()*0.000001f);
 	}
 
 #ifdef PRINT_WORDS
@@ -156,7 +156,7 @@ int main(int argC, char **arguments)
 	std::sort(durations.begin(), durations.end());
 
 	const float time = (float) durations[0].count();
-	printf("\nSolver ran %u times, fastest: %.f microsec. (incl. %d sec. spooling) or approx. %.3f second(s)\n", (unsigned) NUM_QUERIES, time, SPOOLING_TIME_IN_SEC, time*0.000001f - float(SPOOLING_TIME_IN_SEC));
+	printf("\nSolver ran %u times, fastest: %.f microsec. or approx. %.3f second(s)\n", (unsigned) NUM_QUERIES, time, time*0.000001f);
 
 	return 0;
 }
