@@ -627,7 +627,7 @@ public:
 
 		// Output
 		std::vector<size_t> wordsFound;
-		unsigned score;
+		size_t score;
 		size_t reqStrBufLen;
 
 #if defined(DEBUG_STATS)
@@ -686,9 +686,9 @@ public:
 			for (auto& context : contexts)
 			{
 				const unsigned numWords = (unsigned) context->wordsFound.size();
-				const unsigned score = context->score;
+				const size_t score = context->score;
 				m_results.Count += numWords;
-				m_results.Score += score;
+				m_results.Score += (unsigned) score;
 				strBufLen += context->reqStrBufLen + numWords; // Add numWords for 0-string-terminator for each.
 
 				debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, numWords, score);
@@ -736,13 +736,28 @@ private:
 	static void ExecuteThread(ThreadContext* context);
 
 private:
-	BOGGLE_INLINE static unsigned GetWordScore(size_t length) /* const */
+	BOGGLE_INLINE static size_t GetWordScore_Niels(size_t length) /* const */
 	{
 		length -= 3;
-		length = length > 5 ? 5 : length;
+		length = length > 5 ? 5 : length; // This nicely compiles to a conditional move
 
-		constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
+		constexpr size_t kLUT[] = { 1, 1, 2, 3, 5, 11 };
 		return kLUT[length];
+	}
+
+	BOGGLE_INLINE static size_t GetWordScore(size_t length) /* const */
+	{
+		length = length > 8 ? 8 : length;
+		length -= 3;
+		
+		// Courtesy of Albert S.
+		size_t Albert = 0;
+		Albert += length>>1;
+		Albert += (length+1)>>2;
+		Albert += length>>2;
+		Albert += ((length+3)>>3)<<2;
+		Albert += ((length+3)>>3<<1);
+		return Albert+1;
 	}
 
 #if defined(DEBUG_STATS)
