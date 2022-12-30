@@ -73,6 +73,10 @@
 
 	Uncle Henrik pointed out clearly and justly that my load balancing is off. I'm also toying around with the allocation
 	and initialization of the node.
+
+	** 30/12/2022 **
+	
+	Completely f*cking around now..
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -94,6 +98,7 @@
 #include <vector>
 #include <algorithm>
 #include <cassert>
+#include <atomic>
 	
 #include "api.h"
 
@@ -101,6 +106,8 @@
 #include "bit-tricks.h"
 #include "simple-tlsf.h"
 #include "inline.h"
+
+#include "spooling.h"
 
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
@@ -560,6 +567,7 @@ public:
 ,		visited(nullptr)
 ,		score(0)
 ,		reqStrBufLen(0)
+,		spooling(instance->m_spooling)
 		{
 			Assert(nullptr != instance);
 		}
@@ -587,9 +595,18 @@ public:
 			else
 				memset(visited, 0, gridSize*sizeof(bool));
 
-			// Reserve for 50%
+			// Reserve
 			wordsFound.reserve(s_threadInfo[iThread].load); 
+			
+			// Spool thread
+			do
+			{
+				std::this_thread::yield();
+			}
+			while (spooling);
 		}
+
+		const std::atomic_bool& spooling;
 
 		// Input
 		const unsigned iThread;
@@ -621,6 +638,8 @@ public:
 		{
 			// Kick off threads.
 
+			m_spooling = true;
+
 			std::vector<std::thread> threads;
 			std::vector<std::unique_ptr<ThreadContext>> contexts;
 
@@ -634,6 +653,10 @@ public:
 					threads.push_back(std::thread(ExecuteThread, contexts[iThread].get()));
 				}
 			}
+
+			std::this_thread::sleep_for(std::chrono::seconds(SPOOLING_TIME_IN_SEC));
+
+			m_spooling = false;
 
 //			auto busy = kNumThreads;
 //			while (busy)
@@ -732,6 +755,8 @@ private:
 	const char* m_sanitized;
 	const unsigned m_width, m_height;
 	const size_t m_gridSize;
+
+	std::atomic_bool m_spooling;
 };
 
 /* static */ void Query::ExecuteThread(ThreadContext* context)

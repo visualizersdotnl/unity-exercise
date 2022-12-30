@@ -18,9 +18,12 @@
 #include <vector>
 #include <unordered_set>
 #include <string>
+#include <algorithm>
 
 #include "api.h"
 #include "random.h"
+
+#include "spooling.h"
 
 int main(int argC, char **arguments)
 {
@@ -123,7 +126,7 @@ int main(int argC, char **arguments)
 		const auto count  = results[iQuery].Count;
 		const auto score = results[iQuery].Score;
 		printf("Results (run %u): ", iQuery+1);
-		printf("count: %u, score: %u, duration %.3f\n", count, score, (float) durations[iQuery].count()*0.000001f);
+		printf("count: %u, score: %u, duration %.3f\n", count, score, (float) durations[iQuery].count()*0.000001f - float(SPOOLING_TIME_IN_SEC));
 	}
 
 #ifdef PRINT_WORDS
@@ -152,8 +155,8 @@ int main(int argC, char **arguments)
 	// Sort so we can conveniently pick the fastest run
 	std::sort(durations.begin(), durations.end());
 
-	const float time = (float) durations[0].count(); 
-	printf("\nSolver ran %u times, fastest: %.f microsec. or approx. %.3f second(s)\n", (unsigned) NUM_QUERIES, time, time*0.000001f);
+	const float time = (float) durations[0].count();
+	printf("\nSolver ran %u times, fastest: %.f microsec. (incl. %d sec. spooling) or approx. %.3f second(s)\n", (unsigned) NUM_QUERIES, time, SPOOLING_TIME_IN_SEC, time*0.000001f - float(SPOOLING_TIME_IN_SEC));
 
 	return 0;
 }
