@@ -19,9 +19,6 @@
     <Filter Include="tlsf">
       <UniqueIdentifier>{367b98c2-379d-42f3-8dd2-c7ba96e26d59}</UniqueIdentifier>
     </Filter>
-    <Filter Include="hat-trie">
-      <UniqueIdentifier>{d22b43e9-43b8-436e-b11f-4077dfabc42b}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\api.h">

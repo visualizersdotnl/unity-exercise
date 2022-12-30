@@ -139,9 +139,9 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
 #if defined(_WIN32)
-	const size_t kNumThreads = kAlphaRange;
+	const size_t kNumThreads = kNumConcurrrency*2;
 #else
-	const size_t kNumThreads = kAlphaRange;
+	const size_t kNumThreads = kNumConcurrency*2;
 #endif
 
 #endif
@@ -176,25 +176,19 @@ static std::vector<DictionaryNode*> s_threadDicts;
 
 class DictionaryNode
 {
-	friend void AddWordToDictionary(const std::string& word);
+	friend void AddWordToDictionary(const std::string& word, unsigned iThread);
 	friend void FreeDictionary();
 
 public:
 	CUSTOM_NEW
 	CUSTOM_DELETE
 
-	DictionaryNode() // : 
-//		m_wordIdx(-1)
-//,		m_indexBits(0)
-	{
-//		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
-	}
+	DictionaryNode() {}
 
 	DictionaryNode(size_t wordIdx, unsigned indexBits) :
 		m_wordIdx(wordIdx)
 ,		m_indexBits(indexBits)
 	{
-//		memset(m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 	}
 
 	class ThreadCopy
@@ -234,7 +228,6 @@ public:
 
 			node.m_wordIdx   = parent->m_wordIdx;
 			node.m_indexBits = parent->m_indexBits;
-			// memset(node.m_children, 0, kAlphaRange*sizeof(DictionaryNode*));
 
 			unsigned indexBits = node.m_indexBits;
 			unsigned index = 0;
@@ -329,11 +322,9 @@ public:
 	}
 
 private:
-	size_t m_wordIdx = -1; // size_t m_wordIdx;
+	size_t m_wordIdx = -1; 
 	unsigned m_indexBits = 0;
 	DictionaryNode* m_children[kAlphaRange] = { nullptr };
-
-//	uint8_t m_padding[256-224];
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -393,7 +384,7 @@ static bool IsWordValid(const std::string& word)
 }
 
 // Input word must be uppercase!
-static void AddWordToDictionary(const std::string& word)
+static void AddWordToDictionary(const std::string& word, unsigned iThread)
 {
 	// Word of any use given the Boggle rules?	
 	if (false == IsWordValid(word))
@@ -404,14 +395,8 @@ static void AddWordToDictionary(const std::string& word)
 	{
 		s_longestWord = length;
 	}
-	
-	// Thread per entry letter, nice locality at least
+
 	char letter = word[0];
-	if ('Q' == letter)
-		letter = (mt_rand32() & 1) ? 'Q' : 'U';
-
-	const unsigned iThread = LetterToIndex(letter); // ((LetterToIndex(letter))%kNumThreads);
-
 	DictionaryNode* node = s_threadDicts[iThread];
 
 	unsigned letterLen = 0;
@@ -468,7 +453,8 @@ void LoadDictionary(const char* path)
 
 		int character;
 		std::string word;
-
+		std::vector<std::string> words;
+	
 		do
 		{
 			character = fgetc(file);
@@ -482,7 +468,7 @@ void LoadDictionary(const char* path)
 				// We've hit EOF or a non-alphanumeric character.
 				if (false == word.empty()) // Got a word?
 				{
-					AddWordToDictionary(word);
+					words.push_back(word); 
 					word.clear();
 				}
 			}
@@ -490,6 +476,25 @@ void LoadDictionary(const char* path)
 		while (EOF != character);
 
 		fclose(file);
+		
+		// Assign words to threads sequentially
+		const size_t numWords = words.size();
+		const size_t wordsPerThread = numWords/kNumThreads;
+
+		iThread = 0;
+		size_t threadNumWords = 0;
+
+		for (auto &word : words)
+		{
+			AddWordToDictionary(word, iThread);
+
+			++threadNumWords;
+			if (threadNumWords>wordsPerThread)
+			{
+				threadNumWords = 0;
+				++iThread;
+			}
+		}
 
 #ifdef NED_FLANDERS		
 		// Check thread load total.
@@ -721,7 +726,7 @@ private:
 		return kLUT[length];
 	}
 
-	BOGGLE_INLINE static size_t GetWordScore_Albert_1(size_t length) /* const */
+	BOGGLE_INLINE static size_t GetWordScore(size_t length) /* const */
 	{
 		length = length > 8 ? 8 : length;
 		length -= 3;
@@ -736,7 +741,7 @@ private:
 		return Albert+1;
 	}
 
-	BOGGLE_INLINE static size_t GetWordScore(size_t length) /* const */
+	BOGGLE_INLINE static size_t GetWordScore_Albert_2(size_t length) /* const */
 	{
 		length = length > 8 ? 8 : length;
 
@@ -793,12 +798,12 @@ private:
 		{
 			const unsigned index = sanitized[boardIdx++];
 
-			if (root->HasChild(index))
+			// if (root->HasChild(index))
 			{
 				DictionaryNode* child = root->GetChild(index);
-				// if (nullptr != child)
+				if (nullptr != child)
 				{
-					unsigned depth = 0;
+					unsigned depth = 1;
 #if defined(DEBUG_STATS)
 					TraverseBoard(*context, child, iX, iY, depth);
 #else
@@ -808,8 +813,6 @@ private:
 			}
 		}
 
-		
-		//if (iY&1) 
 		std::this_thread::yield();
 	}
 	
@@ -849,7 +852,7 @@ private:
 
 	if (0 != node->HasChild(nbIndex))
 	{
-		if (depth < s_longestWords[context.iThread])
+		if (depth <= s_longestWords[context.iThread])
 		{
 			const auto* visited = context.visited;
 			if (false == visited[nbBoardIdx])
@@ -909,29 +912,29 @@ private:
 
 #if defined(DEBUG_STATS)
 	if (iX > 0)
-		TraverseCall(context, iX-1, iY, node, depth);
+		TraverseCall(context, node, iX-1, iY, depth);
 
 	if (xSafe)
-		TraverseCall(context, iX+1, iY, node, depth);
+		TraverseCall(context, node, iX+1, iY, depth);
 
 	if (ySafe)
 	{
-		TraverseCall(context, iX, iY+1, node, depth);
+		TraverseCall(context, node, iX, iY+1, depth);
 		
 		if (xSafe) 
-			TraverseCall(context, iX+1, iY+1, node, depth);
+			TraverseCall(context, node, iX+1, iY+1, depth);
 		if (iX > 0)
-			TraverseCall(context, iX-1, iY+1, node, depth);
+			TraverseCall(context, node, iX-1, iY+1, depth);
 	}
 
 	if (iY > 0)
 	{
-		TraverseCall(context, iX, iY-1, node, depth);
+		TraverseCall(context, node, iX, iY-1, depth);
 		
 		if (xSafe)
-			TraverseCall(context, iX+1, iY-1, node, depth);
+			TraverseCall(context, node, iX+1, iY-1, depth);
 		if (iX > 0) 
-			TraverseCall(context, iX-1, iY-1, node, depth);
+			TraverseCall(context, node, iX-1, iY-1, depth);
 	}
 #else
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
