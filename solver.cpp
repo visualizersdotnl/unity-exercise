@@ -450,7 +450,7 @@ void LoadDictionary(const char* path)
 	{
 		size_t iThread = kNumThreads;
 		while (iThread-- > 0)
-			s_threadDicts.emplace_back(new DictionaryNode());
+			s_threadDicts.push_back(new DictionaryNode());
 
 		int character;
 		std::string word;
@@ -536,7 +536,9 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
-// #include <emmintrin.h>
+#if defined(_WIN32)
+	#include <emmintrin.h>
+#endif
 
 class Query
 {
@@ -587,21 +589,18 @@ public:
 
 			visited = static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine));
 
-			if (false) // gridSize >= 32)
-			{
-				// This has proven to be a little faster than memset().
-//				size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
-//				int* pWrite = reinterpret_cast<int*>(visited);
-//				while (numStreams--)
-//					_mm_stream_si32(pWrite++, 0);
-			}
-			else
-				memset(visited, 0, gridSize*sizeof(bool));
+#if defined(_WIN32)
+			// This has proven to be a little faster than memset().
+			size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
+			int* pWrite = reinterpret_cast<int*>(visited);
+			while (numStreams--)
+			_mm_stream_si32(pWrite++, 0);
+#else
+			memset(visited, 0, gridSize*sizeof(bool));
+#endif
 
 			// Reserve
-			wordsFound.reserve(s_threadInfo[iThread].load>>1); 
-			
-			log2Width = unsigned(log2f(float(width)));
+			wordsFound.reserve(s_threadInfo[iThread].load); 
 		}
 
 		// Input
@@ -609,8 +608,6 @@ public:
 		const size_t gridSize;
 		const char* sanitized;
 		const unsigned width, height;
-		
-		unsigned log2Width;
 		
 		// Grid to flag visited tiles.
 		bool* visited;
@@ -642,41 +639,31 @@ public:
 			
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
-				// if (s_threadInfo[iThread].load > 0) // This check is only useful if the distribution calc. cocks up (FIXME)
-				{
-					contexts.push_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
-					threads.push_back(std::thread(ExecuteThread, contexts[iThread].get()));
-				}
+				contexts.push_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
+				threads.push_back(std::thread(ExecuteThread, contexts[iThread].get()));
 			}
 
-			auto busy = kNumThreads;
-			while (busy)
+			for (auto& thread : threads)
 			{
-				for (auto& thread : threads)
+				if (thread.joinable())
 				{
-					if (thread.joinable())
-					{
-						thread.join();
-						--busy;
-					}
-					else
-						std::this_thread::yield();
+					thread.join();
 				}
-			} // Given the current way of doing thins just waiting for them to join one by one seems fastest, can't dispute it now
-
+			}
+			
 			m_results.Count  = 0;
 			m_results.Score  = 0;
 			size_t strBufLen = 0;
 
 			for (auto& context : contexts)
 			{
-				const unsigned numWords = (unsigned) context->wordsFound.size();
+				const auto wordsFound = context->wordsFound.size();
 				const size_t score = context->score;
-				m_results.Count += numWords;
+				m_results.Count += (unsigned) wordsFound;
 				m_results.Score += (unsigned) score;
-				strBufLen += context->reqStrBufLen + numWords; // Add numWords for 0-string-terminator for each.
+				strBufLen += context->reqStrBufLen + wordsFound; // Add numWords for 0-string-terminator for each.
 
-				debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, numWords, score);
+				debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, wordsFound, score);
 			}
 
 			m_results.Words = new char*[m_results.Count];
@@ -781,8 +768,6 @@ private:
 	const unsigned iThread = context->iThread;
 	const auto* sanitized = context->sanitized;
 
-	const auto gridSize = context->gridSize;
-
 	// Create copy of source dictionary tree
 	auto threadCopy = DictionaryNode::ThreadCopy(iThread);
 	auto* root = threadCopy.Get();
@@ -812,8 +797,8 @@ private:
 				if (nullptr != child)
 #endif
 				{
-					unsigned depth = 1;
 #if defined(DEBUG_STATS)
+					unsigned depth = 1;
 					TraverseBoard(*context, child, iX, iY, depth);
 #else
 					TraverseBoard(*context, child, boardIdx /* Beacuse of boardIdx++ above! */, iX, iY); // , depth);
@@ -830,14 +815,17 @@ private:
 	auto& wordsFound = context->wordsFound;
 
 	// Not sure if this helps or hurts (on paper it "should" help)
-	// std::sort(wordsFound.begin(), wordsFound.end());
+	std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
 	for (auto wordIdx : wordsFound)
 	{
-		const size_t length = s_dictionary[wordIdx].length();
-		context->score += GetWordScore(length);
-		context->reqStrBufLen += length;
+//		if (-1 != wordIdx)
+		{
+			const size_t length = s_dictionary[wordIdx].length();
+			context->score += GetWordScore(length);
+			context->reqStrBufLen += length;
+		}
 	}
 		
 #if defined(DEBUG_STATS)
@@ -848,6 +836,9 @@ private:
 #endif
 }
 
+static alignas(16) unsigned s_log2Width;
+// static std::vector<unsigned> s_yTab;
+
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth)
 #else
@@ -855,10 +846,11 @@ private:
 #endif
 {
 //	const auto width = context.width;
-//	const unsigned nbBoardIdx = (iY<<context.log2Width) + iX;
-	const unsigned nbBoardIdx = (iY<<12) + iX;
+//	const unsigned nbBoardIdx = s_yTab[iY] + iX;
+	const unsigned nbBoardIdx = (iY<<s_log2Width) + iX;
+//	const unsigned nbBoardIdx = (iY<<12) + iX;
 
-	auto* board = context.sanitized;
+	const auto* board = context.sanitized;
 	const unsigned nbIndex = board[nbBoardIdx];
 
 //	if (depth <= s_longestWords[context.iThread]) // This check is more expensive than it is effective..
@@ -875,16 +867,16 @@ private:
 					{
 
 #if defined(DEBUG_STATS)
-					TraverseBoard(context, child, iX, iY, depth);
+						TraverseBoard(context, child, iX, iY, depth);
 #else
-					TraverseBoard(context, child, nbBoardIdx, iX, iY); // , depth);
+						TraverseBoard(context, child, nbBoardIdx, iX, iY); // , depth);
 #endif
-					}
 
-					// Child node exhausted?
-					if (child->IsVoid())
-					{
-						node->RemoveChild(nbIndex);
+						// Child node exhausted?
+						if (child->IsVoid())
+						{
+							node->RemoveChild(nbIndex);
+						}
 					}
 				}
 			}
@@ -900,14 +892,11 @@ private:
 {
 	Assert(nullptr != node);
 
+	auto* visited = context.visited;
+	visited[boardIdx] = true;
+
 	const auto width = context.width;
 	const auto height = context.height;
-
-	// No need to recalculate this if we can just pass it along for cheap.
-//	const unsigned boardIdx = (iY<<context.log2Width) + iX;
-//	const unsigned boardIdx = (iY<<12) + iX;
-
-	auto* visited = context.visited;
 
 #if defined(DEBUG_STATS)
 	Assert(depth < s_longestWord);
@@ -917,8 +906,6 @@ private:
 
 	// Recurse, as we've got a node that might be going somewhewre.
 	
-	visited[boardIdx] = true;
-
 	const bool xSafe = iX < width-1;
 	const bool ySafe = iY < height-1;
 
@@ -957,6 +944,15 @@ private:
 	if (xSafe)
 		TraverseCall(context, node, iX+1, iY);
 
+	if (iY > 0) {
+		TraverseCall(context, node, iX, iY-1);
+
+		if (xSafe)
+			TraverseCall(context, node, iX+1, iY-1);
+		if (iX > 0) 
+			TraverseCall(context, node, iX-1, iY-1);
+	}
+
 	if (ySafe)
 	{
 		TraverseCall(context, node, iX, iY+1);
@@ -966,15 +962,6 @@ private:
 		if (iX > 0)
 			TraverseCall(context, node, iX-1, iY+1);
 	}
-	
-	if (iY > 0) {
-		TraverseCall(context, node, iX, iY-1);
-
-		if (xSafe)
-			TraverseCall(context, node, iX+1, iY-1);
-		if (iX > 0) 
-			TraverseCall(context, node, iX-1, iY-1);
-	}
 #endif
 
 #if defined(DEBUG_STATS)
@@ -982,13 +969,12 @@ private:
 #endif
 
 	visited[boardIdx] = false;
-
-	// It's faster to do this *after* traversal; I haven't looked at why exactly that is, might have to do with the
-	// branch predictor again.
+	
+	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
 	const size_t wordIdx = node->GetWordIndex();
 	if (-1 != wordIdx)
 	{
-		context.wordsFound.push_back(wordIdx);
+		context.wordsFound.emplace_back(wordIdx);
 	}
 }
 
@@ -1004,6 +990,14 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		warned = true;
 	}
 #endif
+
+	// Calc. Y offset table
+	s_log2Width = unsigned(log2f(float(width)));
+//	for (unsigned iY = 0; iY < height; ++iY)
+//	{
+//		const auto offset = iY<<s_log2Width;
+//		s_yTab.push_back(offset);
+//	}
 
 	const size_t nodeSize = sizeof(DictionaryNode);
 	debug_print("Node size: %zu\n", nodeSize);
@@ -1045,11 +1039,11 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		}
 #else
 		// Sanitize that just reorders and expects uppercase.
-		for (unsigned index = 0; index < gridSize; ++index)
+		for (unsigned index = 0; index < gridSize;)
 		{
-			const char letter = *board++;
-			const unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
-			sanitized[index] = sanity;
+			char letter = *board++;
+			unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
+			sanitized[index++] = sanity;
 		}
 #endif
 
