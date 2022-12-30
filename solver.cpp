@@ -486,7 +486,7 @@ void LoadDictionary(const char* path)
 
 		for (auto &word : words)
 		{
-			AddWordToDictionary(word, iThread);
+			AddWordToDictionary(word, unsigned(iThread));
 
 			++threadNumWords;
 			if (threadNumWords>wordsPerThread)
@@ -600,7 +600,7 @@ public:
 			// Reserve
 			wordsFound.reserve(s_threadInfo[iThread].load>>1); 
 			
-			log2Width = unsigned(log2f(width));
+			log2Width = unsigned(log2f(float(width)));
 		}
 
 		// Input
@@ -763,8 +763,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY); // , unsigned depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, size_t boardIdx, unsigned iX, unsigned iY); // , unsigned depth);
 #endif
 
 	Results& m_results;
@@ -800,7 +800,7 @@ private:
 	{
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			const unsigned index = sanitized[boardIdx++];
+			const unsigned index = sanitized[boardIdx];
 
 #if defined(_WIN32)
 			if (root->HasChild(index))
@@ -815,10 +815,12 @@ private:
 #if defined(DEBUG_STATS)
 					TraverseBoard(*context, child, iX, iY, depth);
 #else
-					TraverseBoard(*context, child, iX, iY, depth);
+					TraverseBoard(*context, child, boardIdx /* Beacuse of boardIdx++ above! */, iX, iY); // , depth);
 #endif
 				}
 			}
+
+			++boardIdx;
 		}
 
 		// std::this_thread::yield();
@@ -848,39 +850,41 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY) // , unsigned depth)
 #endif
 {
 //	const auto width = context.width;
-	const unsigned nbBoardIdx = (iY<<context.log2Width) + iX;
-//	const unsigned nbBoardIdx = (iY<<12) + iX;
+//	const unsigned nbBoardIdx = (iY<<context.log2Width) + iX;
+	const unsigned nbBoardIdx = (iY<<12) + iX;
 
 	auto* board = context.sanitized;
 	const unsigned nbIndex = board[nbBoardIdx];
 
-	if (0 != node->HasChild(nbIndex))
+//	if (depth <= s_longestWords[context.iThread]) // This check is more expensive than it is effective..
 	{
-		if (depth <= s_longestWords[context.iThread])
+		if (0 != node->HasChild(nbIndex)) // This check does it's job by not accessing the array inside the node.
 		{
-			const auto* visited = context.visited;
-			if (false == visited[nbBoardIdx])
+			auto* child = node->GetChild(nbIndex);
+//			if (nullptr != child)
 			{
-				auto* child = node->GetChild(nbIndex);
-
-				if (!child->IsVoid())
+				const auto* visited = context.visited;
+				if (false == visited[nbBoardIdx]) // Save the last/most expensive check for last!
 				{
+					if (!child->IsVoid())
+					{
 
 #if defined(DEBUG_STATS)
-				TraverseBoard(context, child, iX, iY, depth);
+					TraverseBoard(context, child, iX, iY, depth);
 #else
-				TraverseBoard(context, child, iX, iY, depth);
+					TraverseBoard(context, child, nbBoardIdx, iX, iY); // , depth);
 #endif
-				}
+					}
 
-				// Child node exhausted?
-				if (child->IsVoid())
-				{
-					node->RemoveChild(nbIndex);
+					// Child node exhausted?
+					if (child->IsVoid())
+					{
+						node->RemoveChild(nbIndex);
+					}
 				}
 			}
 		}
@@ -890,7 +894,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned iY, unsigned depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned iY, unsigned depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, size_t boardIdx, unsigned iX, unsigned iY) // , unsigned depth)
 #endif
 {
 	Assert(nullptr != node);
@@ -898,7 +902,8 @@ private:
 	const auto width = context.width;
 	const auto height = context.height;
 
-	const unsigned boardIdx = (iY<<context.log2Width) + iX;
+	// No need to recalculate this if we can just pass it along for cheap.
+//	const unsigned boardIdx = (iY<<context.log2Width) + iX;
 //	const unsigned boardIdx = (iY<<12) + iX;
 
 	auto* visited = context.visited;
@@ -906,10 +911,8 @@ private:
 #if defined(DEBUG_STATS)
 	Assert(depth < s_longestWord);
 	context.maxDepth = std::max(context.maxDepth, depth);
-	// ++depth;
-#endif
-
 	++depth;
+#endif
 
 	// Recurse, as we've got a node that might be going somewhewre.
 	
@@ -948,35 +951,34 @@ private:
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
 
 	if (iX > 0)
-		TraverseCall(context, node, iX-1, iY, depth);
+		TraverseCall(context, node, iX-1, iY);
 
 	if (xSafe)
-		TraverseCall(context, node, iX+1, iY, depth);
+		TraverseCall(context, node, iX+1, iY);
 
 	if (ySafe)
 	{
-		TraverseCall(context, node, iX, iY+1, depth);
+		TraverseCall(context, node, iX, iY+1);
 
 		if (xSafe) 
-			TraverseCall(context, node, iX+1, iY+1, depth);
+			TraverseCall(context, node, iX+1, iY+1);
 		if (iX > 0)
-			TraverseCall(context, node, iX-1, iY+1, depth);
+			TraverseCall(context, node, iX-1, iY+1);
 	}
 	
 	if (iY > 0) {
-		TraverseCall(context, node, iX, iY-1, depth);
+		TraverseCall(context, node, iX, iY-1);
 
 		if (xSafe)
-			TraverseCall(context, node, iX+1, iY-1, depth);
+			TraverseCall(context, node, iX+1, iY-1);
 		if (iX > 0) 
-			TraverseCall(context, node, iX-1, iY-1, depth);
+			TraverseCall(context, node, iX-1, iY-1);
 	}
 #endif
 
 #if defined(DEBUG_STATS)
-//	--depth;
-#endif
 	--depth;
+#endif
 
 	visited[boardIdx] = false;
 
