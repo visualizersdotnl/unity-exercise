@@ -533,6 +533,11 @@ void FreeDictionary()
 
 // #include <emmintrin.h>
 
+
+BOGGLE_INLINE static unsigned PackCoord(unsigned iX, unsigned iY) { return iX | (iY<<16); }
+BOGGLE_INLINE static unsigned CoordGetX(unsigned Coord) { return Coord & 0xffff; }
+BOGGLE_INLINE static unsigned CoordGetY(unsigned Coord) { return Coord>>16; }
+
 class Query
 {
 public:
@@ -647,7 +652,7 @@ public:
 			
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
-				if (s_threadInfo[iThread].load > 0) // This check is only useful if the distribution calc. cocks up (FIXME)
+				// if (s_threadInfo[iThread].load > 0) // This check is only useful if the distribution calc. cocks up (FIXME)
 				{
 					contexts.push_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
 					threads.push_back(std::thread(ExecuteThread, contexts[iThread].get()));
@@ -730,17 +735,11 @@ private:
 private:
 	BOGGLE_INLINE static unsigned GetWordScore(size_t length) /* const */
 	{
-//		if (length > 8)
-//			length = 8;
+		if (length > 8)
+			length = 8;
 
-
-		if (length <= 8)
-		{
-			constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
-			return kLUT[length-3];
-		}
-		else
-			return 11;
+		constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
+		return kLUT[length-3];
 	}
 
 #if defined(DEBUG_STATS)
@@ -802,21 +801,19 @@ private:
 #else
 					TraverseBoard(*context, iX, iY, child, depth);
 #endif
-
-					//if (false == root->HasChildren())
-					//	break;
 				}
 			}
 		}
 
 		
-		if (iY&1) std::this_thread::yield();
+		//if (iY&1) 
+		std::this_thread::yield();
 	}
 	
 	auto& wordsFound = context->wordsFound;
 
 	// Not sure if this helps or hurts (on paper it "should" help)
-	std::sort(wordsFound.begin(), wordsFound.end());
+	//std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
 	for (auto wordIdx : wordsFound)
@@ -855,10 +852,9 @@ private:
 
 	if (0 != node->HasChild(nbIndex))
 	{
-//		auto* visited = context.visited;
-		if (false == visited[nbBoardIdx])
+		if (depth < s_longestWords[context.iThread])
 		{
-			if (depth <= s_longestWords[context.iThread])
+			if (false == visited[nbBoardIdx])
 			{
 				auto* child = node->GetChild(nbIndex);
 
@@ -872,9 +868,8 @@ private:
 #endif
 				}
 
-
 				// Child node exhausted?
-				if (!child->HasChildren()) // IsVoid())
+				if (!child->HasChildren())
 				{
 					node->RemoveChild(nbIndex);
 				}
@@ -891,17 +886,12 @@ private:
 {
 	Assert(nullptr != node);
 
-	//if (depth>ms_longestWord)
-	//	return;
-
 	const auto width = context.width;
 	const auto height = context.height;
 
 	const unsigned boardIdx = iY*width + iX;
 
 	auto* visited = context.visited;
-//	if (true == visited[boardIdx])
-//		return;
 
 #if defined(DEBUG_STATS)
 	Assert(depth < s_longestWord);
@@ -911,7 +901,6 @@ private:
 	++depth;
 
 	// Recurse, as we've got a node that might be going somewhewre.
-
 	
 	visited[boardIdx] = true;
 
@@ -947,32 +936,29 @@ private:
 #else
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
 
-//	if (0 != node->HasChildren()) // <- You'd think this is smart, but it's so much better if the CPU can just crunch along instead of evaluating branches
+	if (iX > 0)
+		TraverseCall(context, iX-1, iY, node, depth);
+
+	if (xSafe)
+		TraverseCall(context, iX+1, iY, node, depth);
+
+	if (ySafe)
 	{
+		TraverseCall(context, iX, iY+1, node, depth);
+
+		if (xSafe) 
+			TraverseCall(context, iX+1, iY+1, node, depth);
 		if (iX > 0)
-			TraverseCall(context, iX-1, iY, node, depth);
+			TraverseCall(context, iX-1, iY+1, node, depth);
+	}
+	
+	if (iY > 0) {
+		TraverseCall(context, iX, iY-1, node, depth);
 
 		if (xSafe)
-			TraverseCall(context, iX+1, iY, node, depth);
-
-		if (ySafe)
-		{
-			TraverseCall(context, iX, iY+1, node, depth);
-
-			if (xSafe) 
-				TraverseCall(context, iX+1, iY+1, node, depth);
-			if (iX > 0)
-				TraverseCall(context, iX-1, iY+1, node, depth);
-		}
-	
-		if (iY > 0) {
-			TraverseCall(context, iX, iY-1, node, depth);
-
-			if (xSafe)
-				TraverseCall(context, iX+1, iY-1, node, depth);
-			if (iX > 0) 
-				TraverseCall(context, iX-1, iY-1, node, depth);
-		}
+			TraverseCall(context, iX+1, iY-1, node, depth);
+		if (iX > 0) 
+			TraverseCall(context, iX-1, iY-1, node, depth);
 	}
 #endif
 
