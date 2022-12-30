@@ -836,8 +836,7 @@ private:
 #endif
 }
 
-static alignas(16) unsigned s_log2Width;
-// static std::vector<unsigned> s_yTab;
+static unsigned s_log2Width;
 
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth)
@@ -846,7 +845,6 @@ static alignas(16) unsigned s_log2Width;
 #endif
 {
 //	const auto width = context.width;
-//	const unsigned nbBoardIdx = s_yTab[iY] + iX;
 	const unsigned nbBoardIdx = (iY<<s_log2Width) + iX;
 //	const unsigned nbBoardIdx = (iY<<12) + iX;
 
