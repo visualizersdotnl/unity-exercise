@@ -784,7 +784,7 @@ private:
 	const unsigned m_width, m_height;
 	const size_t m_gridSize;
 
-	std::atomic_bool m_spooling;
+	// std::atomic_bool m_spooling;
 };
 
 /* static */ void Query::ExecuteThread(ThreadContext* context)
@@ -811,15 +811,13 @@ private:
 #endif
 	
 	size_t boardIdx = 0;
-	for (unsigned iY = 0; iY < height; ++iY) // ++iY
+	for (unsigned iY = 0; iY < height; ++iY) 
 	{
-		for (unsigned iX = 0; iX < width; iX++) // ++iX
+		for (unsigned iX = 0; iX < width; ++iX) 
 		{
 			const unsigned index = sanitized[boardIdx++];
 
-			// We know, for now, that the root won't be removed, so we can just get the child node pointer
-			// and see if it's NULL instead of calling 2 functions to come to the same conclusion.
-//			if (root->HasChild(index))
+			if (root->HasChild(index))
 			{
 				DictionaryNode* child = root->GetChild(index);
 				if (nullptr != child)
