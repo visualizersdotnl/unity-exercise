@@ -8,7 +8,6 @@
 	- FIXMEs.
 
 	To do (low priority):
-		- Check compile & run status on OSX.
 		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver.
 		- Fix class members (notation).
 
@@ -76,7 +75,7 @@
 
 	** 30/12/2022 **
 	
-	Completely f*cking around now..
+	Encore minor optimizations w/Albert.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -820,7 +819,7 @@ private:
 			if (root->HasChild(index))
 			{
 				DictionaryNode* child = root->GetChild(index);
-				if (nullptr != child)
+				// if (nullptr != child)
 				{
 					unsigned depth = 0;
 #if defined(DEBUG_STATS)
