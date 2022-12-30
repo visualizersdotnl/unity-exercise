@@ -88,6 +88,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 #include <memory>
 #include <string>
