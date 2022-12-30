@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 16 // The more spooling the better chance of a fast result
+#define NUM_QUERIES 8 // The more spooling the better chance of a fast result
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -22,8 +22,6 @@
 
 #include "api.h"
 #include "random.h"
-
-// #include "spooling.h"
 
 int main(int argC, char **arguments)
 {

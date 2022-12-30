@@ -848,8 +848,8 @@ private:
 #endif
 {
 	const auto width = context.width;
-//	const unsigned nbBoardIdx = iY*width + iX;
-	const unsigned nbBoardIdx = (iY<<12) + iX;
+	const unsigned nbBoardIdx = iY*width + iX;
+//	const unsigned nbBoardIdx = (iY<<12) + iX;
 
 	auto* board = context.sanitized;
 	const unsigned nbIndex = board[nbBoardIdx];
@@ -894,8 +894,8 @@ private:
 	const auto width = context.width;
 	const auto height = context.height;
 
-//	const unsigned boardIdx = iY*width + iX;
-	const unsigned boardIdx = (iY<<12) + iX;
+	const unsigned boardIdx = iY*width + iX;
+//	const unsigned boardIdx = (iY<<12) + iX;
 
 	auto* visited = context.visited;
 
