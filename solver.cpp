@@ -142,9 +142,9 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
 #if defined(_WIN32)
-	const size_t kNumThreads = kNumConcurrrency;
+	const size_t kNumThreads = kAlphaRange;
 #else
-	const size_t kNumThreads = kNumConcurrrency*4;
+	const size_t kNumThreads = kAlphaRange;
 #endif
 
 #endif
@@ -407,16 +407,13 @@ static void AddWordToDictionary(const std::string& word)
 	{
 		s_longestWord = length;
 	}
-
-	// FIXME: this distributes by letter, which does a better job at containing the amount of traversal
+	
+	// Thread per entry letter, nice locality at least
 	char letter = word[0];
 	if ('Q' == letter)
 		letter = (mt_rand32() & 1) ? 'Q' : 'U';
 
-	const unsigned iThread = ((LetterToIndex(letter))%kNumThreads);
-	
-	// This distributes evenly, but makes things dreadfully slow (see above)
-//	unsigned iThread = s_wordCount%kNumThreads;
+	const unsigned iThread = LetterToIndex(letter); // ((LetterToIndex(letter))%kNumThreads);
 
 	DictionaryNode* node = s_threadDicts[iThread];
 
@@ -745,7 +742,7 @@ private:
 		return kLUT[length];
 	}
 
-	BOGGLE_INLINE static size_t GetWordScore(size_t length) /* const */
+	BOGGLE_INLINE static size_t GetWordScore_Albert_1(size_t length) /* const */
 	{
 		length = length > 8 ? 8 : length;
 		length -= 3;
@@ -757,6 +754,20 @@ private:
 		Albert += length>>2;
 		Albert += ((length+3)>>3)<<2;
 		Albert += ((length+3)>>3<<1);
+		return Albert+1;
+	}
+
+	BOGGLE_INLINE static size_t GetWordScore(size_t length) /* const */
+	{
+		length = length > 8 ? 8 : length;
+
+		// Courtesy of Albert S.
+		size_t Albert = 0;
+		Albert += (length-3)>>1;
+		Albert += (length+10)>>4;
+		Albert += (length+9)>>4;
+		Albert += length<<2>>5<<2;
+		Albert += length<<2>>5<<1;
 		return Albert+1;
 	}
 
