@@ -75,7 +75,7 @@
 
 	** 30/12/2022 **
 	
-	Encore minor optimizations w/Albert.
+	More optimizations w/Albert. Now splitting the dictionary over an/the amount of threads.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -141,7 +141,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #if defined(_WIN32)
 	const size_t kNumThreads = kNumConcurrrency*2;
 #else
-	const size_t kNumThreads = kNumConcurrency*2;
+	const size_t kNumThreads = kNumConcurrrency*2;
 #endif
 
 #endif
@@ -384,7 +384,7 @@ static bool IsWordValid(const std::string& word)
 }
 
 // Input word must be uppercase!
-static void AddWordToDictionary(const std::string& word, unsigned iThread)
+/* static */ void AddWordToDictionary(const std::string& word, unsigned iThread)
 {
 	// Word of any use given the Boggle rules?	
 	if (false == IsWordValid(word))
