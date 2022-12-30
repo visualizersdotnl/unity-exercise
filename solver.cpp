@@ -233,7 +233,7 @@ public:
 		DictionaryNode* Copy(DictionaryNode* parent)
 		{
 			DictionaryNode& node = m_pool[m_iAlloc++];
-			Assert(m_iAlloc < s_threadInfo[m_iThread].nodes);
+			Assert(m_iAlloc <= s_threadInfo[m_iThread].nodes);
 
 			node.m_wordIdx   = parent->m_wordIdx;
 			node.m_indexBits = parent->m_indexBits;
@@ -317,7 +317,9 @@ public:
 
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
 	{
-		Assert(HasChild(index));
+		// Function (can also be) also used to determine if it *has* the child
+//		Assert(HasChild(index));
+
 		return m_children[index];
 	}
 
@@ -736,11 +738,11 @@ private:
 private:
 	BOGGLE_INLINE static unsigned GetWordScore(size_t length) /* const */
 	{
-		length -= 1;
-		length &= 8-1;
+		length -= 3;
+		length = length > 5 ? 5 : length;
 
 		constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
-		return kLUT[length-2];
+		return kLUT[length];
 	}
 
 #if defined(DEBUG_STATS)
