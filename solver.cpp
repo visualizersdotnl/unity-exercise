@@ -751,8 +751,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY); // , unsigned depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, size_t boardIdx, unsigned iX, unsigned iY); // , unsigned depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY); // , unsigned depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY); // , unsigned depth);
 #endif
 
 	Results& m_results;
@@ -781,9 +781,10 @@ private:
 	context->maxDepth = 0;
 #endif
 	
-	size_t boardIdx = 0;
+	unsigned offsetY = 0;
 	for (unsigned iY = 0; iY < height; ++iY) 
 	{
+		unsigned boardIdx = offsetY;
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
 			const unsigned index = sanitized[boardIdx];
@@ -801,13 +802,15 @@ private:
 					unsigned depth = 1;
 					TraverseBoard(*context, child, iX, iY, depth);
 #else
-					TraverseBoard(*context, child, boardIdx /* Beacuse of boardIdx++ above! */, iX, iY); // , depth);
+					TraverseBoard(*context, child, iX, offsetY); // , depth);
 #endif
 				}
 			}
 
 			++boardIdx;
 		}
+
+		offsetY += width;
 
 		// std::this_thread::yield();
 	}
@@ -836,17 +839,17 @@ private:
 #endif
 }
 
-static unsigned s_log2Width;
+// static unsigned s_log2Width;
 
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY) // , unsigned depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY) // , unsigned depth)
 #endif
 {
 //	const auto width = context.width;
 //	const unsigned nbBoardIdx = (iY<<s_log2Width) + iX;
-	const unsigned nbBoardIdx = (iY<<12) + iX;
+	const unsigned nbBoardIdx = offsetY + iX;
 
 	const auto* board = context.sanitized;
 	const unsigned nbIndex = board[nbBoardIdx];
@@ -867,7 +870,7 @@ static unsigned s_log2Width;
 #if defined(DEBUG_STATS)
 						TraverseBoard(context, child, iX, iY, depth);
 #else
-						TraverseBoard(context, child, nbBoardIdx, iX, iY); // , depth);
+						TraverseBoard(context, child, iX, offsetY); // , depth);
 #endif
 
 						// Child node exhausted?
@@ -885,16 +888,15 @@ static unsigned s_log2Width;
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned iY, unsigned depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, size_t boardIdx, unsigned iX, unsigned iY) // , unsigned depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned offsetY) // , unsigned depth)
 #endif
 {
 	Assert(nullptr != node);
 
+	const unsigned boardIdx = offsetY + iX;
+
 	auto* visited = context.visited;
 	visited[boardIdx] = true;
-
-	const auto width = context.width;
-	const auto height = context.height;
 
 #if defined(DEBUG_STATS)
 	Assert(depth < s_longestWord);
@@ -904,8 +906,10 @@ static unsigned s_log2Width;
 
 	// Recurse, as we've got a node that might be going somewhewre.
 	
+	const auto width = context.width;
+	const auto height = context.height;
 	const bool xSafe = iX < width-1;
-	const bool ySafe = iY < height-1;
+	const bool ySafe = offsetY < (width*(height-1)); // iY < height-1;
 
 #if defined(DEBUG_STATS)
 	if (iX > 0)
@@ -937,28 +941,28 @@ static unsigned s_log2Width;
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
 
 	if (iX > 0)
-		TraverseCall(context, node, iX-1, iY);
+		TraverseCall(context, node, iX-1, offsetY);
 
 	if (xSafe)
-		TraverseCall(context, node, iX+1, iY);
+		TraverseCall(context, node, iX+1, offsetY);
 
-	if (iY > 0) {
-		TraverseCall(context, node, iX, iY-1);
+	if (offsetY > width) {
+		TraverseCall(context, node, iX, offsetY-width);
 
 		if (xSafe)
-			TraverseCall(context, node, iX+1, iY-1);
+			TraverseCall(context, node, iX+1, offsetY-width);
 		if (iX > 0) 
-			TraverseCall(context, node, iX-1, iY-1);
+			TraverseCall(context, node, iX-1, offsetY-width);
 	}
 
 	if (ySafe)
 	{
-		TraverseCall(context, node, iX, iY+1);
+		TraverseCall(context, node, iX, offsetY+width);
 
 		if (xSafe) 
-			TraverseCall(context, node, iX+1, iY+1);
+			TraverseCall(context, node, iX+1, offsetY+width);
 		if (iX > 0)
-			TraverseCall(context, node, iX-1, iY+1);
+			TraverseCall(context, node, iX-1, offsetY+width);
 	}
 #endif
 
@@ -989,13 +993,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	}
 #endif
 
-	// Calc. Y offset table
-	s_log2Width = unsigned(log2f(float(width)));
-//	for (unsigned iY = 0; iY < height; ++iY)
-//	{
-//		const auto offset = iY<<s_log2Width;
-//		s_yTab.push_back(offset);
-//	}
+//	s_log2Width = unsigned(log2f(float(width)));
 
 	const size_t nodeSize = sizeof(DictionaryNode);
 	debug_print("Node size: %zu\n", nodeSize);
