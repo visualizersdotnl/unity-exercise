@@ -142,7 +142,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
 	// FIXME	
-	const size_t kNumThreads = kNumConcurrrency*2;
+	const size_t kNumThreads = kNumConcurrrency*3;
 	// const size_t kNumThreads = kAlphaRange;
 #endif
 
