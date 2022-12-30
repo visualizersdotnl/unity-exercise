@@ -106,8 +106,6 @@
 #include "simple-tlsf.h"
 #include "inline.h"
 
-// #include "spooling.h"
-
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
 
@@ -568,7 +566,6 @@ public:
 ,		visited(nullptr)
 ,		score(0)
 ,		reqStrBufLen(0)
-//,		spooling(instance->m_spooling)
 		{
 			Assert(nullptr != instance);
 		}
@@ -586,7 +583,6 @@ public:
 
 			if (false) // gridSize >= 32)
 			{
-				
 				// This has proven to be a little faster than memset().
 //				size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
 //				int* pWrite = reinterpret_cast<int*>(visited);
@@ -597,19 +593,10 @@ public:
 				memset(visited, 0, gridSize*sizeof(bool));
 
 			// Reserve
-			wordsFound.reserve(s_threadInfo[iThread].load); 
+			wordsFound.reserve(s_threadInfo[iThread].load>>1); 
 			
-			// Spool thread
-//			do
-//			{
-//				std::this_thread::yield();
-//			}
-//			while (spooling);
-
 			// log2Width = unsigned(log2f(width));
 		}
-
-//		const std::atomic_bool& spooling;
 
 		// Input
 		const unsigned iThread;
@@ -641,9 +628,6 @@ public:
 		DictionaryLock dictLock;
 		{
 			// Kick off threads.
-
-//			m_spooling = true;
-
 			std::vector<std::thread> threads;
 			std::vector<std::unique_ptr<ThreadContext>> contexts;
 
@@ -657,10 +641,6 @@ public:
 					threads.push_back(std::thread(ExecuteThread, contexts[iThread].get()));
 				}
 			}
-
-//			std::this_thread::sleep_for(std::chrono::seconds(SPOOLING_TIME_IN_SEC));
-
-//			m_spooling = false;
 
 //			auto busy = kNumThreads;
 //			while (busy)
@@ -782,8 +762,6 @@ private:
 	const char* m_sanitized;
 	const unsigned m_width, m_height;
 	const size_t m_gridSize;
-
-	// std::atomic_bool m_spooling;
 };
 
 /* static */ void Query::ExecuteThread(ThreadContext* context)
@@ -793,7 +771,6 @@ private:
 	const unsigned iThread = context->iThread;
 	const auto* sanitized = context->sanitized;
 
-	auto* visited = context->visited;
 	const auto gridSize = context->gridSize;
 
 	// Create copy of source dictionary tree
