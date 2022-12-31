@@ -323,7 +323,7 @@ public:
 	}
 
 private:
-	size_t m_wordIdx = -1; 
+	int m_wordIdx = -1; 
 	unsigned m_indexBits = 0;
 	DictionaryNode* m_children[kAlphaRange] = { nullptr };
 };
