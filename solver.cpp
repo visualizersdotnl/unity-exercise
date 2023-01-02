@@ -76,6 +76,10 @@
 	** 30/12/2022 **
 	
 	More optimizations w/Albert. Now splitting the dictionary over an/the amount of threads.
+
+	** 02/01/2023 **
+
+	Introducing 'sse2neon'.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -99,6 +103,12 @@
 #include <algorithm>
 #include <cassert>
 #include <atomic>
+
+#if defined(_WIN32)
+	#include <emmintrin.h>
+#elif defined(__ARM_NEON)
+	#include "sse2neon-02-01-2022/sse2neon.h"
+#endif
 	
 #include "api.h"
 
@@ -536,10 +546,6 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
-#if defined(_WIN32)
-	#include <emmintrin.h>
-#endif
-
 class Query
 {
 public:
@@ -589,7 +595,7 @@ public:
 
 			visited = static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine));
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__ARM_NEON)
 			// This has proven to be a little faster than memset().
 			size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
 			int* pWrite = reinterpret_cast<int*>(visited);
