@@ -104,7 +104,7 @@
 #include <cassert>
 #include <atomic>
 
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(_WIN32) || defined(_WIN64)
 	#include <emmintrin.h>
 	#define USE_SSE 1
 #elif defined(__ARM_NEON)
@@ -198,7 +198,7 @@ public:
 
 	DictionaryNode() {}
 
-	DictionaryNode(size_t wordIdx, unsigned indexBits) :
+	DictionaryNode(int wordIdx, unsigned indexBits) :
 		m_wordIdx(wordIdx)
 ,		m_indexBits(indexBits)
 	{
@@ -437,7 +437,7 @@ static bool IsWordValid(const std::string& word)
 	
 	// Store.
 	s_dictionary.push_back(word);
-	node->m_wordIdx = s_wordCount;
+	node->m_wordIdx = int(s_wordCount);
 
 	++s_threadInfo[iThread].load;
 	++s_wordCount;
