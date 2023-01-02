@@ -104,10 +104,12 @@
 #include <cassert>
 #include <atomic>
 
-#if defined(_WIN32)
+#if defined(__x86_64__)
 	#include <emmintrin.h>
+	#define USE_SSE 1
 #elif defined(__ARM_NEON)
 	#include "sse2neon-02-01-2022/sse2neon.h"
+	#define USE_SSE 1
 #endif
 	
 #include "api.h"
@@ -595,7 +597,7 @@ public:
 
 			visited = static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine));
 
-#if defined(_WIN32) || defined(__ARM_NEON)
+#if defined(USE_SSE)
 			// This has proven to be a little faster than memset().
 			size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
 			int* pWrite = reinterpret_cast<int*>(visited);
