@@ -272,8 +272,7 @@ public:
 
 			node.m_wordIdx = parent->m_wordIdx;
 			auto indexBits = node.m_indexBits = parent->m_indexBits;
-
-			// memset(&node.m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
+			memset(&node.m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 
 			unsigned index = 0;
 			while (1)
@@ -352,7 +351,7 @@ public:
 
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
 	{
-		Assert(HasChild(index)); // Do not rely on this array being fully initialized!
+//		Assert(HasChild(index));
 		return m_children[index];
 	}
 
@@ -841,17 +840,16 @@ private:
 	auto& wordsFound = context->wordsFound;
 
 	// Not sure if this helps or hurts (on paper it "should" help)
-	std::sort(wordsFound.begin(), wordsFound.end());
+//	std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
 	for (auto wordIdx : wordsFound)
 	{
-//		if (-1 != wordIdx)
-		{
-			const size_t length = s_dictionary[wordIdx].length();
-			context->score += GetWordScore(length);
-			context->reqStrBufLen += length;
-		}
+		Assert(-1 != wordIdx);
+
+		const size_t length = s_dictionary[wordIdx].length();
+		context->score += GetWordScore(length);
+		context->reqStrBufLen += length;
 	}
 		
 #if defined(DEBUG_STATS)
