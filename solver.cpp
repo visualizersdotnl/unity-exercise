@@ -180,7 +180,7 @@ static BOGGLE_INLINE void StreamWipe(void *memory, size_t size)
 
 	size_t numStreams = size / sizeof(__m128i);
 	__m128i* pWrite = reinterpret_cast<__m128i*>(memory);
-	const __m128i zero = _mm_setzero_ps();
+	const __m128i zero = _mm_setzero_si128();
 	while (numStreams--)
 		// _mm_store_si128(pWrite++, zero);
 		_mm_stream_si128(pWrite++, zero);
