@@ -326,7 +326,6 @@ private:
 public:
 	BOGGLE_INLINE unsigned HasChildren() const { return m_indexBits;                    } // Non-zero.
 	BOGGLE_INLINE bool     IsWord()      const { return -1 != m_wordIdx;                }
-	BOGGLE_INLINE int      IsVoid()      const { return int(m_indexBits+m_wordIdx)>>31; } // Is 1 (sign bit) if zero children (0) and no word (-1).
 
 	// Returns zero if node is now a dead end.
 //	BOGGLE_INLINE unsigned RemoveChild(unsigned index)
@@ -885,7 +884,8 @@ private:
 #endif
 
 			// Child node exhausted?
-			if (child->IsVoid())
+			// Note that we don't check if it's a word, since the preceding TraverseBoard() call has taken care of it
+			if (false == child->HasChildren())
 			{
 				node->RemoveChild(letterIdx);
 			}
@@ -917,8 +917,10 @@ private:
 	
 	const auto width = context.width;
 	const auto height = context.height;
+//	const auto gridSize = context.gridSize;
 	const bool xSafe = iX < width-1;
-	const bool ySafe = offsetY < (width*(height-1)); // iY < height-1;
+	const bool ySafe = offsetY < (width*(height-1));
+//	const bool ySafe = offsetY < (gridSize-width);
 
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
 #if defined(DEBUG_STATS)
