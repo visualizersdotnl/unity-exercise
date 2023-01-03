@@ -700,13 +700,17 @@ public:
 				const auto result = SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_HIGHEST);
 				Assert(0 != result);
 #else
-				const int policy = SCHED_RR;
+				const int policy = SCHED_FIFO;
 				const int maxPrio = sched_get_priority_max(policy);
 				sched_param schedParam;
-				schedParam.sched_priority = maxPrio-2;
+				schedParam.sched_priority = maxPrio-1;
 				pthread_setschedparam(threads[iThread].native_handle(), policy, &schedParam);
 #endif
 			}
+
+#ifdef _WIN32
+			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
+#endif
 
 			// OSX likes this better
 			for (auto& thread : threads)
