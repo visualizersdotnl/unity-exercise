@@ -972,7 +972,6 @@ private:
 			TraverseCall(context, node, iX+1, offsetY+width, depth);
 	}
 #else
-#if __x86_64__ || _WIN32
 	if (iX > 0)
 	{
 		TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY);
@@ -996,39 +995,6 @@ private:
 		TraverseCall(context, sanitized, visited, node, width, height, iX, offsetY+width);
 		if (iX < width-1) TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY+width);
 	}
-#else // Apparently M/ARM likes this:
-	if (iX > 0)
-	{
-		TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY);
-		if (false == node->HasChildren()) goto stop;
-	}
-
-	if (iX < width-1) 
-	{
-		TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY);
-		if (false == node->HasChildren()) goto stop;
-	}
-
-	if (offsetY >= width) 
-	{
-		if (iX > 0) TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY-width);
-		if (false == node->HasChildren()) goto stop;
-		TraverseCall(context, sanitized, visited, node, width, height, iX, offsetY-width);
-		if (false == node->HasChildren()) goto stop;
-		if (iX < width-1) TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY-width);
-		if (false == node->HasChildren()) goto stop;
-	}
-
-	if (offsetY < width*heightMinOne)
-	{
-		if (iX > 0) TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY+width);
-		if (false == node->HasChildren()) goto stop;
-		TraverseCall(context, sanitized, visited, node, width, height, iX, offsetY+width);
-		if (false == node->HasChildren()) goto stop;
-		if (iX < width-1) TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY+width);
-	}
-stop:
-#endif
 #endif
 
 
