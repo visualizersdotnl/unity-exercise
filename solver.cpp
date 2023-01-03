@@ -604,6 +604,8 @@ void FreeDictionary()
 
 #ifndef _WIN32
 	#include <pthread.h>
+#else
+	#include <windows.h>
 #endif
 
 class Query
@@ -698,7 +700,7 @@ public:
 				const auto result = SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_HIGHEST);
 				Assert(0 != result);
 #else
-				const int policy = SCHED_FIFO;
+				const int policy = SCHED_RR;
 				const int maxPrio = sched_get_priority_max(policy);
 				sched_param schedParam;
 				schedParam.sched_priority = maxPrio-2;
