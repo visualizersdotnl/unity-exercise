@@ -214,19 +214,78 @@ BOGGLE_INLINE unsigned LetterToIndex(unsigned letter)
 
 // FWD.
 static void AddWordToDictionary(const std::string& word);
+class LoadDictionaryNode;
 class DictionaryNode;
 
 // A tree root per thread.
-static std::vector<DictionaryNode*> s_threadDicts;
+static std::vector<LoadDictionaryNode*> s_threadDicts;
 
-class DictionaryNode
+// Load node.
+class LoadDictionaryNode
 {
 	friend void AddWordToDictionary(const std::string& word, unsigned iThread);
 	friend void FreeDictionary();
 
+	friend class DictionaryNode;
+
 public:
+	// Nothing is allocated here, so no use for:
 	CUSTOM_NEW
-	CUSTOM_DELETE
+	CUSTOM_DELETE	
+
+	LoadDictionaryNode() {}
+
+	LoadDictionaryNode(int wordIdx, unsigned indexBits) :
+		m_wordIdx(wordIdx)
+,		m_indexBits(indexBits)
+	{
+	}
+
+	// Destructor is not called when using ThreadCopy!
+	~LoadDictionaryNode()
+	{
+		for (unsigned iChar = 0; iChar < kAlphaRange; ++iChar)
+			delete m_children[iChar];
+	}
+
+	// Only called from LoadDictionary().
+	LoadDictionaryNode* AddChild(char letter, unsigned iThread)
+	{
+		const unsigned index = LetterToIndex(letter);
+
+		const unsigned bit = 1 << index;
+		if (m_indexBits & bit)
+		{
+			return m_children[index];
+		}
+
+		++s_threadInfo[iThread].nodes;
+			
+		m_indexBits |= bit;
+		return m_children[index] = new LoadDictionaryNode();
+	}
+
+	BOGGLE_INLINE LoadDictionaryNode* GetChild(unsigned index)
+	{
+		Assert(nullptr != m_children[index]);
+		return m_children[index];
+	}
+
+private:
+	int32_t m_wordIdx = -1; 
+	uint32_t m_indexBits = 0;
+	LoadDictionaryNode* m_children[kAlphaRange] = { nullptr };
+};
+
+// Actual processing node.
+class DictionaryNode
+{
+	friend class LoadDictionaryNode;
+
+public:
+	// Nothing is allocated here, so no use for:
+	CUSTOM_NEW
+	CUSTOM_DELETE	
 
 	DictionaryNode() {}
 
@@ -243,7 +302,7 @@ public:
 		CUSTOM_DELETE
 
 		ThreadCopy(unsigned iThread) : 
-			m_iThread(iThread), m_root(nullptr), m_iAlloc(0)
+			m_iThread(iThread), m_iAlloc(0)
 		{
 			// Allocate pool for all necessary nodes.
 			const auto numNodes = s_threadInfo[iThread].nodes;
@@ -251,30 +310,33 @@ public:
 			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
 
 			// Recursively copy them.
-			m_root = Copy(s_threadDicts[iThread]);						
+			Copy(s_threadDicts[iThread]);	
 		}
 
 		~ThreadCopy()
 		{
-			s_customAlloc.Free(m_root);
+			s_customAlloc.Free(m_pool);
 		}
 
 		DictionaryNode* Get() /* const */
 		{
-			return m_root;
+			return m_pool;
 		}
 
 	private:
-		DictionaryNode* Copy(DictionaryNode* parent)
+		uint32_t Copy(LoadDictionaryNode* parent)
 		{
 			// Important: initialize entire node!
 
-			DictionaryNode& node = m_pool[m_iAlloc++];
+			const uint32_t offsInPool = uint32_t(m_iAlloc++);
+			DictionaryNode& node = m_pool[offsInPool];
 			Assert(m_iAlloc <= s_threadInfo[m_iThread].nodes);
 
 			node.m_wordIdx = parent->m_wordIdx;
 			auto indexBits = node.m_indexBits = parent->m_indexBits;
-			memset(&node.m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
+			node.m_pool    = m_pool;
+
+//			memset(&node.m_children, 0, sizeof(uint32_t)*kAlphaRange);
 
 			unsigned index = 0;
 			while (1)
@@ -289,41 +351,17 @@ public:
 				++index;
 			}
 
-			return &node;
+			return offsInPool;
 		}
 
 		const unsigned m_iThread;
 
 		DictionaryNode* m_pool;
 		size_t m_iAlloc;
-
-		DictionaryNode* m_root;
 	};
 
 	// Destructor is not called when using ThreadCopy!
-	~DictionaryNode()
-	{
-		for (unsigned iChar = 0; iChar < kAlphaRange; ++iChar)
-			delete m_children[iChar];
-	}
-
-private:
-	// Only called from LoadDictionary().
-	DictionaryNode* AddChild(char letter, unsigned iThread)
-	{
-		const unsigned index = LetterToIndex(letter);
-
-		const unsigned bit = 1 << index;
-		if (m_indexBits & bit)
-		{
-			return m_children[index];
-		}
-
-		++s_threadInfo[iThread].nodes;
-			
-		m_indexBits |= bit;
-		return m_children[index] = new DictionaryNode();
-	}
+	~DictionaryNode() = delete;
 
 public:
 	BOGGLE_INLINE unsigned HasChildren() const { return m_indexBits;                    } // Non-zero.
@@ -352,8 +390,8 @@ public:
 
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
 	{
-//		Assert(HasChild(index));
-		return m_children[index];
+		Assert(HasChild(index));
+		return m_pool + m_children[index];
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
@@ -365,9 +403,11 @@ public:
 	}
 
 private:
-	int32_t m_wordIdx = -1; 
-	uint32_t m_indexBits = 0;
-	DictionaryNode* m_children[kAlphaRange] = { nullptr };
+	int32_t m_wordIdx; 
+	uint32_t m_indexBits;
+
+	DictionaryNode* m_pool;
+	uint32_t m_children[kAlphaRange];
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -440,7 +480,7 @@ static bool IsWordValid(const std::string& word)
 	}
 
 	char letter = word[0];
-	DictionaryNode* node = s_threadDicts[iThread];
+	LoadDictionaryNode* node = s_threadDicts[iThread];
 
 	unsigned letterLen = 0;
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
@@ -492,7 +532,7 @@ void LoadDictionary(const char* path)
 	{
 		size_t iThread = kNumThreads;
 		while (iThread-- > 0)
-			s_threadDicts.push_back(new DictionaryNode());
+			s_threadDicts.push_back(new LoadDictionaryNode());
 
 		int character;
 		std::string word;
