@@ -229,7 +229,6 @@ class LoadDictionaryNode
 	friend class DictionaryNode;
 
 public:
-	// Nothing is allocated here, so no use for:
 	CUSTOM_NEW
 	CUSTOM_DELETE	
 
@@ -334,7 +333,7 @@ public:
 
 			node.m_wordIdx = parent->m_wordIdx;
 			auto indexBits = node.m_indexBits = parent->m_indexBits;
-			node.m_pool    = m_pool;
+			node.m_pool    = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Store upper 32 bits only
 
 //			memset(&node.m_children, 0, sizeof(uint32_t)*kAlphaRange);
 
@@ -351,7 +350,7 @@ public:
 				++index;
 			}
 
-			return offsInPool;
+			return reinterpret_cast<uint64_t>(&node)&0xffffffff;
 		}
 
 		const unsigned m_iThread;
@@ -391,7 +390,10 @@ public:
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
 	{
 		Assert(HasChild(index));
-		return m_pool + m_children[index];
+//		return m_children[index];
+		const auto childHalf = m_children[index];
+		const auto upperHalf = m_pool;
+		return reinterpret_cast<DictionaryNode*>(upperHalf|childHalf);
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
@@ -406,7 +408,7 @@ private:
 	int32_t m_wordIdx; 
 	uint32_t m_indexBits;
 
-	DictionaryNode* m_pool;
+	uint64_t m_pool;
 	uint32_t m_children[kAlphaRange];
 };
 
