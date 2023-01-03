@@ -718,17 +718,9 @@ public:
 
 #endif
 
-			// OSX likes this better
 			for (auto& thread : threads)
-			{
-				if (thread.joinable())
-				{
-					thread.join();
-				}
-				else
-					std::this_thread::yield();
-			}
-			
+				thread.join();
+
 			m_results.Count  = 0;
 			m_results.Score  = 0;
 			size_t strBufLen = 0;
@@ -950,14 +942,13 @@ private:
 	// Recurse, as we've got a node that might be going somewhewre.
 	
 	const auto width = context.width;
-	const auto height = context.height;
-//	const auto gridSize = context.gridSize;
-	const bool xSafe = iX < width-1;
-	const bool ySafe = offsetY < (width*(height-1));
-//	const bool ySafe = offsetY < (gridSize-width);
+	const auto heightMinOne = context.height-1;
 
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
 #if defined(DEBUG_STATS)
+	const bool xSafe = iX < width-1;
+	const bool ySafe = offsetY < width*heightMinOne;
+
 	if (iX > 0)
 		TraverseCall(context, node, iX-1, offsetY, depth);
 
@@ -992,7 +983,7 @@ private:
 		TraverseCall(context, node, iX-1, offsetY);
 	}
 
-	if (xSafe) 
+	if (iX < width-1) 
 	{
 		TraverseCall(context, node, iX+1, offsetY);
 	}
@@ -1001,14 +992,14 @@ private:
 	{
 		if (iX > 0) TraverseCall(context, node, iX-1, offsetY-width);
 		TraverseCall(context, node, iX, offsetY-width);
-		if (xSafe) TraverseCall(context, node, iX+1, offsetY-width);
+		if (iX < width-1) TraverseCall(context, node, iX+1, offsetY-width);
 	}
 
-	if (ySafe)
+m	if (offsetY < width*heightMinOne)
 	{
 		if (iX > 0) TraverseCall(context, node, iX-1, offsetY+width);
 		TraverseCall(context, node, iX, offsetY+width);
-		if (xSafe) TraverseCall(context, node, iX+1, offsetY+width);
+		if (iX < width-1) TraverseCall(context, node, iX+1, offsetY+width);
 	}
 #else // Apparently M/ARM likes this:
 	if (iX > 0)
@@ -1017,31 +1008,29 @@ private:
 		if (false == node->HasChildren()) goto stop;
 	}
 
-	if (xSafe) 
+	if (iX < width-1) 
 	{
 		TraverseCall(context, node, iX+1, offsetY);
-//		if (false == node->HasChildren()) goto stop;
+		if (false == node->HasChildren()) goto stop;
 	}
 
 	if (offsetY >= width) 
 	{
-		if (false == node->HasChildren()) goto stop;
 		if (iX > 0) TraverseCall(context, node, iX-1, offsetY-width);
 		if (false == node->HasChildren()) goto stop;
 		TraverseCall(context, node, iX, offsetY-width);
 		if (false == node->HasChildren()) goto stop;
-		if (xSafe) TraverseCall(context, node, iX+1, offsetY-width);
+		if (iX < width-1) TraverseCall(context, node, iX+1, offsetY-width);
+		if (false == node->HasChildren()) goto stop;
 	}
 
-	if (ySafe)
+	if (offsetY < width*heightMinOne)
 	{
-		if (false == node->HasChildren()) goto stop;
 		if (iX > 0) TraverseCall(context, node, iX-1, offsetY+width);
 		if (false == node->HasChildren()) goto stop;
 		TraverseCall(context, node, iX, offsetY+width);
 		if (false == node->HasChildren()) goto stop;
-		if (xSafe) TraverseCall(context, node, iX+1, offsetY+width);
-
+		if (iX < width-1) TraverseCall(context, node, iX+1, offsetY+width);
 	}
 stop:
 #endif
