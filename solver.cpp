@@ -995,7 +995,7 @@ private:
 		if (iX < width-1) TraverseCall(context, node, iX+1, offsetY-width);
 	}
 
-m	if (offsetY < width*heightMinOne)
+	if (offsetY < width*heightMinOne)
 	{
 		if (iX > 0) TraverseCall(context, node, iX-1, offsetY+width);
 		TraverseCall(context, node, iX, offsetY+width);
