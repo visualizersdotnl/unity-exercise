@@ -289,44 +289,38 @@ public:
 			s_customAlloc.Free(m_pool);
 		}
 
-		DictionaryNode* Get() /* const */
+		BOGGLE_INLINE DictionaryNode* Get() const
 		{
 			return m_pool;
 		}
 
-		uint64_t GetPool() /* const */
+		BOGGLE_INLINE uint64_t GetPool() const 
 		{
-//			return reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Store upper 32 bits only
 			return Get()->GetPool();
 		}
 
 	private:
 		uint32_t Copy(LoadDictionaryNode* parent)
 		{
-			DictionaryNode& node = m_pool[m_iAlloc++];
-			Assert(m_iAlloc <= s_threadInfo[m_iThread].nodes);
+			Assert(m_iAlloc < s_threadInfo[m_iThread].nodes);
+			DictionaryNode* node = m_pool + m_iAlloc++;
 
-			node.m_wordIdx = parent->m_wordIdx;
-			auto indexBits = node.m_indexBits = parent->m_indexBits;
-			node.m_pool    = m_poolUpper32; // Store for cache
-
-//			memset(&node.m_children, 0, sizeof(uint32_t)*kAlphaRange);
+			node->m_wordIdx = parent->m_wordIdx;
+			auto indexBits  = node->m_indexBits = parent->m_indexBits;
+			node->m_pool    = m_poolUpper32; // Store for cache
 
 			unsigned index = 0;
-//			while (1)
 			for (unsigned iLetter = 0; iLetter < kAlphaRange; ++iLetter)
+//			while (indexBits)
 			{
 				if (indexBits & 1)
-					node.m_children[index] = Copy(parent->GetChild(index));
+					node->m_children[index] = Copy(parent->GetChild(index));
 
 				indexBits >>= 1;
-				if (!indexBits)
-					break;
-
 				++index;
-			}
+		}
 
-			return reinterpret_cast<uint64_t>(&node)&0xffffffff;
+			return reinterpret_cast<uint64_t>(node)&0xffffffff;
 		}
 
 		const unsigned m_iThread;
@@ -365,13 +359,19 @@ public:
 		return m_indexBits & bit;
 	}
 
+	// Returns NULL if no child
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
 	{
 		Assert(HasChild(index));
-//		return m_children[index];
-		const auto childHalf = m_children[index];
-		const uint64_t upperHalf = m_pool; // uint64_t(m_pool)<<32;
-		return reinterpret_cast<DictionaryNode*>(upperHalf|childHalf);
+		
+		if (false == HasChild(index))
+			return nullptr;
+		else
+		{
+			const auto childHalf = m_children[index];
+			const uint64_t upperHalf = m_pool;
+			return reinterpret_cast<DictionaryNode*>(upperHalf|childHalf);
+		}
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
@@ -613,7 +613,6 @@ public:
 ,		m_sanitized(sanitized)
 ,		m_width(width)
 ,		m_height(height)
-,		m_gridSize(width*height) 
 	{
 	}
 
@@ -629,7 +628,6 @@ public:
 
 		ThreadContext(unsigned iThread, const Query* instance) :
 		iThread(iThread)
-,		gridSize(instance->m_gridSize)
 ,		sanitized(instance->m_sanitized)
 ,		width(instance->m_width)
 ,		height(instance->m_height)
@@ -648,22 +646,17 @@ public:
 		void OnExecuteThread()
 		{
 			// Handle allocation and initialization of memory.
-
-			visited = static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine));
-			memset(visited, 0, gridSize*sizeof(bool));
+			const auto gridSize = width*height*sizeof(bool);
+			visited = static_cast<bool*>(s_customAlloc.Allocate(gridSize, kCacheLine));
+			memset(visited, 0, gridSize);
 
 			// Reserve
 			wordsFound.reserve(s_threadInfo[iThread].load); 
 		}
 
-		// Input
-		const unsigned iThread;
-		const size_t gridSize;
-		const char* sanitized;
 		const unsigned width, height;
-		
-		// Grid to flag visited tiles.
-		bool* visited;
+		const char* sanitized;
+		bool* visited; // Grid to flag visited tiles.
 
 		// Output
 		std::vector<size_t> wordsFound;
@@ -673,6 +666,8 @@ public:
 #if defined(DEBUG_STATS)
 		unsigned maxDepth;
 #endif
+
+		const unsigned iThread;
 	}; 
 
 public:
@@ -704,8 +699,8 @@ public:
 				{
 					thread.join();
 				}
-
-				std::this_thread::yield();
+				else
+					std::this_thread::yield();
 			}
 #else
 			// Win32 likes it this way
@@ -799,8 +794,7 @@ private:
 		return Albert+1;
 	}
 
-//	BOGGLE_INLINE static size_t GetWordScore_Albert_2(size_t length) /* const */
-	BOGGLE_INLINE static size_t GetWordScore(size_t length) /* const */
+	BOGGLE_INLINE static size_t GetWordScore_Albert_2(size_t length) /* const */
 	{
 		length = length > 8 ? 8 : length;
 
@@ -825,25 +819,23 @@ private:
 	Results& m_results;
 	const char* m_sanitized;
 	const unsigned m_width, m_height;
-	const size_t m_gridSize;
 };
 
 /* static */ void Query::ExecuteThread(ThreadContext* context)
 {
 	context->OnExecuteThread();
 
-	const unsigned iThread = context->iThread;
 	const auto* sanitized = context->sanitized;
 
 	// Create copy of source dictionary tree
-	auto threadCopy = DictionaryNode::ThreadCopy(iThread);
+	auto threadCopy = DictionaryNode::ThreadCopy(context->iThread);
 	auto* root = threadCopy.Get();
 			
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
 
 #if defined(DEBUG_STATS)
-	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", iThread, s_threadInfo[iThread].load, s_threadInfo[iThread].nodes);
+	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context.iThread, s_threadInfo[context.iThread].load, s_threadInfo[context.iThread].nodes);
 
 	context->maxDepth = 0;
 #endif
@@ -856,10 +848,8 @@ private:
 		{
 			const unsigned letterIdx = sanitized[boardIdx];
 
-			if (root->HasChild(letterIdx))
+			if (DictionaryNode* child = root->GetChild(letterIdx))
 			{
-				DictionaryNode* child = root->GetChild(letterIdx);
-
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
@@ -887,14 +877,14 @@ private:
 		Assert(-1 != wordIdx);
 
 		const size_t length = s_dictionary[wordIdx].length();
-		context->score += GetWordScore(length);
+		context->score += GetWordScore_Albert_2(length);
 		context->reqStrBufLen += length;
 	}
 		
 #if defined(DEBUG_STATS)
 	float hitPct = 0.f;
 	if (s_threadInfo[iThread].load > 0.f)
-		hitPct = ((float)wordsFound.size()/s_threadInfo[iThread].load)*100.f;
+		hitPct = ((float)wordsFound.size()/s_threadInfo[context.iThread].load)*100.f;
 	debug_print("Thread %u has max. traversal depth %u (max. %u), hit: %.2f percent of load.\n", iThread, context->maxDepth, s_longestWord, hitPct);
 #endif
 }
@@ -906,14 +896,11 @@ private:
 #endif
 {
 	const unsigned boardIdx = offsetY + iX;
-
 	const auto* board = context.sanitized;
 	const unsigned letterIdx = board[boardIdx];
 
-	if (0 != node->HasChild(letterIdx)) // Limits traversal depth
+	if (auto* child = node->GetChild(letterIdx)) // Limits traversal depth
 	{
-		auto* child = node->GetChild(letterIdx);
-
 		const auto* visited = context.visited;
 		if (false == visited[boardIdx])
 		{
@@ -970,62 +957,74 @@ private:
 	if (xSafe)
 		TraverseCall(context, node, iX+1, offsetY, depth);
 
-	if (offsetY >= width) {
+	if (offsetY >= width) 
+	{
+		if (iX > 0) 
+			TraverseCall(context, node, iX-1, offsetY-width, depth);
+
 		TraverseCall(context, node, iX, offsetY-width, depth);
 
 		if (xSafe)
 			TraverseCall(context, node, iX+1, offsetY-width, depth);
-		if (iX > 0) 
-			TraverseCall(context, node, iX-1, offsetY-width, depth);
 	}
 
 	if (ySafe)
 	{
+		if (iX > 0)
+			TraverseCall(context, node, iX-1, offsetY+width, depth);
+
 		TraverseCall(context, node, iX, offsetY+width, depth);
 
 		if (xSafe) 
 			TraverseCall(context, node, iX+1, offsetY+width, depth);
-		if (iX > 0)
-			TraverseCall(context, node, iX-1, offsetY+width, depth);
 	}
 #else
 	if (iX > 0)
+	{
 		TraverseCall(context, node, iX-1, offsetY);
+		if (false == node->HasChildren()) goto stop;
+	}
 
-	if (xSafe)
+	if (xSafe) 
+	{
 		TraverseCall(context, node, iX+1, offsetY);
+		if (false == node->HasChildren()) goto stop;
+	}
 
-	if (offsetY >= width) {
+	if (offsetY >= width) 
+	{
+		if (false == node->HasChildren()) goto stop;
+		if (iX > 0) TraverseCall(context, node, iX-1, offsetY-width);
+		if (false == node->HasChildren()) goto stop;
 		TraverseCall(context, node, iX, offsetY-width);
-
-		if (xSafe)
-			TraverseCall(context, node, iX+1, offsetY-width);
-		if (iX > 0) 
-			TraverseCall(context, node, iX-1, offsetY-width);
+		if (false == node->HasChildren()) goto stop;
+		if (xSafe) TraverseCall(context, node, iX+1, offsetY-width);
 	}
 
 	if (ySafe)
 	{
+		if (false == node->HasChildren()) goto stop;
+		if (iX > 0) TraverseCall(context, node, iX-1, offsetY+width);
+		if (false == node->HasChildren()) goto stop;
 		TraverseCall(context, node, iX, offsetY+width);
-
-		if (xSafe) 
-			TraverseCall(context, node, iX+1, offsetY+width);
-		if (iX > 0)
-			TraverseCall(context, node, iX-1, offsetY+width);
+		if (false == node->HasChildren()) goto stop;
+		if (xSafe) TraverseCall(context, node, iX+1, offsetY+width);
 	}
 #endif
+
+stop:
 
 #if defined(DEBUG_STATS)
 	--depth;
 #endif
 
 	visited[boardIdx] = false;
-	
+
 	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
 	const size_t wordIdx = node->GetWordIndex();
 	if (-1 != wordIdx)
 	{
-		context.wordsFound.emplace_back(wordIdx);
+		context.wordsFound.push_back(wordIdx);
 	}
 }
 

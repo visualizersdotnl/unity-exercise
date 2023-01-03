@@ -10,5 +10,5 @@
 	#define BOGGLE_INLINE __forceinline 
 #else
 	// According to Albert on Linux (so probably also OSX) no explicit hints yield the best result.
-	#define BOGGLE_INLINE 
+	#define BOGGLE_INLINE __inline
 #endif
