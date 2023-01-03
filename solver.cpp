@@ -972,16 +972,16 @@ private:
 
 	if (offsetY >= width) 
 	{
+		if (iX > 0) TraverseCall(context, node, iX-1, offsetY-width);
 		TraverseCall(context, node, iX, offsetY-width);
 		if (xSafe) TraverseCall(context, node, iX+1, offsetY-width);
-		if (iX > 0) TraverseCall(context, node, iX-1, offsetY-width);
 	}
 
 	if (ySafe)
 	{
+		if (iX > 0) TraverseCall(context, node, iX-1, offsetY+width);
 		TraverseCall(context, node, iX, offsetY+width);
 		if (xSafe) TraverseCall(context, node, iX+1, offsetY+width);
-		if (iX > 0) TraverseCall(context, node, iX-1, offsetY+width);
 	}
 #else // Apparently M/ARM likes this:
 	if (iX > 0)
