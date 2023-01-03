@@ -87,6 +87,7 @@
 	Things that matter:
 	- Node size (multiple megabytes per thread!)
 	- Keep traversal as simple as possible, smart early-outs not seldom cause execution to shoot up due to unpredictability
+	- SSE non-cached writes did not help at all
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -111,18 +112,6 @@
 #include <cassert>
 #include <atomic>
 #include <map>
-
-#if defined(__x86_64__) || defined(_WIN32) || defined(_WIN64)
-	#include <emmintrin.h>
-	#define USE_SSE 1
-#elif defined(__ARM_NEON)
-	#include "sse2neon-02-01-2022/sse2neon.h"
-	#define USE_SSE 1
-#endif
-
-#ifdef _WIN32 
-	#undef USE_SSE
-#endif
 
 #include "api.h"
 
@@ -172,27 +161,6 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
-
-// Meaning: does/should not pollute (most) write cache, if USE_SSE avail. 
-static BOGGLE_INLINE void StreamWipe(void *memory, size_t size) 
-{
-	Assert(!(reinterpret_cast<size_t>(memory) & 15));
-
-#if defined(USE_SSE)
-	const size_t remainder = size % sizeof(__m128i);
-
-	size_t numStreams = size / sizeof(__m128i);
-	__m128i* pWrite = reinterpret_cast<__m128i*>(memory);
-	const __m128i zero = _mm_setzero_si128();
-	while (numStreams--)
-		// _mm_store_si128(pWrite++, zero);
-		_mm_stream_si128(pWrite++, zero);
-
-	memset(pWrite, 0, remainder);
-#else
-	memset(memory, 0, size);
-#endif
-}
 
 // Number of words and number of nodes (1 for root) per thread.
 class ThreadInfo
@@ -682,7 +650,7 @@ public:
 			// Handle allocation and initialization of memory.
 
 			visited = static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine));
-			StreamWipe(visited, gridSize*sizeof(bool));
+			memset(visited, 0, gridSize*sizeof(bool));
 
 			// Reserve
 			wordsFound.reserve(s_threadInfo[iThread].load); 
@@ -1120,60 +1088,12 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		}
 #else
 		// Sanitize that just reorders and expects uppercase.
-#if !defined(USE_SSE)
-		for (unsigned index = 0; index < gridSize;)
+		for (unsigned index = 0; index < gridSize; ++index)
 		{
-			char letter = *board++;
-			unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
-			sanitized[index++] = sanity;
+			const char letter = *board++;
+			const unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
+			sanitized[index] = sanity;
 		}
-#else
-		const auto bytesPerIter = 4*sizeof(__m128i);
-		if ((gridSize % bytesPerIter) != 0)
-		{
-			for (unsigned index = 0; index < gridSize;)
-			{
-				char letter = *board++;
-				unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
-				sanitized[index++] = sanity;
-			}
-		}
-		else
-		{
-			const auto numIter = gridSize/bytesPerIter;
-
-			const __m128i subtract = _mm_set1_epi8('A');
-	//		const __m128i zero = _mm_setzero_si128();
-
-			const auto* pRead  = reinterpret_cast<const __m128i*>(board);
-			auto* pWrite = reinterpret_cast<__m128i*>(sanitized);
-
-			for (unsigned index = 0; index < numIter; ++index)
-			{
-				__m128i letters, subtracted;
-
-				letters = _mm_load_si128(pRead++); 
-				subtracted = _mm_sub_epi8(letters, subtract);
-//				_mm_stream_si128(pWrite++, subtracted);
-				_mm_store_si128(pWrite++, subtracted);
-
-				letters = _mm_load_si128(pRead++); 
-				subtracted = _mm_sub_epi8(letters, subtract);
-//				_mm_stream_si128(pWrite++, subtracted);
-				_mm_store_si128(pWrite++, subtracted);
-
-				letters = _mm_load_si128(pRead++); 
-				subtracted = _mm_sub_epi8(letters, subtract);
-//				_mm_stream_si128(pWrite++, subtracted);
-				_mm_store_si128(pWrite++, subtracted);
-
-				letters = _mm_load_si128(pRead++); 
-				subtracted = _mm_sub_epi8(letters, subtract);
-//				_mm_stream_si128(pWrite++, subtracted);
-				_mm_store_si128(pWrite++, subtracted);
-			}
-		}
-#endif
 #endif
 
 		Query query(results, sanitized, width, height);
