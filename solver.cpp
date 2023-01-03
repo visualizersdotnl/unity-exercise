@@ -700,10 +700,10 @@ public:
 				const auto result = SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_HIGHEST);
 				Assert(0 != result);
 #else
-				const int policy = SCHED_FIFO;
+				const int policy = SCHED_RR;
 				const int maxPrio = sched_get_priority_max(policy);
 				sched_param schedParam;
-				schedParam.sched_priority = maxPrio-1;
+				schedParam.sched_priority = maxPrio-2;
 				pthread_setschedparam(threads[iThread].native_handle(), policy, &schedParam);
 #endif
 			}
@@ -721,12 +721,12 @@ public:
 			// OSX likes this better
 			for (auto& thread : threads)
 			{
-//				if (thread.joinable())
+				if (thread.joinable())
 				{
 					thread.join();
 				}
-//				else
-//					std::this_thread::yield();
+				else
+					std::this_thread::yield();
 			}
 			
 			m_results.Count  = 0;
