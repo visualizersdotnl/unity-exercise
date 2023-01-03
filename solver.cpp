@@ -820,8 +820,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
@@ -831,14 +831,16 @@ private:
 
 /* static */ void Query::ExecuteThread(ThreadContext* context)
 {
+	// Initialize context
 	context->OnExecuteThread();
-
-	const auto* sanitized = context->sanitized;
 
 	// Create copy of source dictionary tree
 	auto threadCopy = DictionaryNode::ThreadCopy(context->iThread);
 	auto* root = threadCopy.Get();
-			
+
+	// Grab stuff from context
+	const char* sanitized = context->sanitized;
+	bool* visited = context->visited;
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
 
@@ -848,8 +850,8 @@ private:
 	context->maxDepth = 0;
 #endif
 	
-//	const unsigned yLim =  width*(height-1);
-	for (unsigned offsetY = 0; offsetY <= width*(height-1); offsetY += width) 
+	const unsigned yLim = width*(height-1);
+	for (unsigned offsetY = 0; offsetY <= yLim; offsetY += width) 
 	{
 		unsigned boardIdx = offsetY;
 		for (uint16_t iX = 0; iX < width; ++iX) 
@@ -862,7 +864,7 @@ private:
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
 #else
-				TraverseBoard(*context, child, iX, offsetY);
+				TraverseBoard(*context, sanitized, visited, child, width, height, iX, offsetY);
 #endif
 			}
 		}
@@ -891,22 +893,18 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
 #endif
 {
-	const unsigned boardIdx = offsetY + iX;
-	const auto* board = context.sanitized;
-	const unsigned letterIdx = board[boardIdx];
-
+	const unsigned letterIdx = sanitized[offsetY+iX];
 	if (auto* child = node->GetChild(letterIdx)) // Limits traversal depth
 	{
-		const auto* visited = context.visited;
-		if (false == visited[boardIdx])
+		if (false == visited[offsetY+iX])
 		{
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, child, iX, offsetY, depth);
 #else
-			TraverseBoard(context, child, iX, offsetY);
+			TraverseBoard(context, sanitized, visited, child, width, height, iX, offsetY);
 #endif
 
 			// Child node exhausted?
@@ -922,15 +920,12 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
 #endif
 {
 	Assert(nullptr != node);
 
-	const unsigned boardIdx = offsetY + iX;
-
-	auto* visited = context.visited;
-	visited[boardIdx] = true;
+	visited[offsetY+iX] = true;
 
 #if defined(DEBUG_STATS)
 	++depth;
@@ -940,12 +935,12 @@ private:
 #endif
 
 	// Recurse, as we've got a node that might be going somewhewre.
-	
+	// USUALLY the predictor does it's job and the branches aren't expensive at all.
+	// For some reason the M core loves frequent early escapes?
+
+#if defined(DEBUG_STATS)
 	const auto width = context.width;
 	const auto heightMinOne = context.height-1;
-
-	// USUALLY the predictor does it's job and the branches aren't expensive at all.
-#if defined(DEBUG_STATS)
 	const bool xSafe = iX < width-1;
 	const bool ySafe = offsetY < width*heightMinOne;
 
@@ -980,57 +975,57 @@ private:
 #if __x86_64__ || _WIN32
 	if (iX > 0)
 	{
-		TraverseCall(context, node, iX-1, offsetY);
+		TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY);
 	}
 
 	if (iX < width-1) 
 	{
-		TraverseCall(context, node, iX+1, offsetY);
+		TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY);
 	}
 
 	if (offsetY >= width) 
 	{
-		if (iX > 0) TraverseCall(context, node, iX-1, offsetY-width);
-		TraverseCall(context, node, iX, offsetY-width);
-		if (iX < width-1) TraverseCall(context, node, iX+1, offsetY-width);
+		if (iX > 0) TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY-width);
+		TraverseCall(context, sanitized, visited, node, width, height, iX, offsetY-width);
+		if (iX < width-1) TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY-width);
 	}
 
-	if (offsetY < width*heightMinOne)
+	if (offsetY < width*(height-1))
 	{
-		if (iX > 0) TraverseCall(context, node, iX-1, offsetY+width);
-		TraverseCall(context, node, iX, offsetY+width);
-		if (iX < width-1) TraverseCall(context, node, iX+1, offsetY+width);
+		if (iX > 0) TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY+width);
+		TraverseCall(context, sanitized, visited, node, width, height, iX, offsetY+width);
+		if (iX < width-1) TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY+width);
 	}
 #else // Apparently M/ARM likes this:
 	if (iX > 0)
 	{
-		TraverseCall(context, node, iX-1, offsetY);
+		TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY);
 		if (false == node->HasChildren()) goto stop;
 	}
 
 	if (iX < width-1) 
 	{
-		TraverseCall(context, node, iX+1, offsetY);
+		TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY);
 		if (false == node->HasChildren()) goto stop;
 	}
 
 	if (offsetY >= width) 
 	{
-		if (iX > 0) TraverseCall(context, node, iX-1, offsetY-width);
+		if (iX > 0) TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY-width);
 		if (false == node->HasChildren()) goto stop;
-		TraverseCall(context, node, iX, offsetY-width);
+		TraverseCall(context, sanitized, visited, node, width, height, iX, offsetY-width);
 		if (false == node->HasChildren()) goto stop;
-		if (iX < width-1) TraverseCall(context, node, iX+1, offsetY-width);
+		if (iX < width-1) TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY-width);
 		if (false == node->HasChildren()) goto stop;
 	}
 
 	if (offsetY < width*heightMinOne)
 	{
-		if (iX > 0) TraverseCall(context, node, iX-1, offsetY+width);
+		if (iX > 0) TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY+width);
 		if (false == node->HasChildren()) goto stop;
-		TraverseCall(context, node, iX, offsetY+width);
+		TraverseCall(context, sanitized, visited, node, width, height, iX, offsetY+width);
 		if (false == node->HasChildren()) goto stop;
-		if (iX < width-1) TraverseCall(context, node, iX+1, offsetY+width);
+		if (iX < width-1) TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY+width);
 	}
 stop:
 #endif
@@ -1041,7 +1036,7 @@ stop:
 	--depth;
 #endif
 
-	visited[boardIdx] = false;
+	visited[offsetY+iX] = false;
 
 	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
 	const size_t wordIdx = node->GetWordIndex();
