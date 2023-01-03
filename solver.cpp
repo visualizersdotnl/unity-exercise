@@ -328,8 +328,7 @@ public:
 		{
 			// Important: initialize entire node!
 
-			const uint32_t offsInPool = uint32_t(m_iAlloc++);
-			DictionaryNode& node = m_pool[offsInPool];
+			DictionaryNode& node = m_pool[m_iAlloc++];
 			Assert(m_iAlloc <= s_threadInfo[m_iThread].nodes);
 
 			node.m_wordIdx = parent->m_wordIdx;
@@ -339,7 +338,8 @@ public:
 //			memset(&node.m_children, 0, sizeof(uint32_t)*kAlphaRange);
 
 			unsigned index = 0;
-			while (1)
+//			while (1)
+			for (unsigned iLetter = 0; iLetter < kAlphaRange; ++iLetter)
 			{
 				if (indexBits & 1)
 					node.m_children[index] = Copy(parent->GetChild(index));
