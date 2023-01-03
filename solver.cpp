@@ -378,7 +378,7 @@ static std::vector<std::string> s_dictionary;
 
 // Counters, the latter being useful to reserve space.
 static unsigned s_longestWord;
-static unsigned s_longestWords[64] = { 0 }; // FIXME: just 64 cores, no more, no more :)
+static unsigned s_longestWords[64] = { 0 }; // FIXME: shouldn't crap out if using more than 64 threads
 static size_t s_wordCount;
 
 #ifdef NED_FLANDERS
@@ -780,8 +780,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
@@ -816,19 +816,18 @@ private:
 		unsigned boardIdx = offsetY;
 		for (uint16_t iX = 0; iX < width; ++iX) 
 		{
-			const unsigned index = sanitized[boardIdx];
+			const unsigned letterIdx = sanitized[boardIdx];
 
-			if (root->HasChild(index))
+			if (root->HasChild(letterIdx))
 			{
-				DictionaryNode* child = root->GetChild(index);
-				{
-					unsigned depth = 0;
+				DictionaryNode* child = root->GetChild(letterIdx);
+
 #if defined(DEBUG_STATS)
-					TraverseBoard(*context, child, iX, offsetY, depth);
+				unsigned depth = 0;
+				TraverseBoard(*context, child, iX, offsetY, depth);
 #else
-					TraverseBoard(*context, child, iX, offsetY, depth);
+				TraverseBoard(*context, child, iX, offsetY);
 #endif
-				}
 			}
 
 			++boardIdx;
@@ -866,7 +865,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY)
 #endif
 {
 	const unsigned boardIdx = offsetY + iX;
@@ -876,7 +875,7 @@ private:
 
 	const auto* visited = context.visited;
 
-	if (0 != node->HasChild(letterIdx))
+	if (0 != node->HasChild(letterIdx)) // Limits traversal depth
 	{
 		auto* child = node->GetChild(letterIdx);
 		if (false == visited[boardIdx])
@@ -884,7 +883,7 @@ private:
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, child, iX, offsetY, depth);
 #else
-			TraverseBoard(context, child, iX, offsetY, depth);
+			TraverseBoard(context, child, iX, offsetY);
 #endif
 
 			// Child node exhausted?
@@ -899,7 +898,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY, uint8_t depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY)
 #endif
 {
 	Assert(nullptr != node);
@@ -910,11 +909,11 @@ private:
 	visited[boardIdx] = true;
 
 #if defined(DEBUG_STATS)
-	Assert(depth < s_longestWord);
-	context.maxDepth = std::max(context.maxDepth, depth);
-#endif
-
 	++depth;
+
+	Assert(depth < s_longestWord);
+	context.maxDepth = std::max(context.maxDepth, unsigned(depth));
+#endif
 
 	// Recurse, as we've got a node that might be going somewhewre.
 	
@@ -924,6 +923,7 @@ private:
 	const bool ySafe = offsetY < (width*(height-1)); // iY < height-1;
 
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
+#if defined(DEBUG_STATS)
 	if (iX > 0)
 		TraverseCall(context, node, iX-1, offsetY, depth);
 
@@ -948,8 +948,36 @@ private:
 		if (iX > 0)
 			TraverseCall(context, node, iX-1, offsetY+width, depth);
 	}
+#else
+	if (iX > 0)
+		TraverseCall(context, node, iX-1, offsetY);
 
+	if (xSafe)
+		TraverseCall(context, node, iX+1, offsetY);
+
+	if (offsetY >= width) {
+		TraverseCall(context, node, iX, offsetY-width);
+
+		if (xSafe)
+			TraverseCall(context, node, iX+1, offsetY-width);
+		if (iX > 0) 
+			TraverseCall(context, node, iX-1, offsetY-width);
+	}
+
+	if (ySafe)
+	{
+		TraverseCall(context, node, iX, offsetY+width);
+
+		if (xSafe) 
+			TraverseCall(context, node, iX+1, offsetY+width);
+		if (iX > 0)
+			TraverseCall(context, node, iX-1, offsetY+width);
+	}
+#endif
+
+#if defined(DEBUG_STATS)
 	--depth;
+#endif
 
 	visited[boardIdx] = false;
 	
@@ -959,8 +987,6 @@ private:
 	{
 		context.wordsFound.emplace_back(wordIdx);
 	}
-
-	// if (depth > s_longestWords[context.iThread])
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
