@@ -119,8 +119,10 @@
 	#define USE_SSE 1
 #endif
 
-// #undef USE_SSE
-	
+#ifdef _WIN32 
+	#undef USE_SSE
+#endif
+
 #include "api.h"
 
 #include "random.h"
