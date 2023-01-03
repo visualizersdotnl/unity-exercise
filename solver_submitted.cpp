@@ -53,9 +53,13 @@
 
 	** 10/01/2020 **
 
-	- Testbed for "hat-trie" data structure (slow to just hack in due to <analyze>, must use in sane way).
+	- Testbed for 'hat-trie' data structure (slow to just hack in due to <analyze>, must use in sane way).
 	- There's a bug in here: 1 word extra (or short, depending on which impl. you trust): why?
 	- Could possibly be faster on Windows/MSVC by using BOGGLE_INLINE.
+
+	** 03/01/2020 **
+
+	- Removed 'hat-trie' stuff.
 */
 
 // Make VC++ 2015 shut up and walk in line.

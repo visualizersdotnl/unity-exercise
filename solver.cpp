@@ -81,6 +81,12 @@
 
 	Introducing 'sse2neon'.
 	Try OpenMP!
+
+	** 03/02/2023 **
+
+	Things that matter:
+	- Node size (multiple megabytes per thread!)
+	- Keep traversal as simple as possible, smart early-outs not seldom cause execution to shoot up due to unpredictability
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -164,7 +170,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
 
-// Meaning: does/should not pollute write cache, if USE_SSE avail. 
+// Meaning: does/should not pollute (most) write cache, if USE_SSE avail. 
 static BOGGLE_INLINE void StreamWipe(void *memory, size_t size) 
 {
 	Assert(!(reinterpret_cast<size_t>(memory) & 15));
@@ -264,10 +270,10 @@ public:
 			DictionaryNode& node = m_pool[m_iAlloc++];
 			Assert(m_iAlloc <= s_threadInfo[m_iThread].nodes);
 
-			node.m_wordIdx   = parent->m_wordIdx;
+			node.m_wordIdx = parent->m_wordIdx;
 			auto indexBits = node.m_indexBits = parent->m_indexBits;
 
-			memset(&node.m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
+			// memset(&node.m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
 
 			unsigned index = 0;
 			while (1)
@@ -359,8 +365,8 @@ public:
 	}
 
 private:
-	int m_wordIdx = -1; 
-	unsigned m_indexBits = 0;
+	int32_t m_wordIdx = -1; 
+	uint32_t m_indexBits = 0;
 	DictionaryNode* m_children[kAlphaRange] = { nullptr };
 };
 
@@ -771,11 +777,11 @@ private:
 	}
 
 #if defined(DEBUG_STATS)
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY); // , unsigned depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY); // , unsigned depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 #endif
 
 	Results& m_results;
@@ -808,24 +814,19 @@ private:
 	for (unsigned iY = 0; iY < height; ++iY) 
 	{
 		unsigned boardIdx = offsetY;
-		for (unsigned iX = 0; iX < width; ++iX) 
+		for (uint16_t iX = 0; iX < width; ++iX) 
 		{
 			const unsigned index = sanitized[boardIdx];
 
-// #if defined(_WIN32)
 			if (root->HasChild(index))
-// #endif
 			{
 				DictionaryNode* child = root->GetChild(index);
-//#if !defined(_WIN32)
-//				if (nullptr != child)
-//#endif
 				{
+					unsigned depth = 0;
 #if defined(DEBUG_STATS)
-					unsigned depth = 1;
-					TraverseBoard(*context, child, iX, iY, depth);
+					TraverseBoard(*context, child, iX, offsetY, depth);
 #else
-					TraverseBoard(*context, child, iX, offsetY); // , depth);
+					TraverseBoard(*context, child, iX, offsetY, depth);
 #endif
 				}
 			}
@@ -862,56 +863,43 @@ private:
 #endif
 }
 
-// static unsigned s_log2Width;
-
 #if defined(DEBUG_STATS)
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned iY, unsigned depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY) // , unsigned depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #endif
 {
-//	const auto width = context.width;
-//	const unsigned nbBoardIdx = (iY<<s_log2Width) + iX;
-	const unsigned nbBoardIdx = offsetY + iX;
+	const unsigned boardIdx = offsetY + iX;
 
 	const auto* board = context.sanitized;
-	const unsigned nbIndex = board[nbBoardIdx];
+	const unsigned letterIdx = board[boardIdx];
 
-//	if (depth <= s_longestWords[context.iThread]) // This check is more expensive than it is effective..
+	const auto* visited = context.visited;
+
+	if (0 != node->HasChild(letterIdx))
 	{
-		if (0 != node->HasChild(nbIndex)) // This check does it's job by not accessing the array inside the node.
+		auto* child = node->GetChild(letterIdx);
+		if (false == visited[boardIdx])
 		{
-			auto* child = node->GetChild(nbIndex);
-//			if (nullptr != child)
-			{
-				const auto* visited = context.visited;
-				if (false == visited[nbBoardIdx]) // Save the last/most expensive check for last!
-				{
-					if (!child->IsVoid())
-					{
-
 #if defined(DEBUG_STATS)
-						TraverseBoard(context, child, iX, iY, depth);
+			TraverseBoard(context, child, iX, offsetY, depth);
 #else
-						TraverseBoard(context, child, iX, offsetY); // , depth);
+			TraverseBoard(context, child, iX, offsetY, depth);
 #endif
 
-						// Child node exhausted?
-						if (child->IsVoid())
-						{
-							node->RemoveChild(nbIndex);
-						}
-					}
-				}
+			// Child node exhausted?
+			if (child->IsVoid())
+			{
+				node->RemoveChild(letterIdx);
 			}
 		}
 	}
 }
 
 #if defined(DEBUG_STATS)
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned iY, unsigned depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned offsetY) // , unsigned depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #endif
 {
 	Assert(nullptr != node);
@@ -924,8 +912,9 @@ private:
 #if defined(DEBUG_STATS)
 	Assert(depth < s_longestWord);
 	context.maxDepth = std::max(context.maxDepth, depth);
-	++depth;
 #endif
+
+	++depth;
 
 	// Recurse, as we've got a node that might be going somewhewre.
 	
@@ -934,64 +923,33 @@ private:
 	const bool xSafe = iX < width-1;
 	const bool ySafe = offsetY < (width*(height-1)); // iY < height-1;
 
-#if defined(DEBUG_STATS)
-	if (iX > 0)
-		TraverseCall(context, node, iX-1, iY, depth);
-
-	if (xSafe)
-		TraverseCall(context, node, iX+1, iY, depth);
-
-	if (ySafe)
-	{
-		TraverseCall(context, node, iX, iY+1, depth);
-		
-		if (xSafe) 
-			TraverseCall(context, node, iX+1, iY+1, depth);
-		if (iX > 0)
-			TraverseCall(context, node, iX-1, iY+1, depth);
-	}
-
-	if (iY > 0)
-	{
-		TraverseCall(context, node, iX, iY-1, depth);
-		
-		if (xSafe)
-			TraverseCall(context, node, iX+1, iY-1, depth);
-		if (iX > 0) 
-			TraverseCall(context, node, iX-1, iY-1, depth);
-	}
-#else
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
-
 	if (iX > 0)
-		TraverseCall(context, node, iX-1, offsetY);
+		TraverseCall(context, node, iX-1, offsetY, depth);
 
 	if (xSafe)
-		TraverseCall(context, node, iX+1, offsetY);
+		TraverseCall(context, node, iX+1, offsetY, depth);
 
 	if (offsetY >= width) {
-		TraverseCall(context, node, iX, offsetY-width);
+		TraverseCall(context, node, iX, offsetY-width, depth);
 
 		if (xSafe)
-			TraverseCall(context, node, iX+1, offsetY-width);
+			TraverseCall(context, node, iX+1, offsetY-width, depth);
 		if (iX > 0) 
-			TraverseCall(context, node, iX-1, offsetY-width);
+			TraverseCall(context, node, iX-1, offsetY-width, depth);
 	}
 
 	if (ySafe)
 	{
-		TraverseCall(context, node, iX, offsetY+width);
+		TraverseCall(context, node, iX, offsetY+width, depth);
 
 		if (xSafe) 
-			TraverseCall(context, node, iX+1, offsetY+width);
+			TraverseCall(context, node, iX+1, offsetY+width, depth);
 		if (iX > 0)
-			TraverseCall(context, node, iX-1, offsetY+width);
+			TraverseCall(context, node, iX-1, offsetY+width, depth);
 	}
-#endif
 
-#if defined(DEBUG_STATS)
 	--depth;
-#endif
 
 	visited[boardIdx] = false;
 	
@@ -1001,6 +959,8 @@ private:
 	{
 		context.wordsFound.emplace_back(wordIdx);
 	}
+
+	// if (depth > s_longestWords[context.iThread])
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
@@ -1016,8 +976,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	}
 #endif
 
-//	s_log2Width = unsigned(log2f(float(width)));
-
 	const size_t nodeSize = sizeof(DictionaryNode);
 	debug_print("Node size: %zu\n", nodeSize);
 	
@@ -1026,6 +984,12 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	results.Count = 0;
 	results.Score = 0;
 	results.UserData = nullptr; // Didn't need it in this implementation.
+
+	if (width > 65535)
+	{
+		printf("Board width can't be greater than 65535 (16-bit).\n");
+		return results;
+	}
 
 	// Board parameters check out?
 	if (nullptr != board && !(0 == width || 0 == height))
