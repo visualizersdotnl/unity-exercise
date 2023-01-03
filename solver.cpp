@@ -691,7 +691,6 @@ public:
 				threads.push_back(std::thread(ExecuteThread, contexts[iThread].get()));
 			}
 
-#ifndef _WIN32
 			// OSX likes this better
 			for (auto& thread : threads)
 			{
@@ -702,16 +701,6 @@ public:
 				else
 					std::this_thread::yield();
 			}
-#else
-			// Win32 likes it this way
-			for (auto& thread : threads)
-			{
-//				if (thread.joinable())
-				{
-					thread.join();
-				}
-			}
-#endif
 			
 			m_results.Count  = 0;
 			m_results.Score  = 0;
@@ -812,8 +801,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
@@ -840,13 +829,13 @@ private:
 	context->maxDepth = 0;
 #endif
 	
-	unsigned offsetY = 0;
-	for (unsigned iY = 0; iY < height; ++iY) 
+//	const unsigned yLim =  width*(height-1);
+	for (unsigned offsetY = 0; offsetY <= width*(height-1); offsetY += width) 
 	{
 		unsigned boardIdx = offsetY;
 		for (uint16_t iX = 0; iX < width; ++iX) 
 		{
-			const unsigned letterIdx = sanitized[boardIdx];
+			const unsigned letterIdx = sanitized[boardIdx++];
 
 			if (DictionaryNode* child = root->GetChild(letterIdx))
 			{
@@ -857,19 +846,10 @@ private:
 				TraverseBoard(*context, child, iX, offsetY);
 #endif
 			}
-
-			++boardIdx;
 		}
-
-		offsetY += width;
-
-		// std::this_thread::yield();
 	}
 	
 	auto& wordsFound = context->wordsFound;
-
-	// Not sure if this helps or hurts (on paper it "should" help)
-//	std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
 	for (auto wordIdx : wordsFound)
@@ -892,7 +872,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY)
 #endif
 {
 	const unsigned boardIdx = offsetY + iX;
@@ -979,6 +959,31 @@ private:
 			TraverseCall(context, node, iX+1, offsetY+width, depth);
 	}
 #else
+#if __x86_64__ || _WIN32
+	if (iX > 0)
+	{
+		TraverseCall(context, node, iX-1, offsetY);
+	}
+
+	if (xSafe) 
+	{
+		TraverseCall(context, node, iX+1, offsetY);
+	}
+
+	if (offsetY >= width) 
+	{
+		TraverseCall(context, node, iX, offsetY-width);
+		if (xSafe) TraverseCall(context, node, iX+1, offsetY-width);
+		if (iX > 0) TraverseCall(context, node, iX-1, offsetY-width);
+	}
+
+	if (ySafe)
+	{
+		TraverseCall(context, node, iX, offsetY+width);
+		if (xSafe) TraverseCall(context, node, iX+1, offsetY+width);
+		if (iX > 0) TraverseCall(context, node, iX-1, offsetY+width);
+	}
+#else // Apparently M/ARM likes this:
 	if (iX > 0)
 	{
 		TraverseCall(context, node, iX-1, offsetY);
@@ -1009,10 +1014,12 @@ private:
 		TraverseCall(context, node, iX, offsetY+width);
 		if (false == node->HasChildren()) goto stop;
 		if (xSafe) TraverseCall(context, node, iX+1, offsetY+width);
+
 	}
+stop:
+#endif
 #endif
 
-stop:
 
 #if defined(DEBUG_STATS)
 	--depth;
