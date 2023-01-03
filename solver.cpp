@@ -728,13 +728,27 @@ public:
 				threads.push_back(std::thread(ExecuteThread, contexts[iThread].get()));
 			}
 
+#ifndef _WIN32
+			// OSX likes this better
 			for (auto& thread : threads)
 			{
 				if (thread.joinable())
 				{
 					thread.join();
 				}
+
+				std::this_thread::yield();
 			}
+#else
+			// Win32 likes it this way
+			for (auto& thread : threads)
+			{
+//				if (thread.joinable())
+				{
+					thread.join();
+				}
+			}
+#endif
 			
 			m_results.Count  = 0;
 			m_results.Score  = 0;
