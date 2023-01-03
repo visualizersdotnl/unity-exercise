@@ -80,6 +80,7 @@
 	** 02/01/2023 **
 
 	Introducing 'sse2neon'.
+	Try OpenMP!
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -602,7 +603,7 @@ public:
 			size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
 			int* pWrite = reinterpret_cast<int*>(visited);
 			while (numStreams--)
-			_mm_stream_si32(pWrite++, 0);
+				_mm_stream_si32(pWrite++, 0);
 #else
 			memset(visited, 0, gridSize*sizeof(bool));
 #endif
@@ -1043,12 +1044,29 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		}
 #else
 		// Sanitize that just reorders and expects uppercase.
+#if !defined(USE_SSE)
 		for (unsigned index = 0; index < gridSize;)
 		{
 			char letter = *board++;
 			unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
 			sanitized[index++] = sanity;
 		}
+#else
+		const auto numIter = gridSize/sizeof(__m128i); // FIXME: check if possible
+
+		const __m128i subtract = _mm_set1_epi8('A');
+//		const __m128i zero = _mm_setzero_si128();
+
+		const auto* pRead  = reinterpret_cast<const __m128i*>(board);
+		auto* pWrite = reinterpret_cast<__m128i*>(sanitized);
+
+		for (unsigned index = 0; index < numIter; ++index)
+		{
+			const __m128i letters = _mm_load_si128(pRead++); // FIXME: can only do this if ptr. is aligned to 16 bytes
+			const __m128i subtracted = _mm_sub_epi8(letters, subtract);
+			_mm_stream_si128(pWrite++, subtracted);
+		}
+#endif
 #endif
 
 		Query query(results, (nullptr == sanitized) ? board : sanitized, width, height);
