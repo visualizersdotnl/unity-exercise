@@ -110,6 +110,7 @@
 #include <algorithm>
 #include <cassert>
 #include <atomic>
+#include <map>
 
 #if defined(__x86_64__) || defined(_WIN32) || defined(_WIN64)
 	#include <emmintrin.h>
@@ -394,6 +395,7 @@ public:
 		const auto childHalf = m_children[index];
 		const auto upperHalf = m_pool;
 		return reinterpret_cast<DictionaryNode*>(upperHalf|childHalf);
+//		return m_children[index];
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
@@ -407,7 +409,6 @@ public:
 private:
 	int32_t m_wordIdx; 
 	uint32_t m_indexBits;
-
 	uint64_t m_pool;
 	uint32_t m_children[kAlphaRange];
 };
