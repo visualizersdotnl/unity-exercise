@@ -710,6 +710,12 @@ public:
 
 #ifdef _WIN32
 			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
+#else
+			const int minPrio = sched_get_priority_min(SCHED_RR);
+			sched_param schedParam;
+			schedParam.sched_priority = minPrio+1;
+			pthread_setschedparam(pthread_self(), SCHED_RR, &schedParam);
+
 #endif
 
 			// OSX likes this better
