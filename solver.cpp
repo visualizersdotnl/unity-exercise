@@ -155,7 +155,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #if defined(_WIN32)
 	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency>>1);
 #else
-	const size_t kNumThreads = kNumConcurrrency*2;
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency>>1);
 #endif
 
 #endif
@@ -602,6 +602,10 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
+#ifndef _WIN32
+	#include <pthread.h>
+#endif
+
 class Query
 {
 public:
@@ -688,18 +692,29 @@ public:
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
 				contexts.push_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
-				threads.push_back(std::thread(ExecuteThread, contexts[iThread].get()));
+				threads.emplace_back(std::move(std::thread(ExecuteThread, contexts[iThread].get())));
+
+#ifdef _WIN32
+				const auto result = SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_HIGHEST);
+				Assert(0 != result);
+#else
+				const int policy = SCHED_FIFO;
+				const int maxPrio = sched_get_priority_max(policy);
+				sched_param schedParam;
+				schedParam.sched_priority = maxPrio-2;
+				pthread_setschedparam(threads[iThread].native_handle(), policy, &schedParam);
+#endif
 			}
 
 			// OSX likes this better
 			for (auto& thread : threads)
 			{
-				if (thread.joinable())
+//				if (thread.joinable())
 				{
 					thread.join();
 				}
-				else
-					std::this_thread::yield();
+//				else
+//					std::this_thread::yield();
 			}
 			
 			m_results.Count  = 0;
@@ -993,7 +1008,7 @@ private:
 	if (xSafe) 
 	{
 		TraverseCall(context, node, iX+1, offsetY);
-		if (false == node->HasChildren()) goto stop;
+//		if (false == node->HasChildren()) goto stop;
 	}
 
 	if (offsetY >= width) 
