@@ -153,7 +153,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
 #if defined(_WIN32)
-	const size_t kNumThreads = kNumConcurrrency*2;
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency>>1);
 #else
 	const size_t kNumThreads = kNumConcurrrency*2;
 #endif
@@ -362,7 +362,7 @@ public:
 	// Returns NULL if no child
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
 	{
-		Assert(HasChild(index));
+		// Assert(HasChild(index));
 		
 		if (false == HasChild(index))
 			return nullptr;

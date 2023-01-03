@@ -126,7 +126,7 @@ int main(int argC, char **arguments)
 		printf("Results (run %u): ", iQuery+1);
 		printf("count: %u, score: %u, duration %.3f\n", count, score, (float) durations[iQuery].count()*0.000001f);
 	}
-
+	 
 #ifdef PRINT_WORDS
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 
 		printf("%s\n", results[0].Words[iWord]);	
