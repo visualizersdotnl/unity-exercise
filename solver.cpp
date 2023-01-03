@@ -309,6 +309,8 @@ public:
 			const auto size = numNodes*sizeof(DictionaryNode);
 			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
 
+			m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000;
+
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);	
 		}
@@ -323,17 +325,21 @@ public:
 			return m_pool;
 		}
 
+		uint64_t GetPool() /* const */
+		{
+//			return reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Store upper 32 bits only
+			return m_pool->GetPool();
+		}
+
 	private:
 		uint32_t Copy(LoadDictionaryNode* parent)
 		{
-			// Important: initialize entire node!
-
 			DictionaryNode& node = m_pool[m_iAlloc++];
 			Assert(m_iAlloc <= s_threadInfo[m_iThread].nodes);
 
 			node.m_wordIdx = parent->m_wordIdx;
 			auto indexBits = node.m_indexBits = parent->m_indexBits;
-			node.m_pool    = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Store upper 32 bits only
+			node.m_pool    = m_poolUpper32; // Store for cache
 
 //			memset(&node.m_children, 0, sizeof(uint32_t)*kAlphaRange);
 
@@ -358,6 +364,8 @@ public:
 
 		DictionaryNode* m_pool;
 		size_t m_iAlloc;
+
+		uint64_t m_poolUpper32;
 	};
 
 	// Destructor is not called when using ThreadCopy!
@@ -395,7 +403,6 @@ public:
 		const auto childHalf = m_children[index];
 		const auto upperHalf = m_pool;
 		return reinterpret_cast<DictionaryNode*>(upperHalf|childHalf);
-//		return m_children[index];
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
@@ -404,6 +411,11 @@ public:
 		const auto index = m_wordIdx;
 		m_wordIdx = -1;
 		return index;
+	}
+
+	BOGGLE_INLINE uint64_t GetPool() /* const */
+	{
+		return m_pool;
 	}
 
 private:
@@ -915,11 +927,11 @@ private:
 	const auto* board = context.sanitized;
 	const unsigned letterIdx = board[boardIdx];
 
-	const auto* visited = context.visited;
-
 	if (0 != node->HasChild(letterIdx)) // Limits traversal depth
 	{
 		auto* child = node->GetChild(letterIdx);
+
+		const auto* visited = context.visited;
 		if (false == visited[boardIdx])
 		{
 #if defined(DEBUG_STATS)
