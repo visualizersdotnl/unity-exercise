@@ -310,6 +310,7 @@ public:
 			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
 
 			m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000;
+//			m_poolUpper32 = (reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000) >> 32;
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);	
@@ -328,7 +329,7 @@ public:
 		uint64_t GetPool() /* const */
 		{
 //			return reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Store upper 32 bits only
-			return m_pool->GetPool();
+			return Get()->GetPool();
 		}
 
 	private:
@@ -401,7 +402,7 @@ public:
 		Assert(HasChild(index));
 //		return m_children[index];
 		const auto childHalf = m_children[index];
-		const auto upperHalf = m_pool;
+		const uint64_t upperHalf = m_pool; // uint64_t(m_pool)<<32;
 		return reinterpret_cast<DictionaryNode*>(upperHalf|childHalf);
 	}
 
