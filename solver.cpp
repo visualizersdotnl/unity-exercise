@@ -112,6 +112,8 @@
 	#include "sse2neon-02-01-2022/sse2neon.h"
 	#define USE_SSE 1
 #endif
+
+// #undef USE_SSE
 	
 #include "api.h"
 
@@ -161,6 +163,27 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
+
+// Meaning: does/should not pollute write cache, if USE_SSE avail. 
+static BOGGLE_INLINE void StreamWipe(void *memory, size_t size) 
+{
+	Assert(!(reinterpret_cast<size_t>(memory) & 15));
+
+#if defined(USE_SSE)
+	const size_t remainder = size % sizeof(__m128i);
+
+	size_t numStreams = size / sizeof(__m128i);
+	__m128i* pWrite = reinterpret_cast<__m128i*>(memory);
+	const __m128i zero = _mm_setzero_ps();
+	while (numStreams--)
+		// _mm_store_si128(pWrite++, zero);
+		_mm_stream_si128(pWrite++, zero);
+
+	memset(pWrite, 0, remainder);
+#else
+	memset(memory, 0, size);
+#endif
+}
 
 // Number of words and number of nodes (1 for root) per thread.
 class ThreadInfo
@@ -218,7 +241,6 @@ public:
 			const auto numNodes = s_threadInfo[iThread].nodes;
 			const auto size = numNodes*sizeof(DictionaryNode);
 			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
-			memset(m_pool, 0, size);
 
 			// Recursively copy them.
 			m_root = Copy(s_threadDicts[iThread]);						
@@ -237,13 +259,16 @@ public:
 	private:
 		DictionaryNode* Copy(DictionaryNode* parent)
 		{
+			// Important: initialize entire node!
+
 			DictionaryNode& node = m_pool[m_iAlloc++];
 			Assert(m_iAlloc <= s_threadInfo[m_iThread].nodes);
 
 			node.m_wordIdx   = parent->m_wordIdx;
-			node.m_indexBits = parent->m_indexBits;
+			auto indexBits = node.m_indexBits = parent->m_indexBits;
 
-			unsigned indexBits = node.m_indexBits;
+			memset(&node.m_children, 0, sizeof(DictionaryNode*)*kAlphaRange);
+
 			unsigned index = 0;
 			while (1)
 			{
@@ -321,9 +346,7 @@ public:
 
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
 	{
-		// Function (can also be) also used to determine if it *has* the child
-//		Assert(HasChild(index));
-
+		Assert(HasChild(index)); // Do not rely on this array being fully initialized!
 		return m_children[index];
 	}
 
@@ -597,16 +620,7 @@ public:
 			// Handle allocation and initialization of memory.
 
 			visited = static_cast<bool*>(s_customAlloc.Allocate(gridSize*sizeof(bool), kCacheLine));
-
-#if defined(USE_SSE)
-			// This has proven to be a little faster than memset().
-			size_t numStreams = gridSize*sizeof(bool) / sizeof(int);
-			int* pWrite = reinterpret_cast<int*>(visited);
-			while (numStreams--)
-				_mm_stream_si32(pWrite++, 0);
-#else
-			memset(visited, 0, gridSize*sizeof(bool));
-#endif
+			StreamWipe(visited, gridSize*sizeof(bool));
 
 			// Reserve
 			wordsFound.reserve(s_threadInfo[iThread].load); 
@@ -798,13 +812,13 @@ private:
 		{
 			const unsigned index = sanitized[boardIdx];
 
-#if defined(_WIN32)
-			//if (root->HasChild(index))
-#endif
+// #if defined(_WIN32)
+			if (root->HasChild(index))
+// #endif
 			{
 				DictionaryNode* child = root->GetChild(index);
 //#if !defined(_WIN32)
-				if (nullptr != child)
+//				if (nullptr != child)
 //#endif
 				{
 #if defined(DEBUG_STATS)
@@ -1052,24 +1066,55 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			sanitized[index++] = sanity;
 		}
 #else
-		const auto numIter = gridSize/sizeof(__m128i); // FIXME: check if possible
-
-		const __m128i subtract = _mm_set1_epi8('A');
-//		const __m128i zero = _mm_setzero_si128();
-
-		const auto* pRead  = reinterpret_cast<const __m128i*>(board);
-		auto* pWrite = reinterpret_cast<__m128i*>(sanitized);
-
-		for (unsigned index = 0; index < numIter; ++index)
+		const auto bytesPerIter = 4*sizeof(__m128i);
+		if ((gridSize % bytesPerIter) != 0)
 		{
-			const __m128i letters = _mm_load_si128(pRead++); // FIXME: can only do this if ptr. is aligned to 16 bytes
-			const __m128i subtracted = _mm_sub_epi8(letters, subtract);
-			_mm_stream_si128(pWrite++, subtracted);
+			for (unsigned index = 0; index < gridSize;)
+			{
+				char letter = *board++;
+				unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
+				sanitized[index++] = sanity;
+			}
+		}
+		else
+		{
+			const auto numIter = gridSize/bytesPerIter;
+
+			const __m128i subtract = _mm_set1_epi8('A');
+	//		const __m128i zero = _mm_setzero_si128();
+
+			const auto* pRead  = reinterpret_cast<const __m128i*>(board);
+			auto* pWrite = reinterpret_cast<__m128i*>(sanitized);
+
+			for (unsigned index = 0; index < numIter; ++index)
+			{
+				__m128i letters, subtracted;
+
+				letters = _mm_load_si128(pRead++); 
+				subtracted = _mm_sub_epi8(letters, subtract);
+//				_mm_stream_si128(pWrite++, subtracted);
+				_mm_store_si128(pWrite++, subtracted);
+
+				letters = _mm_load_si128(pRead++); 
+				subtracted = _mm_sub_epi8(letters, subtract);
+//				_mm_stream_si128(pWrite++, subtracted);
+				_mm_store_si128(pWrite++, subtracted);
+
+				letters = _mm_load_si128(pRead++); 
+				subtracted = _mm_sub_epi8(letters, subtract);
+//				_mm_stream_si128(pWrite++, subtracted);
+				_mm_store_si128(pWrite++, subtracted);
+
+				letters = _mm_load_si128(pRead++); 
+				subtracted = _mm_sub_epi8(letters, subtract);
+//				_mm_stream_si128(pWrite++, subtracted);
+				_mm_store_si128(pWrite++, subtracted);
+			}
 		}
 #endif
 #endif
 
-		Query query(results, (nullptr == sanitized) ? board : sanitized, width, height);
+		Query query(results, sanitized, width, height);
 		query.Execute();
 
 		s_customAlloc.Free(sanitized);
