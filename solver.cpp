@@ -85,9 +85,10 @@
 	** 03/02/2023 **
 
 	Things that matter:
-	- Node size (multiple megabytes per thread!)
-	- Keep traversal as simple as possible, smart early-outs not seldom cause execution to shoot up due to unpredictability
-	- SSE non-cached writes did not help at all
+	- Node size (multiple megabytes per thread!).
+	- Keep traversal as simple as possible, smart early-outs not seldom cause execution to shoot up due to unpredictability.
+	- SSE non-cached writes did not help at all -> Removed.
+	- Most low-level concerns are valid at this point.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -375,7 +376,7 @@ public:
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
-	BOGGLE_INLINE size_t GetWordIndex() /*  const */
+	BOGGLE_INLINE int GetWordIndex() /*  const */
 	{
 		const auto index = m_wordIdx;
 		m_wordIdx = -1;
@@ -666,7 +667,7 @@ public:
 		bool* visited; // Grid to flag visited tiles.
 
 		// Output
-		std::vector<size_t> wordsFound;
+		std::vector<int> wordsFound;
 		size_t score;
 		size_t reqStrBufLen;
 
@@ -728,9 +729,9 @@ public:
 
 			for (auto& context : contexts)
 			{
-				const unsigned wordsFound = (unsigned) context->wordsFound.size();
+				const size_t wordsFound = context->wordsFound.size();
 				const size_t score = context->score;
-				m_results.Count += wordsFound;
+				m_results.Count += (unsigned) wordsFound;
 				m_results.Score += (unsigned) score;
 				strBufLen += context->reqStrBufLen + wordsFound; // Add numWords for 0-string-terminator for each.
 
@@ -821,8 +822,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(std::vector<size_t>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
-	static void BOGGLE_INLINE TraverseBoard(std::vector<size_t>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseCall(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseBoard(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
@@ -844,7 +845,7 @@ private:
 	bool* visited = context->visited;
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
-	std::vector<size_t>& wordsFound = context->wordsFound;
+	std::vector<int>& wordsFound = context->wordsFound;
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->iThread, s_threadInfo[context->iThread].load, s_threadInfo[context->iThread].nodes);
@@ -852,13 +853,12 @@ private:
 	context->maxDepth = 0;
 #endif
 	
-	const unsigned yLim = width*(height-1);
-	for (unsigned offsetY = 0; offsetY <= yLim; offsetY += width) 
+//	const unsigned yLim = width*(height-1);
+	for (unsigned offsetY = 0; offsetY <= width*(height-1); offsetY += width) 
 	{
-		unsigned boardIdx = offsetY;
-		for (uint16_t iX = 0; iX < width; ++iX) 
+		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			const unsigned letterIdx = sanitized[boardIdx++];
+			const unsigned letterIdx = sanitized[offsetY+iX];
 
 			if (DictionaryNode* child = root->GetChild(letterIdx))
 			{
@@ -893,7 +893,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<size_t>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
 #endif
 {
 #if defined(DEBUG_STATS)
@@ -925,7 +925,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<size_t>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
 #endif
 {
 	Assert(nullptr != node);
@@ -1011,8 +1011,7 @@ private:
 	visited[offsetY+iX] = false;
 
 	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
-	const size_t wordIdx = node->GetWordIndex();
-	if (-1 != wordIdx)
+	if (int wordIdx = node->GetWordIndex() >= 0)
 	{
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
