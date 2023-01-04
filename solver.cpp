@@ -301,24 +301,25 @@ public:
 		uint32_t Copy(LoadDictionaryNode* parent)
 		{
 			Assert(m_iAlloc < s_threadInfo[m_iThread].nodes);
-			DictionaryNode* node = m_pool + m_iAlloc++;
+			DictionaryNode* node = m_pool + m_iAlloc;
+			++m_iAlloc;
 
 			node->m_wordIdx     = parent->m_wordIdx;
 			auto indexBits      = node->m_indexBits = parent->m_indexBits;
 			node->m_poolUpper32 = m_poolUpper32; // Store for cache
 
 #ifdef _WIN32
-			unsigned long firstIndex;
-			if (_BitScanForward(&firstIndex, indexBits))
+			unsigned long index;
+			if (_BitScanForward(&index, indexBits))
 			{
-#else // #elif defined(__GNUC__)
-			int firstIndex = __builtin_ffs(int(indexBits));
-			if (firstIndex--)
+#elif defined(__GNUC__)
+			int index = __builtin_ffs(int(indexBits));
+			if (index--)
 			{
 #endif
-				indexBits >>= firstIndex;
+				indexBits >>= index;
 			
-				for (unsigned index = firstIndex; index < kAlphaRange; ++index)
+				for (; index < kAlphaRange; ++index)
 				{
 					if (indexBits & 1)
 						node->m_children[index] = Copy(parent->GetChild(index));
@@ -327,14 +328,16 @@ public:
 				}
 			}
 
+
 			return reinterpret_cast<uint64_t>(node)&0xffffffff;
 		}
 
+		const unsigned m_iThread;
+
 		DictionaryNode* m_pool;
 		size_t m_iAlloc;
-		uint64_t m_poolUpper32;
 
-		const unsigned m_iThread;
+		uint64_t m_poolUpper32;
 	};
 
 	// Destructor is not called when using ThreadCopy!
@@ -368,23 +371,34 @@ public:
 	// Returns NULL if no child
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
 	{
-		// Assert(HasChild(index));
+		Assert(HasChild(index));
 		return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
 	}
 
-	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
-	BOGGLE_INLINE int GetWordIndex() /*  const */
+	BOGGLE_INLINE DictionaryNode* GetChildChecked(unsigned index)
 	{
-		const auto index = m_wordIdx;
+		if (0 == HasChild(index))
+			return nullptr;
+		else
+		{
+			const auto childLower32 = m_children[index];
+			return reinterpret_cast<DictionaryNode*>(m_poolUpper32|childLower32);
+		}
+	}
+
+	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
+	BOGGLE_INLINE int GetWordIndex()
+	{
+		const int index = m_wordIdx;
 		m_wordIdx = -1;
 		return index;
 	}
 
 private:
-	uint64_t m_poolUpper32;
 	uint32_t m_indexBits;
-	int32_t m_wordIdx; 
+	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
+	int32_t m_wordIdx; 
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -689,28 +703,7 @@ public:
 			{
 				contexts.push_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
 				threads.emplace_back(std::move(std::thread(ExecuteThread, contexts[iThread].get())));
-
-#ifdef _WIN32
-				const auto result = SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_HIGHEST);
-				Assert(0 != result);
-#else
-				const int policy = SCHED_RR;
-				const int maxPrio = sched_get_priority_max(policy);
-				sched_param schedParam;
-				schedParam.sched_priority = maxPrio-2;
-				pthread_setschedparam(threads[iThread].native_handle(), policy, &schedParam);
-#endif
 			}
-
-#ifdef _WIN32
-			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
-#else
-			const int minPrio = sched_get_priority_min(SCHED_RR);
-			sched_param schedParam;
-			schedParam.sched_priority = minPrio+1;
-			pthread_setschedparam(pthread_self(), SCHED_RR, &schedParam);
-
-#endif
 
 			for (auto& thread : threads)
 				thread.join();
@@ -811,11 +804,11 @@ private:
 	}
 
 #if defined(DEBUG_STATS)
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
+	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
+	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
-	static void BOGGLE_INLINE TraverseBoard(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseCall(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseBoard(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
@@ -844,20 +837,16 @@ private:
 
 	context->maxDepth = 0;
 #endif
-	
-//	const unsigned yLim = width*(height-1);
-	for (unsigned offsetY = 0; offsetY <= width*(height-1); offsetY += width) 
+
+	const unsigned yLim = width*(height-1);
+	for (unsigned offsetY = 0; offsetY <= yLim; offsetY += width) 
 	{
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
 			const unsigned letterIdx = sanitized[offsetY+iX];
 
-			if (!root->HasChild(letterIdx))
-				continue;
-			else
+			if (auto* child = root->GetChildChecked(letterIdx))
 			{
-				auto* child = root->GetChild(letterIdx);
-
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
@@ -887,9 +876,9 @@ private:
 }
 
 #if defined(DEBUG_STATS)
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 #if defined(DEBUG_STATS)
@@ -898,12 +887,10 @@ private:
 #endif
 
 	const unsigned letterIdx = sanitized[offsetY+iX];
-	if (node->HasChild(letterIdx)) // Limits traversal depth
+	if (auto* child = node->GetChildChecked(letterIdx))
 	{
 		if (false == visited[offsetY+iX])
 		{
-			auto* child = node->GetChild(letterIdx); // We're sure we have it (see above)
-
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, child, iX, offsetY, depth);
 #else
@@ -921,9 +908,9 @@ private:
 }
 
 #if defined(DEBUG_STATS)
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY, uint8_t depth)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<int>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 	Assert(nullptr != node);
@@ -1009,7 +996,8 @@ private:
 	visited[offsetY+iX] = false;
 
 	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
-	if (int wordIdx = node->GetWordIndex() >= 0)
+	const int wordIdx = node->GetWordIndex();
+	if (wordIdx >= 0)
 	{
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);

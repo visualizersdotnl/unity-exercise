@@ -124,7 +124,7 @@ int main(int argC, char **arguments)
 		const auto count  = results[iQuery].Count;
 		const auto score = results[iQuery].Score;
 		printf("Results (run %u): ", iQuery+1);
-		printf("count: %u, score: %u, duration %.3f\n", count, score, (float) durations[iQuery].count()*0.000001f);
+		printf("count: %u, score: %u, duration %.4lf\n", count, score, durations[iQuery].count()*0.000001);
 	}
 	 
 #ifdef PRINT_WORDS
