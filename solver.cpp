@@ -187,7 +187,6 @@ BOGGLE_INLINE unsigned LetterToIndex(unsigned letter)
 }
 
 // FWD.
-static void AddWordToDictionary(const std::string& word);
 class LoadDictionaryNode;
 class DictionaryNode;
 
@@ -262,11 +261,11 @@ public:
 
 	DictionaryNode() {}
 
-	DictionaryNode(int wordIdx, unsigned indexBits) :
-		m_wordIdx(wordIdx)
-,		m_indexBits(indexBits)
-	{
-	}
+//	DictionaryNode(int wordIdx, unsigned indexBits) :
+//		m_wordIdx(wordIdx)
+//,		m_indexBits(indexBits)
+//	{
+//	}
 
 	class ThreadCopy
 	{
@@ -470,7 +469,6 @@ static bool IsWordValid(const std::string& word)
 		s_longestWord = length;
 	}
 
-	char letter = word[0];
 	LoadDictionaryNode* node = s_threadDicts[iThread];
 
 	unsigned letterLen = 0;
@@ -609,12 +607,6 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
-#ifndef _WIN32
-	#include <pthread.h>
-#else
-	#include <windows.h>
-#endif
-
 class Query
 {
 public:
@@ -640,13 +632,13 @@ public:
 		CUSTOM_DELETE
 
 		ThreadContext(unsigned iThread, const Query* instance) :
-		iThread(iThread)
-,		sanitized(instance->m_sanitized)
-,		width(instance->m_width)
+		width(instance->m_width)
 ,		height(instance->m_height)
+,		sanitized(instance->m_sanitized)
 ,		visited(nullptr)
 ,		score(0)
 ,		reqStrBufLen(0)
+,		iThread(iThread)
 		{
 			Assert(nullptr != instance);
 		}
@@ -674,7 +666,7 @@ public:
 
 		// Output
 		std::vector<int> wordsFound;
-		size_t score;
+		unsigned score;
 		size_t reqStrBufLen;
 
 #if defined(DEBUG_STATS)
@@ -702,7 +694,7 @@ public:
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
 				contexts.push_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
-				threads.emplace_back(std::move(std::thread(ExecuteThread, contexts[iThread].get())));
+				threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
 			}
 
 			for (auto& thread : threads)
@@ -710,17 +702,15 @@ public:
 
 			m_results.Count  = 0;
 			m_results.Score  = 0;
-			size_t strBufLen = 0;
 
 			for (auto& context : contexts)
 			{
 				const size_t wordsFound = context->wordsFound.size();
-				const size_t score = context->score;
 				m_results.Count += (unsigned) wordsFound;
-				m_results.Score += (unsigned) score;
-				strBufLen += context->reqStrBufLen + wordsFound; // Add numWords for 0-string-terminator for each.
+				m_results.Score +=  context->score;
+				context->reqStrBufLen += wordsFound; // Add numWords for 0-string-terminator for each.
 
-				debug_print("Thread %u joined with %u words (scoring %zu).\n", context->iThread, wordsFound, score);
+				debug_print("Thread %u joined with %u words (scoring %zu).\n", context->iThread, wordsFound, context->score);
 			}
 
 			m_results.Words = new char*[m_results.Count];
@@ -730,7 +720,7 @@ public:
 			// I'd rather set pointers into the dictionary, but that would break the results as soon as new dictionary is loaded.
 
 			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
-			char* resBuf = new char[strBufLen]; // Allocate sequential buffer.
+			char* resBuf = new char[context->reqStrBufLen]; // Allocate sequential buffer.
 
 			for (auto& context : contexts)
 			{
@@ -765,22 +755,22 @@ private:
 	static void ExecuteThread(ThreadContext* context);
 
 private:
-	BOGGLE_INLINE static size_t GetWordScore_Niels(size_t length) /* const */
+	BOGGLE_INLINE static unsigned GetWordScore_Niels(size_t length) /* const */
 	{
 		length -= 3;
 		length = length > 5 ? 5 : length; // This nicely compiles to a conditional move
 
-		constexpr size_t kLUT[] = { 1, 1, 2, 3, 5, 11 };
+		constexpr unsigned kLUT[] = { 1, 1, 2, 3, 5, 11 };
 		return kLUT[length];
 	}
 
-	BOGGLE_INLINE static size_t GetWordScore_Albert_1(size_t length) /* const */
+	BOGGLE_INLINE static unsigned GetWordScore_Albert_1(size_t length) /* const */
 	{
 		length = length > 8 ? 8 : length;
 		length -= 3;
 		
 		// Courtesy of Albert S.
-		size_t Albert = 0;
+		unsigned Albert = 0;
 		Albert += length>>1;
 		Albert += (length+1)>>2;
 		Albert += length>>2;
@@ -789,12 +779,12 @@ private:
 		return Albert+1;
 	}
 
-	BOGGLE_INLINE static size_t GetWordScore_Albert_2(size_t length) /* const */
+	BOGGLE_INLINE static unsigned GetWordScore_Albert_2(size_t length) /* const */
 	{
 		length = length > 8 ? 8 : length;
 
 		// Courtesy of Albert S.
-		size_t Albert = 0;
+		unsigned Albert = 0;
 		Albert += (length-3)>>1;
 		Albert += (length+10)>>4;
 		Albert += (length+9)>>4;
@@ -899,7 +889,7 @@ private:
 
 			// Child node exhausted?
 			// Note that we don't check if it's a word, since the preceding TraverseBoard() call has taken care of it
-			if (false == child->HasChildren())
+			if (0 == child->HasChildren())
 			{
 				node->RemoveChild(letterIdx);
 			}

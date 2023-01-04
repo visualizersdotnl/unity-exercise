@@ -26,7 +26,9 @@ BOGGLE_INLINE size_t RoundPow2_64(size_t value)
 	return value+1;
 }
 
-#pragma warning(disable:4146) // 'unary minus operator applied, result still unsigned' (IsZero())
+#ifdef _WIN32
+	#pragma warning(disable:4146) // 'unary minus operator applied, result still unsigned' (IsZero())
+#endif
 
 // Thank you Bit Twiddling Hacks.
 BOGGLE_INLINE unsigned IsNotZero(unsigned value) { return ((value | (~value + 1)) >> 31) & 1; }
