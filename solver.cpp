@@ -307,12 +307,18 @@ public:
 			auto indexBits      = node->m_indexBits = parent->m_indexBits;
 			node->m_poolUpper32 = m_poolUpper32; // Store for cache
 
+#ifdef _WIN32
 			unsigned long firstIndex;
 			if (_BitScanForward(&firstIndex, indexBits))
 			{
+#else // #elif defined(__GNUC__)
+			int firstIndex = __builtin_ffs(int(indexBits));
+			if (firstIndex--)
+			{
+#endif
 				indexBits >>= firstIndex;
 			
-				for (unsigned index = firstIndex; index < kAlphaRange; ++index)
+				for (unsigned index = firstIndex; indexBits > 0; ++index)
 				{
 					if (indexBits & 1)
 						node->m_children[index] = Copy(parent->GetChild(index));
@@ -363,25 +369,7 @@ public:
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
 	{
 		// Assert(HasChild(index));
-		
-//		if (HasChild(index) > 0)
-//		{
-			return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
-//		}
-//		else
-//		{
-//			return nullptr;
-//		}
-
-		/*
-		if (false == HasChild(index))
-			return nullptr;
-		else
-		{
-			const auto childLower32 = m_children[index];
-			return reinterpret_cast<DictionaryNode*>(m_poolUpper32|childLower32);
-		}
-		*/
+		return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
