@@ -114,6 +114,10 @@
 // #include <atomic>
 // #include <map>
 
+#ifdef _WIN32
+	#include <intrin.h>
+#endif
+
 #include "api.h"
 
 #include "random.h"
@@ -277,9 +281,7 @@ public:
 			const auto numNodes = s_threadInfo[iThread].nodes;
 			const auto size = numNodes*sizeof(DictionaryNode);
 			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
-
-			m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000;
-//			m_poolUpper32 = (reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000) >> 32;
+			m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Yup, this will be downright dirty
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);	
@@ -295,41 +297,38 @@ public:
 			return m_pool;
 		}
 
-		BOGGLE_INLINE uint64_t GetPool() const 
-		{
-			return Get()->GetPool();
-		}
-
 	private:
 		uint32_t Copy(LoadDictionaryNode* parent)
 		{
 			Assert(m_iAlloc < s_threadInfo[m_iThread].nodes);
 			DictionaryNode* node = m_pool + m_iAlloc++;
 
-			node->m_wordIdx = parent->m_wordIdx;
-			auto indexBits  = node->m_indexBits = parent->m_indexBits;
-			node->m_pool    = m_poolUpper32; // Store for cache
+			node->m_wordIdx     = parent->m_wordIdx;
+			auto indexBits      = node->m_indexBits = parent->m_indexBits;
+			node->m_poolUpper32 = m_poolUpper32; // Store for cache
 
-			unsigned index = 0;
-			for (unsigned iLetter = 0; iLetter < kAlphaRange; ++iLetter)
-//			while (indexBits)
+			unsigned long firstIndex;
+			if (_BitScanForward(&firstIndex, indexBits))
 			{
-				if (indexBits & 1)
-					node->m_children[index] = Copy(parent->GetChild(index));
-
-				indexBits >>= 1;
-				++index;
-		}
+				indexBits >>= firstIndex;
+			
+				for (unsigned index = firstIndex; index < kAlphaRange; ++index)
+				{
+					if (indexBits & 1)
+						node->m_children[index] = Copy(parent->GetChild(index));
+					
+					indexBits >>= 1;
+				}
+			}
 
 			return reinterpret_cast<uint64_t>(node)&0xffffffff;
 		}
 
-		const unsigned m_iThread;
-
 		DictionaryNode* m_pool;
 		size_t m_iAlloc;
-
 		uint64_t m_poolUpper32;
+
+		const unsigned m_iThread;
 	};
 
 	// Destructor is not called when using ThreadCopy!
@@ -365,14 +364,24 @@ public:
 	{
 		// Assert(HasChild(index));
 		
+//		if (HasChild(index) > 0)
+//		{
+			return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
+//		}
+//		else
+//		{
+//			return nullptr;
+//		}
+
+		/*
 		if (false == HasChild(index))
 			return nullptr;
 		else
 		{
-			const auto childHalf = m_children[index];
-			const uint64_t upperHalf = m_pool;
-			return reinterpret_cast<DictionaryNode*>(upperHalf|childHalf);
+			const auto childLower32 = m_children[index];
+			return reinterpret_cast<DictionaryNode*>(m_poolUpper32|childLower32);
 		}
+		*/
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
@@ -383,14 +392,10 @@ public:
 		return index;
 	}
 
-	BOGGLE_INLINE uint64_t GetPool() /* const */
-	{
-		return m_pool;
-	}
-
 private:
 	uint32_t m_indexBits;
-	uint64_t m_pool;
+	uint32_t m_padNextTo8;
+	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
 	int32_t m_wordIdx; 
 };
@@ -860,8 +865,12 @@ private:
 		{
 			const unsigned letterIdx = sanitized[offsetY+iX];
 
-			if (DictionaryNode* child = root->GetChild(letterIdx))
+			if (!root->HasChild(letterIdx))
+				continue;
+			else
 			{
+				auto* child = root->GetChild(letterIdx);
+
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
@@ -902,10 +911,12 @@ private:
 #endif
 
 	const unsigned letterIdx = sanitized[offsetY+iX];
-	if (auto* child = node->GetChild(letterIdx)) // Limits traversal depth
+	if (node->HasChild(letterIdx)) // Limits traversal depth
 	{
 		if (false == visited[offsetY+iX])
 		{
+			auto* child = node->GetChild(letterIdx); // We're sure we have it (see above)
+
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, child, iX, offsetY, depth);
 #else

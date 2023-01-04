@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 16*2 // The more spooling the better chance of a fast result
+#define NUM_QUERIES 64 // The more spooling the better chance of a fast result
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -153,8 +153,8 @@ int main(int argC, char **arguments)
 	// Sort so we can conveniently pick the fastest run
 	std::sort(durations.begin(), durations.end());
 
-	const float time = (float) durations[0].count();
-	printf("\nSolver ran %u times, fastest: %.f microsec. or approx. %.3f second(s)\n", (unsigned) NUM_QUERIES, time, time*0.000001f);
+	const double time = double(durations[0].count());
+	printf("\nSolver ran %u times, fastest: %.lf milliseconds. or approx. %.4lf second(s)\n", (unsigned) NUM_QUERIES, time, time*0.000001);
 
 	return 0;
 }
