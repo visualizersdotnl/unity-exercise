@@ -110,8 +110,8 @@
 #include <vector>
 #include <algorithm>
 #include <cassert>
-#include <atomic>
-#include <map>
+// #include <atomic>
+// #include <map>
 
 #include "api.h"
 
@@ -121,7 +121,7 @@
 #include "inline.h"
 
 // Undef. to skip dead end percentages and all prints and such.
-// #define DEBUG_STATS
+// m#define DEBUG_STATS
 
 // Undef. to enable all the work I put in to place a, as it turns out, very forgiving test harness.
 // But basically the only gaurantee here is that this works with my own test!
@@ -660,6 +660,7 @@ public:
 			wordsFound.reserve(s_threadInfo[iThread].load); 
 		}
 
+		// Input
 		const unsigned width, height;
 		const char* sanitized;
 		bool* visited; // Grid to flag visited tiles.
@@ -733,7 +734,7 @@ public:
 				m_results.Score += (unsigned) score;
 				strBufLen += context->reqStrBufLen + wordsFound; // Add numWords for 0-string-terminator for each.
 
-				debug_print("Thread %u joined with %u words (scoring %u).\n", context->iThread, wordsFound, score);
+				debug_print("Thread %u joined with %u words (scoring %zu).\n", context->iThread, wordsFound, score);
 			}
 
 			m_results.Words = new char*[m_results.Count];
@@ -820,8 +821,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseCall(std::vector<size_t>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseBoard(std::vector<size_t>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
@@ -843,9 +844,10 @@ private:
 	bool* visited = context->visited;
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
+	std::vector<size_t>& wordsFound = context->wordsFound;
 
 #if defined(DEBUG_STATS)
-	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context.iThread, s_threadInfo[context.iThread].load, s_threadInfo[context.iThread].nodes);
+	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->iThread, s_threadInfo[context->iThread].load, s_threadInfo[context->iThread].nodes);
 
 	context->maxDepth = 0;
 #endif
@@ -864,13 +866,11 @@ private:
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
 #else
-				TraverseBoard(*context, sanitized, visited, child, width, height, iX, offsetY);
+				TraverseBoard(wordsFound, sanitized, visited, child, width, height, iX, offsetY);
 #endif
 			}
 		}
 	}
-	
-	auto& wordsFound = context->wordsFound;
 
 	// Tally up the score and required buffer length.
 	for (auto wordIdx : wordsFound)
@@ -884,18 +884,23 @@ private:
 		
 #if defined(DEBUG_STATS)
 	float hitPct = 0.f;
-	if (s_threadInfo[iThread].load > 0.f)
-		hitPct = ((float)wordsFound.size()/s_threadInfo[context.iThread].load)*100.f;
-	debug_print("Thread %u has max. traversal depth %u (max. %u), hit: %.2f percent of load.\n", iThread, context->maxDepth, s_longestWord, hitPct);
+	if (s_threadInfo[context->iThread].load > 0.f)
+		hitPct = ((float)wordsFound.size()/s_threadInfo[context->iThread].load)*100.f;
+	debug_print("Thread %u has max. traversal depth %u (max. %u), hit: %.2f percent of load.\n", context->iThread, context->maxDepth, s_longestWord, hitPct);
 #endif
 }
 
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<size_t>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
 #endif
 {
+#if defined(DEBUG_STATS)
+	const auto* sanitized = context.sanitized;
+	auto* visited = context.visited;
+#endif
+
 	const unsigned letterIdx = sanitized[offsetY+iX];
 	if (auto* child = node->GetChild(letterIdx)) // Limits traversal depth
 	{
@@ -904,7 +909,7 @@ private:
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, child, iX, offsetY, depth);
 #else
-			TraverseBoard(context, sanitized, visited, child, width, height, iX, offsetY);
+			TraverseBoard(wordsFound, sanitized, visited, child, width, height, iX, offsetY);
 #endif
 
 			// Child node exhausted?
@@ -920,23 +925,24 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, uint16_t iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<size_t>& wordsFound, const char* sanitized, bool* visited, DictionaryNode* node, unsigned width, unsigned height, uint16_t iX, unsigned offsetY)
 #endif
 {
 	Assert(nullptr != node);
-
-	visited[offsetY+iX] = true;
 
 #if defined(DEBUG_STATS)
 	++depth;
 
 	Assert(depth < s_longestWord);
 	context.maxDepth = std::max(context.maxDepth, unsigned(depth));
+
+	auto* visited = context.visited;
 #endif
+
+	visited[offsetY+iX] = true;
 
 	// Recurse, as we've got a node that might be going somewhewre.
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
-	// For some reason the M core loves frequent early escapes?
 
 #if defined(DEBUG_STATS)
 	const auto width = context.width;
@@ -974,26 +980,26 @@ private:
 #else
 	if (iX > 0)
 	{
-		TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY);
+		TraverseCall(wordsFound, sanitized, visited, node, width, height, iX-1, offsetY);
 	}
 
 	if (iX < width-1) 
 	{
-		TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY);
+		TraverseCall(wordsFound, sanitized, visited, node, width, height, iX+1, offsetY);
 	}
 
 	if (offsetY >= width) 
 	{
-		if (iX > 0) TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY-width);
-		TraverseCall(context, sanitized, visited, node, width, height, iX, offsetY-width);
-		if (iX < width-1) TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY-width);
+		if (iX > 0) TraverseCall(wordsFound, sanitized, visited, node, width, height, iX-1, offsetY-width);
+		TraverseCall(wordsFound, sanitized, visited, node, width, height, iX, offsetY-width);
+		if (iX < width-1) TraverseCall(wordsFound, sanitized, visited, node, width, height, iX+1, offsetY-width);
 	}
 
 	if (offsetY < width*(height-1))
 	{
-		if (iX > 0) TraverseCall(context, sanitized, visited, node, width, height, iX-1, offsetY+width);
-		TraverseCall(context, sanitized, visited, node, width, height, iX, offsetY+width);
-		if (iX < width-1) TraverseCall(context, sanitized, visited, node, width, height, iX+1, offsetY+width);
+		if (iX > 0) TraverseCall(wordsFound, sanitized, visited, node, width, height, iX-1, offsetY+width);
+		TraverseCall(wordsFound, sanitized, visited, node, width, height, iX, offsetY+width);
+		if (iX < width-1) TraverseCall(wordsFound, sanitized, visited, node, width, height, iX+1, offsetY+width);
 	}
 #endif
 
@@ -1008,7 +1014,11 @@ private:
 	const size_t wordIdx = node->GetWordIndex();
 	if (-1 != wordIdx)
 	{
+#if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
+#else
+		wordsFound.push_back(wordIdx);
+#endif
 	}
 }
 
