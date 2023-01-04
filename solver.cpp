@@ -318,7 +318,7 @@ public:
 #endif
 				indexBits >>= firstIndex;
 			
-				for (unsigned index = firstIndex; indexBits > 0; ++index)
+				for (unsigned index = firstIndex; index < kAlphaRange; ++index)
 				{
 					if (indexBits & 1)
 						node->m_children[index] = Copy(parent->GetChild(index));
@@ -381,11 +381,10 @@ public:
 	}
 
 private:
-	uint32_t m_indexBits;
-	uint32_t m_padNextTo8;
 	uint64_t m_poolUpper32;
-	uint32_t m_children[kAlphaRange];
+	uint32_t m_indexBits;
 	int32_t m_wordIdx; 
+	uint32_t m_children[kAlphaRange];
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
