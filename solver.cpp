@@ -841,9 +841,9 @@ private:
 
 #ifdef __GNUC__
 	// This seems to do a *bit* on OSX/Core M, so for now I'll also leave it enabled for other processors
-	__builtin_prefetch(visited, 0, 0);
+	__builtin_prefetch(visited, 1, 1);
 #elif defined(_WIN32)
-	_mm_prefetch(visited, _MM_HINT_T0);
+	_mm_prefetch(visited, _MM_HINT_T1);
 #endif
 
 	const unsigned yLim = width*(height-1);
@@ -852,7 +852,7 @@ private:
 
 #ifdef __GNUC__
 		// This seems to do a *bit* on OSX/Core M, so for now I'll also leave it enabled for other processors
-		__builtin_prefetch(visited + offsetY+width, 0, 2);
+		__builtin_prefetch(visited + offsetY+width, 1, 2);
 #elif defined(_WIN32)
 		_mm_prefetch(visited + offsetY+width, _MM_HINT_T2);
 #endif
