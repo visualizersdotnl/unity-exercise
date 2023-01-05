@@ -6,7 +6,6 @@
 #pragma once
 
 #ifdef _WIN32
-	// MSVC must be manhandled to do what I want.
 	#define BOGGLE_INLINE 
 //	#define BOGGLE_INLINE __forceinline 
 #else
