@@ -638,7 +638,6 @@ public:
 ,		sanitized(instance->m_sanitized)
 ,		visited(nullptr)
 ,		score(0)
-,		reqStrBufLen(0)
 ,		iThread(iThread)
 		{
 			Assert(nullptr != instance);
@@ -668,7 +667,6 @@ public:
 		// Output
 		std::vector<int> wordsFound;
 		unsigned score;
-		size_t reqStrBufLen;
 
 #if defined(DEBUG_STATS)
 		unsigned maxDepth;
@@ -716,9 +714,7 @@ public:
 				m_results.Count += (unsigned) wordsFound;
 				m_results.Score +=  context->score;
 
-#if !defined(NED_FLANDERS)
-				context->reqStrBufLen += wordsFound; // Add numWords for 0-string-terminator for each.
-#else
+#if defined(NED_FLANDERS)
 				totReqStrBufLen += wordsFound;
 #endif
 
@@ -880,7 +876,6 @@ private:
 
 		const size_t length = s_dictionary[wordIdx].length();
 		context->score += GetWordScore_Albert_2(length);
-		context->reqStrBufLen += length;
 	}
 		
 #if defined(DEBUG_STATS)
