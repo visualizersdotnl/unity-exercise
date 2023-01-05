@@ -183,7 +183,6 @@ public:
 };
 
 constexpr unsigned kTileVisitedBit = 1<<6;
-constexpr unsigned kLetterMask = 0x1f;
 
 static std::vector<ThreadInfo> s_threadInfo;
 
@@ -361,7 +360,7 @@ public:
 	}
 
 	// Returns non-zero if true.
-	BOGGLE_INLINE unsigned HasChild(unsigned index)
+	BOGGLE_INLINE unsigned HasChild(unsigned index) const
 	{
 		Assert(index < kAlphaRange);
 		const unsigned bit = 1 << index;
@@ -369,15 +368,15 @@ public:
 	}
 
 	// Returns NULL if no child
-	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index)
+	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index) const
 	{
 		Assert(HasChild(index));
 		return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
 	}
 
-	BOGGLE_INLINE DictionaryNode* GetChildChecked(unsigned index)
+	BOGGLE_INLINE DictionaryNode* GetChildChecked(unsigned index) const
 	{
-		if (0 == HasChild(index))
+		if (!HasChild(index))
 			return nullptr;
 		else
 		{
@@ -389,16 +388,16 @@ public:
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
 	BOGGLE_INLINE int GetWordIndex()
 	{
-		const int index = m_wordIdx;
+		const auto index = m_wordIdx;
 		m_wordIdx = -1;
 		return index;
 	}
 
 private:
-	uint32_t m_indexBits;
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
 	int32_t m_wordIdx; 
+	uint32_t m_indexBits;
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -805,13 +804,13 @@ private:
 		length -= 3;
 		
 		// Courtesy of Albert S.
-		unsigned Albert = 0;
+		size_t Albert = 0;
 		Albert += length>>1;
 		Albert += (length+1)>>2;
 		Albert += length>>2;
 		Albert += ((length+3)>>3)<<2;
 		Albert += ((length+3)>>3<<1);
-		return Albert+1;
+		return unsigned(Albert+1);
 	}
 
 	BOGGLE_INLINE static unsigned GetWordScore_Albert_2(size_t length) /* const */
@@ -819,13 +818,13 @@ private:
 		length = length > 8 ? 8 : length;
 
 		// Courtesy of Albert S.
-		unsigned Albert = 0;
+		size_t Albert = 0;
 		Albert += (length-3)>>1;
 		Albert += (length+10)>>4;
 		Albert += (length+9)>>4;
 		Albert += length<<2>>5<<2;
 		Albert += length<<2>>5<<1;
-		return Albert+1;
+		return unsigned(Albert+1);
 	}
 
 #if defined(DEBUG_STATS)
@@ -867,7 +866,7 @@ private:
 	{
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			const unsigned letterIdx = visited[offsetY+iX];
+			const char letterIdx = visited[offsetY+iX];
 
 			if (auto* child = root->GetChildChecked(letterIdx))
 			{
@@ -909,10 +908,9 @@ private:
 	auto* visited = context.visited;
 #endif
 
-	unsigned tile = visited[offsetY+iX];
+	const unsigned tile = visited[offsetY+iX];
 	if (!(tile & kTileVisitedBit)) // Not visited?
 	{
-		tile &= kLetterMask;
 		if (auto* child = node->GetChildChecked(tile)) // With child?
 		{
 #if defined(DEBUG_STATS)
@@ -1021,13 +1019,15 @@ private:
 
 	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
 	const int wordIdx = node->GetWordIndex();
-	if (!(wordIdx < 0))
+	if (wordIdx >= 0)
 	{
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
 #else
 		wordsFound.push_back(wordIdx);
 #endif
+
+//		node->WipeWordIndex();
 	}
 }
 
