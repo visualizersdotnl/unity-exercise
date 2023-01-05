@@ -846,13 +846,13 @@ private:
 #ifdef __GNUC__
 		// This seems to do a *bit* on OSX/Core M, so for now I'll also leave it enabled for other processors
 		__builtin_prefetch(visited + offsetY+width, 0, 2);
+#elif defined(_WIN32)
+		_mm_prefetch(visited + offsetY+width, _MM_HINT_T2);
 #endif
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			const char letterIdx = visited[offsetY+iX];
-
-			if (auto* child = root->GetChildChecked(letterIdx))
+			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
