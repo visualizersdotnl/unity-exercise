@@ -612,9 +612,6 @@ void FreeDictionary()
 
 #ifdef _WIN32
 	#include <immintrin.h>
-#else
-	#include "sse2neon-02-01-2022/sse2neon.h"
-#endif
 
 void fastMemcpy(void *pvDest, const void *pvSrc, size_t nBytes) {
 	Assert(nBytes % 32 == 0);
@@ -629,6 +626,9 @@ void fastMemcpy(void *pvDest, const void *pvSrc, size_t nBytes) {
 	}
 //	_mm_sfence();
 }
+#else
+#define fastMemcpy memcpy
+#endif
 
 class Query
 {
