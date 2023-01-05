@@ -967,7 +967,7 @@ private:
 	{
 		TraverseCall(wordsFound, visited, node, width, height, iX-1, offsetY);
 	}
-
+	
 	if (iX < width-1) 
 	{
 		TraverseCall(wordsFound, visited, node, width, height, iX+1, offsetY);
@@ -997,7 +997,7 @@ private:
 
 	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
 	const int wordIdx = node->GetWordIndex();
-	if (wordIdx >= 0)
+	if (wordIdx != -1)
 	{
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
