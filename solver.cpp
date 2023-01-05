@@ -839,6 +839,13 @@ private:
 	context->maxDepth = 0;
 #endif
 
+#ifdef __GNUC__
+	// This seems to do a *bit* on OSX/Core M, so for now I'll also leave it enabled for other processors
+	__builtin_prefetch(visited, 0, 0);
+#elif defined(_WIN32)
+	_mm_prefetch(visited, _MM_HINT_T0);
+#endif
+
 	const unsigned yLim = width*(height-1);
 	for (unsigned offsetY = 0; offsetY <= yLim; offsetY += width) 
 	{
@@ -863,6 +870,8 @@ private:
 			}
 		}
 	}
+
+//	std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
 	for (auto wordIdx : wordsFound)
