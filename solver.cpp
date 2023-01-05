@@ -608,6 +608,27 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
+
+#ifdef _WIN32
+	#include <immintrin.h>
+#else
+	#include "sse2neon-02-01-2022/sse2neon.h"
+#endif
+
+void fastMemcpy(void *pvDest, const void *pvSrc, size_t nBytes) {
+	Assert(nBytes % 32 == 0);
+	Assert((intptr_t(pvDest) & 31) == 0);
+	Assert((intptr_t(pvSrc) & 31) == 0);
+	const __m256i *pSrc = reinterpret_cast<const __m256i*>(pvSrc);
+	__m256i *pDest = reinterpret_cast<__m256i*>(pvDest);
+	int64_t nVects = nBytes / sizeof(*pSrc);
+	for (; nVects > 0; nVects--, pSrc++, pDest++) {
+		const __m256i loaded = _mm256_stream_load_si256(pSrc);
+		_mm256_stream_si256(pDest, loaded);
+	}
+//	_mm_sfence();
+}
+
 class Query
 {
 public:
@@ -654,7 +675,8 @@ public:
 			// Handle allocation and initialization of memory.
 			const auto gridSize = width*height;
 			visited = static_cast<char*>(s_customAlloc.Allocate(gridSize*sizeof(char), kCacheLine));
-			memcpy(visited, sanitized, gridSize*sizeof(char));
+//			memcpy(visited, sanitized, gridSize*sizeof(char));
+			fastMemcpy(visited, sanitized, gridSize*sizeof(char));
 
 			// Reserve
 			wordsFound.reserve(s_threadInfo[iThread].load); 
@@ -996,7 +1018,7 @@ private:
 
 	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
 	const int wordIdx = node->GetWordIndex();
-	if (wordIdx >= 0)
+	if (!(wordIdx < 0))
 	{
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
