@@ -842,7 +842,7 @@ private:
 	{
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			const unsigned letterIdx = visited[offsetY+iX]&kLetterMask;
+			const unsigned letterIdx = visited[offsetY+iX];
 
 			if (auto* child = root->GetChildChecked(letterIdx))
 			{
@@ -884,10 +884,11 @@ private:
 	auto* visited = context.visited;
 #endif
 
-	if (!(visited[offsetY+iX] & kTileVisitedBit))
+	unsigned tile = visited[offsetY+iX];
+	if (!(tile & kTileVisitedBit)) // Not visited?
 	{
-		const unsigned letterIdx = visited[offsetY+iX]&kLetterMask;
-		if (auto* child = node->GetChildChecked(letterIdx))
+		tile &= kLetterMask;
+		if (auto* child = node->GetChildChecked(tile)) // With child?
 		{
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, child, iX, offsetY, depth);
@@ -897,9 +898,9 @@ private:
 
 			// Child node exhausted?
 			// Note that we don't check if it's a word, since the preceding TraverseBoard() call has taken care of it
-			if (0 == child->HasChildren())
+			if (!child->HasChildren())
 			{
-				node->RemoveChild(letterIdx);
+				node->RemoveChild(tile);
 			}
 		}
 	}
