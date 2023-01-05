@@ -423,9 +423,6 @@ public:
 private:
 	std::lock_guard<std::mutex> m_lock;
 };
-#else
-#pragma warning(disable : 4101)
-class DictionaryLock {};
 #endif // NED_FLANDERS
 
 // Tells us if a word adheres to the rules.
@@ -518,7 +515,9 @@ void LoadDictionary(const char* path)
 		return;
 	}
 
+#ifdef NED_FLANDERS
 	DictionaryLock lock;
+#endif
 	{
 		size_t iThread = kNumThreads;
 		while (iThread-- > 0)
@@ -587,7 +586,9 @@ void LoadDictionary(const char* path)
 
 void FreeDictionary()
 {
+#ifdef NED_FLANDERS
 	DictionaryLock lock;
+#endif
 	{
 		// Delete roots;
 		for (auto* root : s_threadDicts) 
@@ -706,7 +707,9 @@ public:
 		FreeWords(m_results);
 
 		// Bit of a step back from what it was, but as I'm picking words out of the global list now..
+#ifdef NED_FLANDERS
 		DictionaryLock dictLock;
+#endif
 		{
 			// Kick off threads.
 			std::vector<std::thread> threads;
