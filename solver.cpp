@@ -842,6 +842,12 @@ private:
 	const unsigned yLim = width*(height-1);
 	for (unsigned offsetY = 0; offsetY <= yLim; offsetY += width) 
 	{
+
+#ifdef __GNUC__
+		// This seems to do a *bit* on OSX/Core M, so for now I'll also leave it enabled for other processors
+		__builtin_prefetch(visited + offsetY+width, 0, 2);
+#endif
+
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
 			const char letterIdx = visited[offsetY+iX];
