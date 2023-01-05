@@ -394,10 +394,10 @@ public:
 	}
 
 private:
+	uint32_t m_indexBits;
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
 	int32_t m_wordIdx; 
-	uint32_t m_indexBits;
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
