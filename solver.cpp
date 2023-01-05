@@ -701,8 +701,8 @@ public:
 			for (auto& thread : threads)
 				thread.join();
 
-			m_results.Count  = 0;
-			m_results.Score  = 0;
+//			m_results.Count  = 0;
+//			m_results.Score  = 0;
 
 #ifdef NED_FLANDERS
 			size_t totReqStrBufLen = 0;
@@ -827,19 +827,20 @@ private:
 	auto* visited = context->visited;
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
+
+#ifdef __GNUC__
+	// This seems to do a *bit* on OSX/Core M, so for now I'll also leave it enabled for other processors
+	__builtin_prefetch(visited, 1, 1);
+#elif defined(_WIN32)
+	_mm_prefetch(visited + width, _MM_HINT_T1);
+#endif
+
 	std::vector<int>& wordsFound = context->wordsFound;
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->iThread, s_threadInfo[context->iThread].load, s_threadInfo[context->iThread].nodes);
 
 	context->maxDepth = 0;
-#endif
-
-#ifdef __GNUC__
-	// This seems to do a *bit* on OSX/Core M, so for now I'll also leave it enabled for other processors
-	__builtin_prefetch(visited, 1, 1);
-#elif defined(_WIN32)
-	_mm_prefetch(visited, _MM_HINT_T1);
 #endif
 
 	const unsigned yLim = width*(height-1);
@@ -866,8 +867,6 @@ private:
 			}
 		}
 	}
-
-//	std::sort(wordsFound.begin(), wordsFound.end());
 
 	// Tally up the score and required buffer length.
 	for (auto wordIdx : wordsFound)
@@ -1007,15 +1006,13 @@ private:
 
 	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
 	const int wordIdx = node->GetWordIndex();
-	if (wordIdx != -1)
+	if (wordIdx >= 0)
 	{
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
 #else
 		wordsFound.push_back(wordIdx);
 #endif
-
-//		node->WipeWordIndex();
 	}
 }
 
