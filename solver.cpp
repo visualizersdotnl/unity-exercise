@@ -707,7 +707,7 @@ public:
 			m_results.Score  = 0;
 
 #ifdef NED_FLANDERS
-			size_t reqStrBufLen = 0;
+			size_t totReqStrBufLen = 0;
 #endif
 
 			for (auto& context : contexts)
@@ -719,7 +719,7 @@ public:
 #if !defined(NED_FLANDERS)
 				context->reqStrBufLen += wordsFound; // Add numWords for 0-string-terminator for each.
 #else
-				reqStrBufLen += context->reqStrBufLen;
+				totReqStrBufLen += wordsFound;
 #endif
 
 				debug_print("Thread %u joined with %u words (scoring %zu).\n", context->iThread, wordsFound, context->score);
@@ -732,7 +732,7 @@ public:
 			// I'd rather set pointers into the dictionary, but that would break the results as soon as new dictionary is loaded.
 
 			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
-			char* resBuf = new char[reqStrBufLen]; // Allocate sequential buffer.
+			char* resBuf = new char[totReqStrBufLen]; // Allocate sequential buffer.
 
 			for (auto& context : contexts)
 			{
