@@ -93,6 +93,7 @@
 	** 05/02/2023 **
 
 	- Just using one block of memory per thread now, got a few bits to spare even.
+	- Misc. fixes & cleaning.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -115,6 +116,7 @@
 #include <vector>
 #include <algorithm>
 #include <cassert>
+// #include <unordered_map>
 // #include <atomic>
 // #include <map>
 
@@ -171,6 +173,16 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
 
+// Dictionary word (score is best precalculated)
+struct Word
+{
+	Word(unsigned score, const std::string& word) :
+		score(score), word(word) {}
+
+	const unsigned score;
+	const std::string word;
+};
+
 // Number of words and number of nodes (1 for root) per thread.
 class ThreadInfo
 {
@@ -182,9 +194,13 @@ public:
 	size_t nodes;
 };
 
-constexpr unsigned kTileVisitedBit = 1<<6;
-
 static std::vector<ThreadInfo> s_threadInfo;
+
+// Full dictionary
+static std::vector<Word> s_words;
+
+// Cheap way to tag along the tiles (few bits left)
+constexpr unsigned kTileVisitedBit = 1<<7;
 
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
 BOGGLE_INLINE unsigned LetterToIndex(unsigned letter)
@@ -353,8 +369,7 @@ public:
 		Assert(index < kAlphaRange);
 		Assert(HasChild(index));
 
-		const unsigned bit = 1 << index;
-		m_indexBits ^= bit;
+		m_indexBits ^= 1 << index;
 
 		// return m_indexBits;
 	}
@@ -363,8 +378,7 @@ public:
 	BOGGLE_INLINE unsigned HasChild(unsigned index) const
 	{
 		Assert(index < kAlphaRange);
-		const unsigned bit = 1 << index;
-		return m_indexBits & bit;
+		return m_indexBits & (1 << index);
 	}
 
 	// Returns NULL if no child
@@ -403,15 +417,6 @@ private:
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
 
-// Sequential dictionary of all full words (FIXME: might be unsorted, depends on dictionary loaded) and their respective scores.
-struct Word
-{
-	size_t score;
-	std::string word;
-};
-
-static std::vector<Word> s_dictionary;
-
 // Counters, the latter being useful to reserve space.
 static unsigned s_longestWord;
 static size_t s_wordCount;
@@ -443,7 +448,7 @@ BOGGLE_INLINE static unsigned GetWordScore_Albert_1(size_t length) /* const */
 }
 #endif
 
-BOGGLE_INLINE static size_t GetWordScore_Albert_2(size_t length) /* const */
+BOGGLE_INLINE static unsigned GetWordScore_Albert_2(size_t length) /* const */
 {
 	length = length > 8 ? 8 : length;
 
@@ -454,7 +459,7 @@ BOGGLE_INLINE static size_t GetWordScore_Albert_2(size_t length) /* const */
 	Albert += (length+9)>>4;
 	Albert += length<<2>>5<<2;
 	Albert += length<<2>>5<<1;
-	return Albert+1;
+	return (unsigned) Albert+1;
 }
 
 #ifdef NED_FLANDERS
@@ -534,11 +539,8 @@ static bool IsWordValid(const std::string& word)
 		++letterLen;
 	}
 	
-	// Store word in dictionary (FIXME: use emplace_back()).
-	Word entry;
-	entry.word = word;
-	entry.score = GetWordScore_Albert_2(length);
-	s_dictionary.push_back(entry);
+	// Store word in dictionary (FIXME: less ham-fisted please).
+	s_words.emplace_back(Word(GetWordScore_Albert_2(length), word));
 
 	// Store index in node.
 	node->m_wordIdx = int(s_wordCount);
@@ -618,7 +620,7 @@ void LoadDictionary(const char* path)
 #ifdef NED_FLANDERS		
 		// Check thread load total.
 		size_t count = 0;
-		for (auto& info : s_threadInfo)
+		for (CONST auto& info : s_threadInfo)
 		{
 			count += info.load;
 		}
@@ -712,7 +714,7 @@ public:
 		char* visited; // Contains letters and a few bits for state.
 
 		// Output
-		std::vector<Word*> wordsFound;
+		std::vector<int> wordsFound;
 
 #if defined(NED_FLANDERS)
 		size_t reqStrBufSize = 0;
@@ -736,84 +738,77 @@ public:
 		DictionaryLock dictLock;
 #endif
 		{
+//			m_results.Count  = 0;
+//			m_results.Score  = 0;
+			m_results.Words = static_cast<char**>(s_customAlloc.AllocateUnsafe(s_wordCount*sizeof(char*), kCacheLine));
+
 			// Kick off threads.
 			std::vector<std::thread> threads;
+//			std::vector<std::unique_ptr<ThreadContext>> contexts;
+			std::vector<ThreadContext> contexts;
 			threads.reserve(kNumThreads);
-
-			std::vector<std::unique_ptr<ThreadContext>> contexts;
 			contexts.reserve(kNumThreads);
 
 			debug_print("Kicking off %zu threads.\n", kNumThreads);
 			
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
-				contexts.push_back(std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this)));
-				threads.emplace_back(std::thread(ExecuteThread, contexts[iThread].get()));
+//				auto context = std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this));
+//				threads.emplace_back(std::thread(ExecuteThread, context.get()));
+//				contexts.emplace_back(std::move(context));
+
+				contexts.emplace_back(ThreadContext(iThread, this));
+				threads.emplace_back(std::thread(ExecuteThread, &contexts[iThread]));
 			}
 
 			for (auto& thread : threads)
 				thread.join();
 
-//			m_results.Count  = 0;
-//			m_results.Score  = 0;
-
-#ifdef NED_FLANDERS
-			size_t totReqStrBufLen = 0;
-#endif
+#if !defined(NED_FLANDERS)
+			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data; we'll just be copying pointers (not fool proof).
 
 			for (const auto& context : contexts)
 			{
-				const auto& wordsFound = context->wordsFound;
-				for (auto* word : wordsFound)
+				auto& wordsFound = context.wordsFound;
+				for (int wordIdx : wordsFound)
 				{
+					const auto& word = s_words[wordIdx]; 
+					*words_cstr++ = const_cast<char*>(word.word.c_str());
+					m_results.Score += word.score;
 					++m_results.Count;
-					m_results.Score += unsigned(word->score);
 				}
 
-#if defined(NED_FLANDERS)
-				totReqStrBufLen += context->reqStrBufSize;
-#endif
+//				m_results.Count += (unsigned) wordsFound.size();
 
-//				debug_print("Thread %u joined with %u words (scoring %zu).\n", context->iThread, numWordsFound, context->score);
+				debug_print("Thread %u joined with %zu words (score %u).\n", context.iThread, wordsFound.size(), m_results.Score);
 			}
+#else
+			size_t totReqStrBufLen = 0;
+			for (const auto& context : contexts)
+				totReqStrBufLen += context->reqStrBufSize;
 
-			m_results.Words = new char*[m_results.Count];
-
-#ifdef NED_FLANDERS
 			// Copy words to Results structure.
 			// I'd rather set pointers into the dictionary, but that would break the results as soon as new dictionary is loaded.
 
 			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
 			char* resBuf = new char[totReqStrBufLen]; // Allocate sequential buffer.
 
-			for (auto& context : contexts)
-			{
-				for (auto wordIdx : context->wordsFound)
-				{
-					*words_cstr = resBuf;
-					auto& word = s_dictionary[wordIdx].word;
-					strcpy(*words_cstr++, word.c_str());
-					const size_t length = word.length();
-					resBuf += length+1;
-				}
-			}
-		}
-#else
-			// Copy words to Results structure.
-			// The dirty way: set pointers.
-
-			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
-
 			for (const auto& context : contexts)
 			{
 				const auto& wordsFound = context->wordsFound;
-				for (auto* word : wordsFound)
+				for (int wordIdx : wordsFound)
 				{
-					*words_cstr++ = const_cast<char*>(word->word.c_str());
+					const auto& word = s_words[wordIdx]; 
+					*words_cstr = resBuf;
+					strcpy(*words_cstr++, word.word.c_str());
+					const size_t length = word.word.length();
+					resBuf += length+1;
 				}
+
+				debug_print("Thread %u joined with %zu words (score %u).\n", context->iThread, wordsFound.size(), m_results.Score);
 			}
-		}
 #endif
+		}
 	}
 
 private:
@@ -824,8 +819,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(std::vector<Word*>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
-	static void BOGGLE_INLINE TraverseBoard(std::vector<Word*>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseCall(std::vector<int>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseBoard(std::vector<int>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
@@ -846,6 +841,7 @@ private:
 	auto* visited = context->visited;
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
+//	const unsigned iThread = context->iThread;
 
 #ifdef __GNUC__
 	// This seems to do a *bit* on OSX/Core M, so for now I'll also leave it enabled for other processors
@@ -854,7 +850,7 @@ private:
 	_mm_prefetch(visited + width, _MM_HINT_T2);
 #endif
 
-	std::vector<Word*>& wordsFound = context->wordsFound;
+	std::vector<int>& wordsFound = context->wordsFound;
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->iThread, s_threadInfo[context->iThread].load, s_threadInfo[context->iThread].nodes);
@@ -886,27 +882,29 @@ private:
 		}
 	}
 
+	std::sort(wordsFound.begin(), wordsFound.end());
+
 #if defined(NED_FLANDERS)
-	for (auto wordIdx : wordsFound)
+	for (int wordIdx : wordsFound)
 	{
-		Assert(-1 != wordIdx);
-		const size_t length = s_dictionary[wordIdx].word.length();
+		const size_t length = s_words[wordIdx].word.length();
 		context->reqStrBufSize += length + 1; // Plus one for zero terminator
 	}
 #endif
 
 #if defined(DEBUG_STATS)
-	float hitPct = 0.f;
-	if (s_threadInfo[context->iThread].load > 0.f)
-		hitPct = ((float)wordsFound.size()/s_threadInfo[context->iThread].load)*100.f;
-	debug_print("Thread %u has max. traversal depth %u (max. %u), hit: %.2f percent of load.\n", context->iThread, context->maxDepth, s_longestWord, hitPct);
+	if (s_threadInfo[context->iThread].load > 0)
+	{
+		const float hitPct = float(wordsFound.size())/s_threadInfo[context->iThread].load;
+		debug_print("Thread %u has max. traversal depth %u (max. %u), hit rate %.2f\n", context->iThread, context->maxDepth, s_longestWord, hitPct); 
+	}
 #endif
 }
 
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<Word*>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<int>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 #if defined(DEBUG_STATS)
@@ -937,7 +935,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<Word*>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<int>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 	Assert(nullptr != node);
@@ -990,6 +988,13 @@ private:
 			TraverseCall(context, node, iX+1, offsetY+width, depth);
 	}
 #else
+	if (offsetY < width*(height-1))
+	{
+		if (iX > 0) TraverseCall(wordsFound, visited, node, width, height, iX-1, offsetY+width);
+		TraverseCall(wordsFound, visited, node, width, height, iX, offsetY+width);
+		if (iX < width-1) TraverseCall(wordsFound, visited, node, width, height, iX+1, offsetY+width);
+	}
+
 	if (iX > 0)
 	{
 		TraverseCall(wordsFound, visited, node, width, height, iX-1, offsetY);
@@ -1006,13 +1011,6 @@ private:
 		TraverseCall(wordsFound, visited, node, width, height, iX, offsetY-width);
 		if (iX < width-1) TraverseCall(wordsFound, visited, node, width, height, iX+1, offsetY-width);
 	}
-
-	if (offsetY < width*(height-1))
-	{
-		if (iX > 0) TraverseCall(wordsFound, visited, node, width, height, iX-1, offsetY+width);
-		TraverseCall(wordsFound, visited, node, width, height, iX, offsetY+width);
-		if (iX < width-1) TraverseCall(wordsFound, visited, node, width, height, iX+1, offsetY+width);
-	}
 #endif
 
 
@@ -1026,11 +1024,10 @@ private:
 	const int wordIdx = node->GetWordIndex();
 	if (wordIdx >= 0)
 	{
-		Word* pWord = &s_dictionary[wordIdx];
 #if defined(DEBUG_STATS)
-		context.wordsFound.push_back(pWord);
+		context.wordsFound.push_back(wordIdx);
 #else
-		wordsFound.push_back(pWord);
+		wordsFound.push_back(wordIdx);
 #endif
 	}
 }
@@ -1121,7 +1118,9 @@ void FreeWords(Results results)
 	}
 #endif
 
-	delete[] results.Words;
+	if (nullptr != results.Words)
+		s_customAlloc.Free((void*)results.Words);
+	
 	results.Words = nullptr;
 
 	results.Count = results.Score = 0;

@@ -4,7 +4,7 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
-#define NUM_QUERIES 20 // The more spooling the better chance of a fast result
+#define NUM_QUERIES 30 // The more spooling the better chance of a fast result
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -16,7 +16,6 @@
 #include <memory>
 #include <chrono>
 #include <vector>
-// #include <unordered_set>
 #include <string>
 #include <algorithm>
 
