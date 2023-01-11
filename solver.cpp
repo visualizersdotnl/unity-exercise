@@ -371,8 +371,9 @@ public:
 	BOGGLE_INLINE_FORCE unsigned HasChildren() const { return m_indexBits; } // Non-zero.
 	BOGGLE_INLINE_FORCE bool IsWord() const { return -1 != m_wordIdx; }
 
-	BOGGLE_INLINE_FORCE void Prune(int32_t wordIdx)
+	BOGGLE_INLINE_FORCE void Prune(const std::string& word)
 	{
+
 	}
 
 	// Returns zero if node is now a dead end.
@@ -401,7 +402,7 @@ public:
 	}
 
 	// Returns NULL if no child
-	BOGGLE_INLINE_FORCE DictionaryNode* GetChildChecked(unsigned index) const
+	BOGGLE_INLINE DictionaryNode* GetChildChecked(unsigned index) const
 	{
 		if (!HasChild(index))
 			return nullptr;
@@ -416,7 +417,7 @@ public:
 	BOGGLE_INLINE_FORCE int GetWordIndex()
 	{
 		const auto index = m_wordIdx;
-		m_wordIdx = -1;
+//		m_wordIdx = -1;
 		return index;
 	}
 
@@ -425,6 +426,8 @@ private:
 	uint32_t m_count;
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
+
+public:
 	int32_t m_wordIdx; 
 };
 
@@ -943,6 +946,7 @@ private:
 /* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<int>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
+
 #if defined(DEBUG_STATS)
 	auto* visited = context.visited;
 #endif
@@ -983,7 +987,8 @@ private:
 	auto* visited = context.visited;
 #endif
 
-	visited[offsetY+iX] |= kTileVisitedBit;
+	const auto offset = offsetY+iX;
+	visited[offset] |= kTileVisitedBit;
 
 	// Recurse, as we've got a node that might be going somewhewre.
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
@@ -1052,8 +1057,6 @@ private:
 	--depth;
 #endif
 
-	visited[offsetY+iX] ^= kTileVisitedBit;
-
 	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
 	const int wordIdx = node->GetWordIndex();
 	if (wordIdx >= 0)
@@ -1062,8 +1065,11 @@ private:
 		context.wordsFound.push_back(wordIdx);
 #else
 		wordsFound.push_back(wordIdx);
+		node->m_wordIdx = -1;
 #endif
 	}
+
+	visited[offset] ^= kTileVisitedBit;
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)

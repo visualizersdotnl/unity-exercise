@@ -5,7 +5,7 @@
 // #define DUPE_CHECK
 #define HIGHSCORE_LOOP
 
-#define NUM_QUERIES 10 // The more spooling the better chance of a fast result
+#define NUM_QUERIES 15 // The more spooling the better chance of a fast result
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -137,7 +137,7 @@ RetrySameBoard:
 	}
 
 #ifdef HIGHSCORE_LOOP
-	if (durations[0].count() >= 40000) 
+	if (durations[0].count() >= 400000) 
 	{
 		for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 			FreeWords(results[iQuery]);

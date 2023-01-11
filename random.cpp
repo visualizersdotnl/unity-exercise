@@ -13,7 +13,7 @@ static tinymt32_t s_genState;
 
 void initialize_random_generator()
 {
-	const uint32_t seed = 0xdeadbeef;
+	const uint32_t seed = 0xdeadbaef;
 	tinymt32_init(&s_genState, seed);
 }
 
