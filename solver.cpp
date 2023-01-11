@@ -145,7 +145,11 @@
 // #define ASSERTIONS
 
 #if defined(_DEBUG) || defined(ASSERTIONS)
-	#define Assert assert
+	#ifdef _WIN32
+		#define Assert(condition) if (!(condition)) __debugbreak();
+	#else
+		#define Assert assert
+	#endif
 #else
 	inline void Assert(bool condition) {}
 #endif
@@ -203,7 +207,7 @@ static std::vector<Word> s_words;
 constexpr unsigned kTileVisitedBit = 1<<7;
 
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
-BOGGLE_INLINE unsigned LetterToIndex(unsigned letter)
+BOGGLE_INLINE_FORCE unsigned LetterToIndex(unsigned letter)
 {
 	return letter - static_cast<unsigned>('A');
 }
@@ -250,16 +254,19 @@ public:
 		const unsigned bit = 1 << index;
 		if (m_indexBits & bit)
 		{
-			return m_children[index];
+			auto* child = m_children[index];
+			++child->m_count;
+			return child;
 		}
 
 		++s_threadInfo[iThread].nodes;
-			
+
 		m_indexBits |= bit;
+
 		return m_children[index] = new LoadDictionaryNode();
 	}
 
-	BOGGLE_INLINE LoadDictionaryNode* GetChild(unsigned index)
+	BOGGLE_INLINE_FORCE LoadDictionaryNode* GetChild(unsigned index)
 	{
 		Assert(nullptr != m_children[index]);
 		return m_children[index];
@@ -268,6 +275,7 @@ public:
 private:
 	int32_t m_wordIdx = -1; 
 	uint32_t m_indexBits = 0;
+	uint32_t m_count = 1;
 	LoadDictionaryNode* m_children[kAlphaRange] = { nullptr };
 };
 
@@ -307,7 +315,7 @@ public:
 			s_customAlloc.Free(m_pool);
 		}
 
-		BOGGLE_INLINE DictionaryNode* Get() const
+		BOGGLE_INLINE_FORCE DictionaryNode* Get() const
 		{
 			return m_pool;
 		}
@@ -319,8 +327,8 @@ public:
 			DictionaryNode* node = m_pool + m_iAlloc;
 			++m_iAlloc;
 
-			node->m_wordIdx     = parent->m_wordIdx;
-			auto indexBits      = node->m_indexBits = parent->m_indexBits;
+			auto indexBits = node->m_indexBits = parent->m_indexBits;
+			node->m_count = parent->m_count;
 			node->m_poolUpper32 = m_poolUpper32; // Store for cache
 
 #ifdef _WIN32
@@ -343,6 +351,7 @@ public:
 				}
 			}
 
+			node->m_wordIdx = parent->m_wordIdx;
 
 			return reinterpret_cast<uint64_t>(node)&0xffffffff;
 		}
@@ -359,12 +368,16 @@ public:
 	~DictionaryNode() = delete;
 
 public:
-	BOGGLE_INLINE unsigned HasChildren() const { return m_indexBits;                    } // Non-zero.
-	BOGGLE_INLINE bool     IsWord()      const { return -1 != m_wordIdx;                }
+	BOGGLE_INLINE_FORCE unsigned HasChildren() const { return m_indexBits; } // Non-zero.
+	BOGGLE_INLINE_FORCE bool IsWord() const { return -1 != m_wordIdx; }
+
+	BOGGLE_INLINE_FORCE void Prune(int32_t wordIdx)
+	{
+	}
 
 	// Returns zero if node is now a dead end.
 //	BOGGLE_INLINE unsigned RemoveChild(unsigned index)
-	BOGGLE_INLINE void RemoveChild(unsigned index)
+	BOGGLE_INLINE_FORCE void RemoveChild(unsigned index)
 	{
 		Assert(index < kAlphaRange);
 		Assert(HasChild(index));
@@ -375,20 +388,20 @@ public:
 	}
 
 	// Returns non-zero if true.
-	BOGGLE_INLINE unsigned HasChild(unsigned index) const
+	BOGGLE_INLINE_FORCE unsigned HasChild(unsigned index) const
 	{
 		Assert(index < kAlphaRange);
 		return m_indexBits & (1 << index);
 	}
 
-	// Returns NULL if no child
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index) const
 	{
 		Assert(HasChild(index));
 		return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
 	}
 
-	BOGGLE_INLINE DictionaryNode* GetChildChecked(unsigned index) const
+	// Returns NULL if no child
+	BOGGLE_INLINE_FORCE DictionaryNode* GetChildChecked(unsigned index) const
 	{
 		if (!HasChild(index))
 			return nullptr;
@@ -400,7 +413,7 @@ public:
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
-	BOGGLE_INLINE int GetWordIndex()
+	BOGGLE_INLINE_FORCE int GetWordIndex()
 	{
 		const auto index = m_wordIdx;
 		m_wordIdx = -1;
@@ -409,6 +422,7 @@ public:
 
 private:
 	uint32_t m_indexBits;
+	uint32_t m_count;
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
 	int32_t m_wordIdx; 
@@ -488,17 +502,19 @@ static bool IsWordValid(const std::string& word)
 	}
 
 	// Check if it violates the 'Qu' rule.
-	auto iQ = word.find_first_of('Q');
+	std::string mutWord = word;
+	auto iQ = mutWord.find_first_of('Q');
 	while (std::string::npos != iQ)
 	{
 		auto next = iQ+1;
-		if (next == length || word[next] != 'U')
+		if (next == length || mutWord[next] != 'U')
 		{
 			debug_print("Invalid word due to 'Qu' rule: %s\n", word.c_str());
 			return false;
 		}
 
-		iQ = word.substr(next).find_first_of('Q');
+		mutWord = mutWord.substr(next);
+		iQ = mutWord.find_first_of('Q');
 	}
 
 	return true;
@@ -658,6 +674,10 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
+#ifdef _WIN32
+	#include <windows.h>
+#endif
+
 class Query
 {
 public:
@@ -716,6 +736,9 @@ public:
 		// Output
 		std::vector<int> wordsFound;
 
+		// Carries
+		DictionaryNode* root;
+
 #if defined(NED_FLANDERS)
 		size_t reqStrBufSize = 0;
 #endif
@@ -744,7 +767,6 @@ public:
 
 			// Kick off threads.
 			std::vector<std::thread> threads;
-//			std::vector<std::unique_ptr<ThreadContext>> contexts;
 			std::vector<ThreadContext> contexts;
 			threads.reserve(kNumThreads);
 			contexts.reserve(kNumThreads);
@@ -753,12 +775,13 @@ public:
 			
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
-//				auto context = std::unique_ptr<ThreadContext>(new ThreadContext(iThread, this));
-//				threads.emplace_back(std::thread(ExecuteThread, context.get()));
-//				contexts.emplace_back(std::move(context));
-
 				contexts.emplace_back(ThreadContext(iThread, this));
 				threads.emplace_back(std::thread(ExecuteThread, &contexts[iThread]));
+
+#ifdef _WIN32
+				// Up priority!
+				SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
+#endif
 			}
 
 			for (auto& thread : threads)
@@ -836,6 +859,7 @@ private:
 	// Create copy of source dictionary tree
 	auto threadCopy = DictionaryNode::ThreadCopy(context->iThread);
 	auto* root = threadCopy.Get();
+	context->root = root;
 
 	// Grab stuff from context
 	auto* visited = context->visited;
@@ -872,12 +896,24 @@ private:
 		{
 			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
+				const auto before = wordsFound.size();
+
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
 #else
 				TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
+				
+				const auto after = wordsFound.size();
+
+				// In practice, with huge dictionaries, this does not happen:
+				if (before < after)
+				{
+					for (auto current = before; current < after; ++current)
+					{
+					}
+				}
 			}
 		}
 	}
@@ -922,8 +958,6 @@ private:
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
 
-			// Child node exhausted?
-			// Note that we don't check if it's a word, since the preceding TraverseBoard() call has taken care of it
 			if (!child->HasChildren())
 			{
 				node->RemoveChild(tile);

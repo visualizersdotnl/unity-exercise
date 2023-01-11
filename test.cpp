@@ -3,8 +3,9 @@
 // #define PRINT_WORDS
 // #define PRINT_GRID
 // #define DUPE_CHECK
+#define HIGHSCORE_LOOP
 
-#define NUM_QUERIES 30 // The more spooling the better chance of a fast result
+#define NUM_QUERIES 10 // The more spooling the better chance of a fast result
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -18,9 +19,14 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <unordered_set>
 
 #include "api.h"
 #include "random.h"
+
+#if _WIN32
+	#include <windows.h>
+#endif
 
 int main(int argC, char **arguments)
 {
@@ -39,7 +45,16 @@ int main(int argC, char **arguments)
 		_CrtSetBreakAlloc(WIN32_CRT_BREAK_ALLOC);
 #endif
 
+	Results results[NUM_QUERIES];
+	std::vector<std::chrono::microseconds> durations;
+
 	initialize_random_generator();
+
+	printf("- Loading dictionary...\n");
+	//	const char *dictPath = "dictionary-short.txt";
+	const char *dictPath = "dictionary.txt";
+	//	const char *dictPath = "dictionary-bigger.txt";
+	LoadDictionary(dictPath);
 
 #ifndef USE_UNITY_REF_GRID
 
@@ -58,6 +73,8 @@ int main(int argC, char **arguments)
 	
 //	srand(42);
 	std::unique_ptr<char[]> board(new char[gridSize]);
+
+GenerateBoard:
 	char* write = board.get();
 
 	for (unsigned iBoard = 0, iY = 0; iY < ySize; ++iY)
@@ -96,19 +113,9 @@ int main(int argC, char **arguments)
 
 #endif
 
-	printf("- Loading dictionary...\n");
-//	const char *dictPath = "dictionary-short.txt";
-	const char *dictPath = "dictionary.txt";
-//	const char *dictPath = "dictionary-bigger.txt";
-	LoadDictionary(dictPath);
-
+RetrySameBoard:
 	printf("- Finding in %ux%u... (%u iterations)\n", xSize, ySize, NUM_QUERIES);
-
-	Results results[NUM_QUERIES];
-
-	std::vector<std::chrono::microseconds> durations;
-
-
+		
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
 		auto start = std::chrono::high_resolution_clock::now();
@@ -118,6 +125,9 @@ int main(int argC, char **arguments)
 		durations.push_back(timing);
 	}
 
+	// Sort so we can conveniently pick the fastest run
+	std::sort(durations.begin(), durations.end());
+
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
 		const auto count  = results[iQuery].Count;
@@ -125,7 +135,20 @@ int main(int argC, char **arguments)
 		printf("Results (run %u): ", iQuery+1);
 		printf("count: %u, score: %u, duration %.4lf\n", count, score, durations[iQuery].count()*0.000001);
 	}
-	 
+
+#ifdef HIGHSCORE_LOOP
+	if (durations[0].count() >= 40000) 
+	{
+		for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
+			FreeWords(results[iQuery]);
+
+		durations.clear();
+
+//		goto GenerateBoard;
+		goto RetrySameBoard;
+	}
+#endif
+
 #ifdef PRINT_WORDS
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 
 		printf("%s\n", results[0].Words[iWord]);	
@@ -136,6 +159,7 @@ int main(int argC, char **arguments)
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord)
 	{
 		std::string word(results[0].Words[iWord]);
+
 		auto pair = words.insert(word);
 		if (false == pair.second)
 		{
@@ -148,9 +172,6 @@ int main(int argC, char **arguments)
 		FreeWords(results[iQuery]);
 	
 	FreeDictionary();
-
-	// Sort so we can conveniently pick the fastest run
-	std::sort(durations.begin(), durations.end());
 
 	const double time = double(durations[0].count());
 	printf("\nSolver ran %u times, fastest: %.lf milliseconds. or approx. %.4lf second(s)\n", (unsigned) NUM_QUERIES, time, time*0.000001);

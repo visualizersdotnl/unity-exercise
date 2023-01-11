@@ -9,9 +9,11 @@
 
 static tinymt32_t s_genState;
 
+#include <stdlib.h>
+
 void initialize_random_generator()
 {
-	const uint32_t seed = 0xbadf00d;
+	const uint32_t seed = 0xdeadbeef;
 	tinymt32_init(&s_genState, seed);
 }
 
