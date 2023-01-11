@@ -275,7 +275,7 @@ public:
 private:
 	int32_t m_wordIdx = -1; 
 	uint32_t m_indexBits = 0;
-	uint32_t m_count = 1;
+	int32_t m_count = 1;
 	LoadDictionaryNode* m_children[kAlphaRange] = { nullptr };
 };
 
@@ -371,9 +371,26 @@ public:
 	BOGGLE_INLINE_FORCE unsigned HasChildren() const { return m_indexBits; } // Non-zero.
 	BOGGLE_INLINE_FORCE bool IsWord() const { return m_wordIdx > -1; }
 
-	BOGGLE_INLINE_FORCE void Prune(const std::string& word)
+	BOGGLE_INLINE void Prune(const std::string& word)
 	{
+		auto* current = this;
+		for (auto iLetter = 0; iLetter < word.size(); ++iLetter)
+		{
+			const auto index = LetterToIndex(word[iLetter]);
+			if (index != LetterToIndex('U'))
+			{
+				auto* child = current->GetChildChecked(index); // Because we also prune elsewhere (TraverseCall())
+				if (nullptr != child)
+				{
+					if (child->m_count-- <= 0)
+						current->RemoveChild(index);
 
+					current = child;
+				}
+				else
+					break;
+			}
+		}
 	}
 
 	// Returns zero if node is now a dead end.
@@ -402,7 +419,7 @@ public:
 	}
 
 	// Returns NULL if no child
-	BOGGLE_INLINE DictionaryNode* GetChildChecked(unsigned index) const
+	BOGGLE_INLINE_FORCE DictionaryNode* GetChildChecked(unsigned index) const
 	{
 		if (!HasChild(index))
 			return nullptr;
@@ -419,10 +436,10 @@ public:
 		return m_wordIdx;
 	}
 
-private:
+public:
+// private:
 	uint32_t m_indexBits;
-private:
-	uint32_t m_count;
+	int32_t m_count;
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
 public:
@@ -897,7 +914,7 @@ private:
 		{
 			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
-				const auto before = wordsFound.size();
+				size_t before = wordsFound.size();
 
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
@@ -905,18 +922,17 @@ private:
 #else
 				TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
-				
-				const auto after = wordsFound.size();
+
+				const size_t after = wordsFound.size();
 
 				// In practice, with huge dictionaries, this does not happen:
-				if (before < after)
-				{
-					for (auto current = before; current < after; ++current)
-					{
-					}
-				}
+//				while (before < after)
+//				{
+//					root->Prune(s_words[wordsFound[before++]].word);
+//				}
 			}
 		}
+
 	}
 
 	std::sort(wordsFound.begin(), wordsFound.end());
@@ -1057,7 +1073,6 @@ private:
 
 	const int wordIdx = node->GetWordIndex();
 
-	// Against stall (maybe, based on old AGI-stall theory)
 	visited[offset] ^= kTileVisitedBit;
 
 	// And now go:
@@ -1065,6 +1080,7 @@ private:
 	{
 //		__debugbreak();
 		node->m_wordIdx = -1;
+		--node->m_count;
 
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);

@@ -7,7 +7,7 @@
 	#define HIGHSCORE_LOOP
 #endif
 
-#define NUM_QUERIES 15 // The more spooling the better chance of a fast result
+#define NUM_QUERIES 10 // The more spooling the better chance of a fast result
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
