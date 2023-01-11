@@ -369,7 +369,7 @@ public:
 
 public:
 	BOGGLE_INLINE_FORCE unsigned HasChildren() const { return m_indexBits; } // Non-zero.
-	BOGGLE_INLINE_FORCE bool IsWord() const { return -1 != m_wordIdx; }
+	BOGGLE_INLINE_FORCE bool IsWord() const { return m_wordIdx > -1; }
 
 	BOGGLE_INLINE_FORCE void Prune(const std::string& word)
 	{
@@ -414,21 +414,19 @@ public:
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
-	BOGGLE_INLINE_FORCE int GetWordIndex()
+	BOGGLE_INLINE_FORCE int32_t GetWordIndex() const
 	{
-		const auto index = m_wordIdx;
-//		m_wordIdx = -1;
-		return index;
+		return m_wordIdx;
 	}
 
 private:
 	uint32_t m_indexBits;
+private:
 	uint32_t m_count;
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
-
 public:
-	int32_t m_wordIdx; 
+	int32_t m_wordIdx;
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -1057,19 +1055,23 @@ private:
 	--depth;
 #endif
 
-	// Because this is a bit of an unpredictable branch that modifies the node, it's faster to do this at *this* point rather than before traversal
 	const int wordIdx = node->GetWordIndex();
-	if (wordIdx >= 0)
+
+	// Against stall (maybe, based on old AGI-stall theory)
+	visited[offset] ^= kTileVisitedBit;
+
+	// And now go:
+	if (wordIdx >= 0) 
 	{
+//		__debugbreak();
+		node->m_wordIdx = -1;
+
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
 #else
 		wordsFound.push_back(wordIdx);
-		node->m_wordIdx = -1;
 #endif
 	}
-
-	visited[offset] ^= kTileVisitedBit;
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)

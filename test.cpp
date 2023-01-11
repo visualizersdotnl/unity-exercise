@@ -3,7 +3,9 @@
 // #define PRINT_WORDS
 // #define PRINT_GRID
 // #define DUPE_CHECK
-#define HIGHSCORE_LOOP
+#ifdef _WIN32
+	#define HIGHSCORE_LOOP
+#endif
 
 #define NUM_QUERIES 15 // The more spooling the better chance of a fast result
 
