@@ -800,7 +800,7 @@ public:
 		char* visited; // Contains letters and a few bits for state.
 
 		// Output
-		std::vector<int> wordsFound;
+		std::vector<unsigned> wordsFound;
 
 #if defined(NED_FLANDERS)
 		size_t reqStrBufSize = 0;
@@ -869,8 +869,6 @@ public:
 					++m_results.Count;
 				}
 
-//				m_results.Count += (unsigned) wordsFound.size();
-
 				debug_print("Thread %u joined with %zu words (score %u).\n", context.iThread, wordsFound.size(), m_results.Score);
 			}
 #else
@@ -910,8 +908,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(std::vector<int>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
-	static void BOGGLE_INLINE TraverseBoard(std::vector<int>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
@@ -936,7 +934,7 @@ private:
 	// Attempt to prefetch grid
 	NearPrefetch(visited);
 
-	std::vector<int>& wordsFound = context->wordsFound;
+	auto& wordsFound = context->wordsFound;
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->iThread, s_threadInfo[context->iThread].load, s_threadInfo[context->iThread].nodes);
@@ -954,7 +952,7 @@ private:
 			auto* curVisited = visited + offsetY+iX;
 
 			// Try to prefetch next cache line in board
-//			NearPrefetch(visited + curVisited + kCacheLine);
+			NearPrefetch(curVisited + kCacheLine);
 
 			if (auto* child = root->GetChildChecked(*curVisited))
 			{
@@ -967,9 +965,7 @@ private:
 				TraverseBoard(wordsFound, curVisited, child, width, height, iX, offsetY);
 #endif
 
-				const size_t after = wordsFound.size();
-
-				while (before < after)
+				while (before < wordsFound.size())
 				{
 					root->Prune(s_words[wordsFound[before]].word);
 					++before;
@@ -1001,7 +997,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<int>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+/* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 
@@ -1031,7 +1027,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<int>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 	Assert(nullptr != node);
@@ -1154,11 +1150,11 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	results.Score = 0;
 	results.UserData = nullptr; // Didn't need it in this implementation.
 
-	if (width > 65535)
-	{
-		printf("Board width can't be greater than 65535 (16-bit).\n");
-		return results;
-	}
+//	if (width > 65535)
+//	{
+//		printf("Board width can't be greater than 65535 (16-bit).\n");
+//		return results;
+//	}
 
 	// Board parameters check out?
 	if (nullptr != board && !(0 == width || 0 == height))
