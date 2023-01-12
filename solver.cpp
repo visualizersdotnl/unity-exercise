@@ -152,7 +152,7 @@
 // #define ASSERTIONS
 
 // Undef. to kill prefetching
-// #define NO_PREFETCHES
+#define NO_PREFETCHES
 
 #if defined(_DEBUG) || defined(ASSERTIONS)
 	#ifdef _WIN32
@@ -178,7 +178,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
 #if defined(_WIN32)
-	const size_t kNumThreads = kNumConcurrrency;
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2); // This causes all kinds of pre-emption stalls (see Superluminal) but for all the wrong reasons, better peak perf.
 #else
 	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
 #endif
@@ -413,20 +413,20 @@ public:
 	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1; }
 	BOGGLE_INLINE_FORCE bool IsExhausted() const     { return m_wordRefCount == 0; }
 
-#if 0
 	// FIXME: experimental
 	BOGGLE_INLINE void Prune(const std::string& word)
 	{
+		constexpr auto kIndexU = 'U'-'A'; // LetterToIndex('U');
 		auto* current = this;
 		for (auto iLetter = 0; iLetter < word.size(); ++iLetter)
 		{
 			const auto index = LetterToIndex(word[iLetter]);
-			if (index != LetterToIndex('U'))
+			if (kIndexU != index)
 			{
 				auto* child = current->GetChildChecked(index); // Because we also prune elsewhere (TraverseCall())
 				if (nullptr != child)
 				{
-					if (child->m_wordRefCount-- <= 0)
+					if (--child->m_wordRefCount == 0)
 						current->RemoveChild(index);
 
 					current = child;
@@ -436,7 +436,6 @@ public:
 			}
 		}
 	}
-#endif
 
 	BOGGLE_INLINE_FORCE void RemoveChild(unsigned index)
 	{
@@ -681,12 +680,11 @@ void LoadDictionary(const char* path)
 		iThread = 0;
 		size_t threadNumWords = 0;
 
-		for (auto &word : words)
+		for (const auto &word : words)
 		{
 			AddWordToDictionary(word, unsigned(iThread));
 
-			++threadNumWords;
-			if (threadNumWords>wordsPerThread)
+			if (++threadNumWords > wordsPerThread)
 			{
 				threadNumWords = 0;
 				++iThread;
@@ -947,26 +945,29 @@ private:
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			// Try to prefetch next cache line in board
-			NearPrefetch(visited + offsetY+iX + kCacheLine);
+			auto* curVisited = visited + offsetY+iX;
 
-			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
+			// Try to prefetch next cache line in board
+//			NearPrefetch(visited + curVisited + kCacheLine);
+
+			if (auto* child = root->GetChildChecked(*curVisited))
 			{
-//				size_t before = wordsFound.size();
+				size_t before = wordsFound.size();
 
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
 #else
-				TraverseBoard(wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
+				TraverseBoard(wordsFound, curVisited, child, width, height, iX, offsetY);
 #endif
 
-//				const size_t after = wordsFound.size();
+				const size_t after = wordsFound.size();
 
-//				while (before < after)
-//				{
-//					root->Prune(s_words[wordsFound[before++]].word);
-//				}
+				while (before < after)
+				{
+					root->Prune(s_words[wordsFound[before]].word);
+					++before;
+				}
 			}
 		}
 
@@ -1077,28 +1078,28 @@ private:
 			TraverseCall(context, node, iX+1, offsetY+width, depth);
 	}
 #else
-	if (offsetY < width*(height-1))
+	if (offsetY >= width) 
 	{
-		if (iX > 0) TraverseCall(wordsFound, visited +width-1, node, width, height, iX-1, offsetY+width);
-		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width);
-		if (iX < width-1) TraverseCall(wordsFound, visited + width+1, node, width, height, iX+1, offsetY+width);
+		if (iX > 0) TraverseCall(wordsFound, visited - width-1, node, width, height, iX-1, offsetY-width);
+		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
+		if (iX < width-1) TraverseCall(wordsFound, visited - width+1, node, width, height, iX+1, offsetY-width);
 	}
 
 	if (iX > 0)
 	{
 		TraverseCall(wordsFound, visited-1, node, width, height, iX-1, offsetY);
 	}
-	
+
 	if (iX < width-1) 
 	{
 		TraverseCall(wordsFound, visited+1, node, width, height, iX+1, offsetY);
 	}
 
-	if (offsetY >= width) 
+	if (offsetY < width*(height-1))
 	{
-		if (iX > 0) TraverseCall(wordsFound, visited - width-1, node, width, height, iX-1, offsetY-width);
-		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
-		if (iX < width-1) TraverseCall(wordsFound, visited - width+1, node, width, height, iX+1, offsetY-width);
+		if (iX > 0) TraverseCall(wordsFound, visited + width-1, node, width, height, iX-1, offsetY+width);
+		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width);
+		if (iX < width-1) TraverseCall(wordsFound, visited + width+1, node, width, height, iX+1, offsetY+width);
 	}
 #endif
 
@@ -1115,7 +1116,7 @@ private:
 	if (wordIdx >= 0) 
 	{
 		node->m_wordIdx = -1;
-		--node->m_wordRefCount;
+//		--node->m_wordRefCount;
 
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);

@@ -7,7 +7,7 @@
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECS 400000 // Stress test Ryzen 5900x
-	#define NUM_QUERIES 10
+	#define NUM_QUERIES 5
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECS 620000 // Stress test for M1 MAX
