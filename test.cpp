@@ -147,7 +147,7 @@ RetrySameBoard:
 	}
 
 #ifdef HIGHSCORE_LOOP
-	if (durations[0].count() >= 400000) 
+	if (durations[0].count() >= HIGHSCORE_MICROSECS) 
 	{
 		printf("Best in microsec. %lld\n", durations[0].count());
 
