@@ -4,11 +4,12 @@
 // #define PRINT_GRID
 // #define DUPE_CHECK
 
+// When board randomization enabled, it pays off (usually) to do more queries to get better performance.
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECS 380000 // Stress test Ryzen 5900x
-	#define NUM_QUERIES 5
-	// #define HIGHSCORE_LOOP_RANDOMIZE_BOARD
+	#define NUM_QUERIES 30
+	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECS 640000 // Stress test for M1 MAX
