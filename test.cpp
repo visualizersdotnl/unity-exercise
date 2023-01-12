@@ -8,10 +8,12 @@
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECS 400000 // Stress test Ryzen 5900x
 	#define NUM_QUERIES 5
+	// #define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
-	#define HIGHSCORE_MICROSECS 620000 // Stress test for M1 MAX
-	#define NUM_QUERIES 15
+	#define HIGHSCORE_MICROSECS 630000 // Stress test for M1 MAX
+	#define NUM_QUERIES 10
+	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #endif
 
 
@@ -154,8 +156,11 @@ RetrySameBoard:
 
 		durations.clear();
 
-//		goto GenerateBoard;
+#ifdef HIGHSCORE_LOOP_RANDOMIZE_BOARD
+		goto GenerateBoard;
+#else
 		goto RetrySameBoard;
+#endif
 	}
 #endif
 
