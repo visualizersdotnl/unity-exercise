@@ -17,7 +17,7 @@
 
 	Notes:
 		- Currently tested on Windows 10 (VS2017), Linux & OSX.
-		- It's currently faster on a proper multi-core CPU than the Core M, probably due to those allocator locks.
+		- It's currently faster on a proper multi-core CPU than the (Intel) Core M, probably due to those allocator locks.
 		- Compile with full optimization (-O3 for ex.) for best performance.
 		  Disabling C++ exceptions helps too, as they hinder inlining and are not used.
 		  Please look at Albert's makefile for Linux/OSX optimal parameters!
@@ -82,7 +82,7 @@
 	Introducing 'sse2neon'.
 	Try OpenMP?
 
-	** 03/02/2023 **
+	** 03/01/2023 **
 
 	Things that matter:
 	- Node size (multiple megabytes per thread!).
@@ -90,17 +90,17 @@
 	- SSE non-cached writes did not help at all -> Removed.
 	- Most low-level concerns are valid at this point.
 
-	** 05/02/2023 **
+	** 05/01/2023 **
 
 	- Just using one block of memory per thread now, got a few bits to spare even.
 	- Misc. fixes & cleaning.
 
-	** 05/02/2023 **
+	** 12/01/2023 **
 	
-	- Micro-optimizations, still adhering, somewhat, to the Unity test API requirements.
+	- Several mcro-optimizations (see Github history), still adhering, somewhat, to the Unity test API requirements.
 	- I've move adding the offset to the 'visited' address to the caller.
 	- It, logically (right?), seems important to have as little on the stack as possible during traversal.
-	- Trying some things using prefetches; it looks as if there's not much to gain.
+	- Trying some things using prefetches; it looks as if there's not much to gain. On Apple M though...
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -152,7 +152,9 @@
 // #define ASSERTIONS
 
 // Undef. to kill prefetching
-#define NO_PREFETCHES
+#ifdef _WIN32
+	#define NO_PREFETCHES // Seems to have some effect on Apple M
+#endif
 
 #if defined(_DEBUG) || defined(ASSERTIONS)
 	#ifdef _WIN32

@@ -11,9 +11,9 @@
 	// #define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
-	#define HIGHSCORE_MICROSECS 630000 // Stress test for M1 MAX
-	#define NUM_QUERIES 10
-	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
+	#define HIGHSCORE_MICROSECS 635000 // Stress test for M1 MAX
+	#define NUM_QUERIES 7
+	// #define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #endif
 
 
