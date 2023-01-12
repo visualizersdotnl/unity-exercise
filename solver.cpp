@@ -267,10 +267,10 @@ static std::vector<LoadDictionaryNode*> s_threadDicts;
 // Load node.
 class LoadDictionaryNode
 {
-	friend void AddWordToDictionary(const std::string& word, unsigned iThread);
-	friend void FreeDictionary();
-
 	friend class DictionaryNode;
+
+	friend void AddWordToDictionary(const std::string& word, size_t iThread);
+	friend void FreeDictionary();
 
 public:
 	CUSTOM_NEW
@@ -292,7 +292,7 @@ public:
 	}
 
 	// Only called from LoadDictionary().
-	LoadDictionaryNode* AddChild(char letter, unsigned iThread)
+	LoadDictionaryNode* AddChild(char letter, size_t iThread)
 	{
 		const unsigned index = LetterToIndex(letter);
 
@@ -432,7 +432,9 @@ public:
 				if (nullptr != child)
 				{
 					if (--child->m_wordRefCount == 0)
+					{
 						current->RemoveChild(index);
+					}
 
 					current = child;
 				}
@@ -552,7 +554,6 @@ class DictionaryLock
 public:
 	DictionaryLock() :
 		m_lock(s_dictMutex) {}
-
 private:
 	std::lock_guard<std::mutex> m_lock;
 };
@@ -590,7 +591,7 @@ static bool IsWordValid(const std::string& word)
 }
 
 // Input word must be uppercase!
-/* static */ void AddWordToDictionary(const std::string& word, unsigned iThread)
+/* static */ void AddWordToDictionary(const std::string& word, size_t iThread)
 {
 	// Word of any use given the Boggle rules?	
 	if (false == IsWordValid(word))
@@ -692,7 +693,7 @@ void LoadDictionary(const char* path)
 
 		for (const auto &word : words)
 		{
-			AddWordToDictionary(word, unsigned(iThread));
+			AddWordToDictionary(word, iThread);
 
 			if (++threadNumWords > wordsPerThread)
 			{
