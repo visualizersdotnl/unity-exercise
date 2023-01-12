@@ -3,15 +3,17 @@
 // #define PRINT_WORDS
 // #define PRINT_GRID
 // #define DUPE_CHECK
+
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECS 400000 // Stress test Ryzen 5900x
+	#define NUM_QUERIES 10
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
-	#define HIGHSCORE_MICROSECS 500000 // Stress test for M1 MAX
+	#define HIGHSCORE_MICROSECS 620000 // Stress test for M1 MAX
+	#define NUM_QUERIES 15
 #endif
 
-#define NUM_QUERIES 10 // The more spooling the better chance of a fast result
 
 #define WIN32_CRT_BREAK_ALLOC -1 // 497 // 991000 // 1317291
 
@@ -145,7 +147,7 @@ RetrySameBoard:
 #ifdef HIGHSCORE_LOOP
 	if (durations[0].count() >= 400000) 
 	{
-		printf("Best in microsec. %zu\n", durations[0].count());
+		printf("Best in microsec. %lld\n", durations[0].count());
 
 		for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 			FreeWords(results[iQuery]);

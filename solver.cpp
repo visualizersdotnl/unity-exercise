@@ -736,6 +736,8 @@ void FreeDictionary()
 
 #ifdef _WIN32
 	#include <windows.h>
+#elif __GNUC__
+	#include <pthread.h>
 #endif
 
 class Query
@@ -838,8 +840,11 @@ public:
 				threads.emplace_back(std::thread(ExecuteThread, &contexts[iThread]));
 
 #ifdef _WIN32
-				// Up priority!
+				// Works as a mild stimulant, if you will
+
 				SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
+#elif defined(__GNUC__)
+				// FIXME: should I?
 #endif
 			}
 
