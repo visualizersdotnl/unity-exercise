@@ -180,7 +180,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #if defined(_WIN32)
 	const size_t kNumThreads = kNumConcurrrency;
 #else
-	const size_t kNumThreads = kNumConcurrrency;
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
 #endif
 
 #endif
