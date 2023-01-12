@@ -220,6 +220,9 @@ BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address) {}
 // Dictionary word (score is best precalculated)
 struct Word
 {
+	CUSTOM_NEW
+	CUSTOM_DELETE
+
 	Word(unsigned score, const std::string& word) :
 		score(score), word(word) {}
 
@@ -423,7 +426,7 @@ public:
 			const auto index = LetterToIndex(word[iLetter]);
 			if (kIndexU != index)
 			{
-				auto* child = current->GetChildChecked(index); // Because we also prune elsewhere (TraverseCall())
+				auto* child = current->GetChildChecked(index); // Because we prune topmost in TraverseCall()
 				if (nullptr != child)
 				{
 					if (--child->m_wordRefCount == 0)
@@ -432,7 +435,10 @@ public:
 					current = child;
 				}
 				else
+				{
+					// Most often if topmost was already pruned during traversal
 					break;
+				}
 			}
 		}
 	}
