@@ -178,9 +178,9 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
 #if defined(_WIN32)
-	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency>>1);
+	const size_t kNumThreads = kNumConcurrrency;
 #else
-	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency>>1);
+	const size_t kNumThreads = kNumConcurrrency;
 #endif
 
 #endif
