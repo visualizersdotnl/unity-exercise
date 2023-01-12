@@ -117,7 +117,7 @@ GenerateBoard:
 
 RetrySameBoard:
 	printf("- Finding in %ux%u... (%u iterations)\n", xSize, ySize, NUM_QUERIES);
-		
+
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
 		auto start = std::chrono::high_resolution_clock::now();
@@ -141,6 +141,8 @@ RetrySameBoard:
 #ifdef HIGHSCORE_LOOP
 	if (durations[0].count() >= 400000) 
 	{
+		printf("Best in microsec. %zu\n", durations[0].count());
+
 		for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 			FreeWords(results[iQuery]);
 

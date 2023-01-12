@@ -80,7 +80,7 @@
 	** 02/01/2023 **
 
 	Introducing 'sse2neon'.
-	Try OpenMP!
+	Try OpenMP?
 
 	** 03/02/2023 **
 
@@ -94,6 +94,13 @@
 
 	- Just using one block of memory per thread now, got a few bits to spare even.
 	- Misc. fixes & cleaning.
+
+	** 05/02/2023 **
+	
+	- Micro-optimizations, still adhering, somewhat, to the Unity test API requirements.
+	- I've move adding the offset to the 'visited' address to the caller.
+	- It, logically (right?), seems important to have as little on the stack as possible during traversal.
+	- Trying some things using prefetches; it looks as if there's not much to gain.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -144,6 +151,9 @@
 // Undef. to kill assertions.
 // #define ASSERTIONS
 
+// Undef. to kill prefetching
+// #define NO_PREFETCHES
+
 #if defined(_DEBUG) || defined(ASSERTIONS)
 	#ifdef _WIN32
 		#define Assert(condition) if (!(condition)) __debugbreak();
@@ -176,6 +186,36 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #endif
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
+
+#ifndef NO_PREFETCHES
+
+// Far prefetch (most temporal)
+BOGGLE_INLINE_FORCE static void FarPrefetch(const char* address)
+{
+#ifdef __GNUC__
+	__builtin_prefetch(address, 1, 3);
+#elif defined(_WIN32)
+	_mm_prefetch(address, _MM_HINT_T2);
+#endif
+}
+
+// Near prefetch (near temporal)
+BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
+{
+#ifdef __GNUC__
+	__builtin_prefetch(address, 1, 1);
+#elif defined(_WIN32)
+	_mm_prefetch(address, _MM_HINT_T1);
+#endif
+}
+
+#else
+
+BOGGLE_INLINE_FORCE static void FarPrefetch(const char* address) {}
+BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address) {}
+
+#endif
+
 
 // Dictionary word (score is best precalculated)
 struct Word
@@ -255,7 +295,7 @@ public:
 		if (m_indexBits & bit)
 		{
 			auto* child = m_children[index];
-			++child->m_count;
+			++child->m_wordRefCount;
 			return child;
 		}
 
@@ -275,7 +315,7 @@ public:
 private:
 	int32_t m_wordIdx = -1; 
 	uint32_t m_indexBits = 0;
-	int32_t m_count = 1;
+	int32_t m_wordRefCount = 1;
 	LoadDictionaryNode* m_children[kAlphaRange] = { nullptr };
 };
 
@@ -298,7 +338,8 @@ public:
 		CUSTOM_DELETE
 
 		ThreadCopy(unsigned iThread) : 
-			m_iThread(iThread), m_iAlloc(0)
+//			m_iThread(iThread), 
+			m_iAlloc(0)
 		{
 			// Allocate pool for all necessary nodes.
 			const auto numNodes = s_threadInfo[iThread].nodes;
@@ -323,12 +364,12 @@ public:
 	private:
 		uint32_t Copy(LoadDictionaryNode* parent)
 		{
-			Assert(m_iAlloc < s_threadInfo[m_iThread].nodes);
+//			Assert(m_iAlloc < s_threadInfo[m_iThread].nodes);
 			DictionaryNode* node = m_pool + m_iAlloc;
 			++m_iAlloc;
 
 			auto indexBits = node->m_indexBits = parent->m_indexBits;
-			node->m_count = parent->m_count;
+			node->m_wordRefCount = parent->m_wordRefCount;
 			node->m_poolUpper32 = m_poolUpper32; // Store for cache
 
 #ifdef _WIN32
@@ -356,7 +397,7 @@ public:
 			return reinterpret_cast<uint64_t>(node)&0xffffffff;
 		}
 
-		const unsigned m_iThread;
+//		const unsigned m_iThread;
 
 		DictionaryNode* m_pool;
 		size_t m_iAlloc;
@@ -368,9 +409,12 @@ public:
 	~DictionaryNode() = delete;
 
 public:
-	BOGGLE_INLINE_FORCE unsigned HasChildren() const { return m_indexBits; } // Non-zero.
-	BOGGLE_INLINE_FORCE bool IsWord() const { return m_wordIdx > -1; }
+	BOGGLE_INLINE_FORCE unsigned HasChildren() const { return m_indexBits; } // Check for non-zero.
+	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1; }
+	BOGGLE_INLINE_FORCE bool IsExhausted() const     { return m_wordRefCount == 0; }
 
+#if 0
+	// FIXME: experimental
 	BOGGLE_INLINE void Prune(const std::string& word)
 	{
 		auto* current = this;
@@ -382,7 +426,7 @@ public:
 				auto* child = current->GetChildChecked(index); // Because we also prune elsewhere (TraverseCall())
 				if (nullptr != child)
 				{
-					if (child->m_count-- <= 0)
+					if (child->m_wordRefCount-- <= 0)
 						current->RemoveChild(index);
 
 					current = child;
@@ -392,17 +436,14 @@ public:
 			}
 		}
 	}
+#endif
 
-	// Returns zero if node is now a dead end.
-//	BOGGLE_INLINE unsigned RemoveChild(unsigned index)
 	BOGGLE_INLINE_FORCE void RemoveChild(unsigned index)
 	{
 		Assert(index < kAlphaRange);
 		Assert(HasChild(index));
 
 		m_indexBits ^= 1 << index;
-
-		// return m_indexBits;
 	}
 
 	// Returns non-zero if true.
@@ -436,10 +477,11 @@ public:
 		return m_wordIdx;
 	}
 
-public:
-// private:
+private:
 	uint32_t m_indexBits;
-	int32_t m_count;
+public:
+	int32_t m_wordRefCount;
+private:
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
 public:
@@ -754,9 +796,6 @@ public:
 		// Output
 		std::vector<int> wordsFound;
 
-		// Carries
-		DictionaryNode* root;
-
 #if defined(NED_FLANDERS)
 		size_t reqStrBufSize = 0;
 #endif
@@ -779,8 +818,10 @@ public:
 		DictionaryLock dictLock;
 #endif
 		{
+			// Already set
 //			m_results.Count  = 0;
 //			m_results.Score  = 0;
+
 			m_results.Words = static_cast<char**>(s_customAlloc.AllocateUnsafe(s_wordCount*sizeof(char*), kCacheLine));
 
 			// Kick off threads.
@@ -877,20 +918,14 @@ private:
 	// Create copy of source dictionary tree
 	auto threadCopy = DictionaryNode::ThreadCopy(context->iThread);
 	auto* root = threadCopy.Get();
-	context->root = root;
 
 	// Grab stuff from context
 	auto* visited = context->visited;
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
-//	const unsigned iThread = context->iThread;
 
-#ifdef __GNUC__
-	// This seems to do a *bit* on OSX/Core M, so for now I'll also leave it enabled for other processors
-	__builtin_prefetch(visited, 1, 1);
-#elif defined(_WIN32)
-	_mm_prefetch(visited + width, _MM_HINT_T2);
-#endif
+	// Attempt to prefetch grid
+	NearPrefetch(visited);
 
 	std::vector<int>& wordsFound = context->wordsFound;
 
@@ -900,32 +935,29 @@ private:
 	context->maxDepth = 0;
 #endif
 
-//	const unsigned yLim = width*(height-1);
 	for (unsigned offsetY = 0; offsetY <= width*(height-1); offsetY += width) 
 	{
-#ifdef __GNUC__
-		// This seems to do a *bit* on OSX/Core M, so for now I'll also leave it enabled for other processors
-		__builtin_prefetch(visited + offsetY+width, 1, 2);
-#elif defined(_WIN32)
-		_mm_prefetch(visited + offsetY+width, _MM_HINT_T2);
-#endif
+		// Try to prefetch next horizontal line of board
+		FarPrefetch(visited + offsetY+width);
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
+			// Try to prefetch next cache line in board
+			NearPrefetch(visited + offsetY+iX + kCacheLine);
+
 			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
-				size_t before = wordsFound.size();
+//				size_t before = wordsFound.size();
 
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
 #else
-				TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
+				TraverseBoard(wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
 #endif
 
-				const size_t after = wordsFound.size();
+//				const size_t after = wordsFound.size();
 
-				// In practice, with huge dictionaries, this does not happen:
 //				while (before < after)
 //				{
 //					root->Prune(s_words[wordsFound[before++]].word);
@@ -962,10 +994,10 @@ private:
 {
 
 #if defined(DEBUG_STATS)
-	auto* visited = context.visited;
+	auto* visited = context.visited + offsetY+iX;
 #endif
 
-	const unsigned tile = visited[offsetY+iX];
+	const unsigned tile = *visited; // [offsetY+iX];
 	if (!(tile & kTileVisitedBit)) // Not visited?
 	{
 		if (auto* child = node->GetChildChecked(tile)) // With child?
@@ -976,7 +1008,7 @@ private:
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
 
-			if (!child->HasChildren())
+			if (!child->HasChildren() || child->IsExhausted())
 			{
 				node->RemoveChild(tile);
 			}
@@ -993,16 +1025,15 @@ private:
 	Assert(nullptr != node);
 
 #if defined(DEBUG_STATS)
+	auto* visited = context.visited + offsetY+iX;
+
 	++depth;
 
 	Assert(depth < s_longestWord);
-	context.maxDepth = std::max(context.maxDepth, unsigned(depth));
-
-	auto* visited = context.visited;
+	context.maxDepth = std::max<unsigned>(context.maxDepth, unsigned(depth));
 #endif
 
-	const auto offset = offsetY+iX;
-	visited[offset] |= kTileVisitedBit;
+	*visited |= kTileVisitedBit;
 
 	// Recurse, as we've got a node that might be going somewhewre.
 	// USUALLY the predictor does it's job and the branches aren't expensive at all.
@@ -1043,26 +1074,26 @@ private:
 #else
 	if (offsetY < width*(height-1))
 	{
-		if (iX > 0) TraverseCall(wordsFound, visited, node, width, height, iX-1, offsetY+width);
-		TraverseCall(wordsFound, visited, node, width, height, iX, offsetY+width);
-		if (iX < width-1) TraverseCall(wordsFound, visited, node, width, height, iX+1, offsetY+width);
+		if (iX > 0) TraverseCall(wordsFound, visited +width-1, node, width, height, iX-1, offsetY+width);
+		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width);
+		if (iX < width-1) TraverseCall(wordsFound, visited + width+1, node, width, height, iX+1, offsetY+width);
 	}
 
 	if (iX > 0)
 	{
-		TraverseCall(wordsFound, visited, node, width, height, iX-1, offsetY);
+		TraverseCall(wordsFound, visited-1, node, width, height, iX-1, offsetY);
 	}
 	
 	if (iX < width-1) 
 	{
-		TraverseCall(wordsFound, visited, node, width, height, iX+1, offsetY);
+		TraverseCall(wordsFound, visited+1, node, width, height, iX+1, offsetY);
 	}
 
 	if (offsetY >= width) 
 	{
-		if (iX > 0) TraverseCall(wordsFound, visited, node, width, height, iX-1, offsetY-width);
-		TraverseCall(wordsFound, visited, node, width, height, iX, offsetY-width);
-		if (iX < width-1) TraverseCall(wordsFound, visited, node, width, height, iX+1, offsetY-width);
+		if (iX > 0) TraverseCall(wordsFound, visited - width-1, node, width, height, iX-1, offsetY-width);
+		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
+		if (iX < width-1) TraverseCall(wordsFound, visited - width+1, node, width, height, iX+1, offsetY-width);
 	}
 #endif
 
@@ -1073,14 +1104,13 @@ private:
 
 	const int wordIdx = node->GetWordIndex();
 
-	visited[offset] ^= kTileVisitedBit;
+	*visited ^= kTileVisitedBit;
 
 	// And now go:
 	if (wordIdx >= 0) 
 	{
-//		__debugbreak();
 		node->m_wordIdx = -1;
-		--node->m_count;
+		--node->m_wordRefCount;
 
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);

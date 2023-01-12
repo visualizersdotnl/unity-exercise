@@ -59,7 +59,7 @@
 
 	** 03/01/2020 **
 
-	- Removed 'hat-trie' stuff.
+	- Removed 'hat-trie' stuff (code still needs to be cleaned up, but it's hardly worth the hassle).
 */
 
 // Make VC++ 2015 shut up and walk in line.
