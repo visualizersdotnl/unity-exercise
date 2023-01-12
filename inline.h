@@ -9,7 +9,7 @@
 	#define BOGGLE_INLINE 
 	#define BOGGLE_INLINE_FORCE __forceinline 
 #else
-	// According to Albert on Linux (so probably also OSX) no explicit hints yield the best result.
-	#define BOGGLE_INLINE
+	// According to Albert on Linux (so probably also OSX) no explicit hints yield the best result (in conjunction with -O3).
+	#define BOGGLE_INLINE 
 	#define BOGGLE_INLINE_FORCE __inline
 #endif
