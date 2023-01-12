@@ -474,7 +474,7 @@ public:
 		else
 		{
 			const auto childLower32 = m_children[index];
-			return reinterpret_cast<DictionaryNode*>(m_poolUpper32|childLower32);
+			return reinterpret_cast<DictionaryNode*>(m_poolUpper32|childLower32); // This dirty trick courtesty of Alex B.
 		}
 	}
 
@@ -1084,6 +1084,10 @@ private:
 			TraverseCall(context, node, iX+1, offsetY+width, depth);
 	}
 #else
+	// 1st [ X X X ]
+	// 2nd [ X O X ]
+	// 3rd [ X X X ]
+
 	if (offsetY >= width) 
 	{
 		if (iX > 0) TraverseCall(wordsFound, visited - width-1, node, width, height, iX-1, offsetY-width);
