@@ -5,6 +5,10 @@
 // #define DUPE_CHECK
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
+	#define HIGHSCORE_MICROSECS 400000 // Stress test Ryzen 5900x
+#elif defined(__GNUC__)
+	#define HIGHSCORE_LOOP
+	#define HIGHSCORE_MICROSECS 500000 // Stress test for M1 MAX
 #endif
 
 #define NUM_QUERIES 10 // The more spooling the better chance of a fast result
