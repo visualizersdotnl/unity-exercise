@@ -58,6 +58,11 @@ int main(int argC, char **arguments)
 	Results results[NUM_QUERIES];
 	std::vector<std::chrono::microseconds> durations;
 
+#ifdef HIGHSCORE_LOOP
+	bool initializeBestSoFar = true;
+	std::chrono::microseconds bestSoFar;
+#endif
+
 	initialize_random_generator();
 
 	printf("- Loading dictionary...\n");
@@ -149,7 +154,12 @@ RetrySameBoard:
 #ifdef HIGHSCORE_LOOP
 	if (durations[0].count() >= HIGHSCORE_MICROSECS) 
 	{
-		printf("Best in microsec. %lld\n", durations[0].count());
+		if (durations[0] < bestSoFar || initializeBestSoFar)
+			bestSoFar = durations[0];
+
+		initializeBestSoFar = false;
+
+		printf("Best so far (in microsec.): %lld\n", bestSoFar.count());
 
 		for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 			FreeWords(results[iQuery]);

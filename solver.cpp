@@ -153,7 +153,7 @@
 
 // Undef. to kill prefetching
 #ifdef _WIN32
-	#define NO_PREFETCHES // Seems to have some effect on Apple M
+//	#define NO_PREFETCHES // Seems to have some effect on Apple M
 #endif
 
 #if defined(_DEBUG) || defined(ASSERTIONS)
