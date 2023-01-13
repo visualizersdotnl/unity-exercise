@@ -421,8 +421,8 @@ public:
 	~DictionaryNode() = delete;
 
 public:
-	BOGGLE_INLINE_FORCE unsigned HasChildren() const { return m_indexBits != 0; } // Check for non-zero.
-	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1; }
+	BOGGLE_INLINE_FORCE bool HasChildren() const     { return m_indexBits > 0;     }
+	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1;      }
 	BOGGLE_INLINE_FORCE bool IsExhausted() const     { return m_wordRefCount == 0; }
 
 #if 0
@@ -461,6 +461,7 @@ public:
 		while (uint32_t currentLower32 = current->m_children[kIndexU])
 		{
 			auto* temporary = reinterpret_cast<DictionaryNode*>(m_poolUpper32|currentLower32);
+			NearPrefetch((const char*)(temporary->m_children + kIndexU)); // Sometimes it's just easier to say fuck it and use a C-style cast
 
 			if (--current->m_wordRefCount == 0)
 			{
