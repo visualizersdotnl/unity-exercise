@@ -236,9 +236,6 @@ struct Word
 class ThreadInfo
 {
 public:
-	CUSTOM_NEW
-	CUSTOM_DELETE
-
 	ThreadInfo() : 
 		load(0), nodes(1) {}
 
@@ -381,6 +378,7 @@ public:
 
 			auto indexBits = node->m_indexBits = parent->m_indexBits;
 			node->m_wordRefCount = parent->m_wordRefCount;
+			node->m_wordIdx = parent->m_wordIdx;
 			node->m_poolUpper32 = m_poolUpper32; // Store for cache
 
 			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node)&0xffffffff;
@@ -409,9 +407,8 @@ public:
 				}
 			}
 	
-			node->m_wordIdx = parent->m_wordIdx;
 
-			return nodeLower32; // reinterpret_cast<uint64_t>(node)&0xffffffff;
+			return nodeLower32;
 		}
 
 //		const unsigned m_iThread;
@@ -518,11 +515,12 @@ private:
 	uint32_t m_indexBits;
 public:
 	uint32_t m_wordRefCount;
-public:
-	int32_t m_wordIdx;
 private:
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
+public:
+	int32_t m_wordIdx;
+private:
 	uint32_t m_padding; // Pads to 128 bytes, plus we can use it!
 };
 
@@ -1147,6 +1145,8 @@ private:
 	--depth;
 #endif
 
+	*visited ^= kTileVisitedBit;
+
 	if (wordIdx >= 0) 
 	{
 #if defined(DEBUG_STATS)
@@ -1158,8 +1158,6 @@ private:
 		node->m_wordIdx = -1;
 		node->PruneReverse();
 	}
-
-	*visited ^= kTileVisitedBit;
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
@@ -1232,7 +1230,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		Query query(results, sanitized, width, height);
 		query.Execute();
 
-		s_customAlloc.Free(sanitized);
+		s_customAlloc.FreeUnsafe(sanitized);
 	}
 
 	return results;
@@ -1249,7 +1247,7 @@ void FreeWords(Results results)
 #endif
 
 	if (nullptr != results.Words)
-		s_customAlloc.Free((void*)results.Words);
+		s_customAlloc.FreeUnsafe((void*)results.Words);
 	
 	results.Words = nullptr;
 
