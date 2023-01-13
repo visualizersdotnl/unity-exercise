@@ -104,7 +104,7 @@
 
 	** 13/01/2023 **
 	
-	- Allocators: own thread pool?
+	- Allocators: changed allocation strategy where each thread has it's own heap allocated from the global one.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -139,8 +139,10 @@
 
 #include "random.h"
 #include "bit-tricks.h"
-#include "simple-tlsf.h"
 #include "inline.h"
+
+#define GLOBAL_MEMORY_POOL_SIZE (1024*1024)*2000 // 2GB
+#include "simple-tlsf.h"
 
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
@@ -190,6 +192,9 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #endif
 
 #endif
+
+// TLS
+static thread_local unsigned s_iThread;
 
 constexpr size_t kCacheLine = sizeof(size_t)*8;
 
@@ -349,18 +354,18 @@ public:
 	class ThreadCopy
 	{
 	public:
-//		CUSTOM_NEW
-//		CUSTOM_DELETE
-
+		CUSTOM_NEW_THREAD(s_iThread)
+		CUSTOM_DELETE_THREAD(s_iThread)
+	
 		ThreadCopy(unsigned iThread) : 
-//			m_iThread(iThread), 
+			m_iThread(iThread), 
 			m_iAlloc(0)
 		{
 			// Allocate pool for all necessary nodes: why here, you glorious titwillow?
 			// Well, it sits nice and snug on it's on (probably) page boundary aligning nicely with this thread's cache as opposed to allocating
 			// one huge block at once.
 			const auto size = s_threadInfo[iThread].nodes*sizeof(DictionaryNode);
-			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
+			m_pool = static_cast<DictionaryNode*>(s_threadCustomAlloc[iThread]->AllocateUnsafe(size, kCacheLine));
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread], 0);
@@ -369,7 +374,7 @@ public:
 
 		~ThreadCopy()
 		{
-			s_customAlloc.Free(m_pool);
+//			s_threadCustomAlloc[m_iThread]->FreeUnsafe(m_pool);
 		}
 
 		BOGGLE_INLINE_FORCE DictionaryNode* Get() const
@@ -419,7 +424,8 @@ public:
 			return nodeLower32;
 		}
 
-//		const unsigned m_iThread;
+	private:
+		const unsigned m_iThread;
 
 		DictionaryNode* m_pool;
 		size_t m_iAlloc;
@@ -484,7 +490,7 @@ public:
 	BOGGLE_INLINE_FORCE void RemoveChild(unsigned index)
 	{
 		Assert(index < kAlphaRange);
-		Assert(HasChild(index));
+//		Assert(HasChild(index));
 
 		m_indexBits ^= 1 << index;
 	}
@@ -804,33 +810,37 @@ public:
 	class ThreadContext
 	{
 	public:
-		CUSTOM_NEW
-		CUSTOM_DELETE
+		CUSTOM_NEW_THREAD(s_iThread)
+		CUSTOM_DELETE_THREAD(s_iThread)
 
 		ThreadContext(unsigned iThread, const Query* instance) :
 		width(instance->m_width)
 ,		height(instance->m_height)
 ,		sanitized(instance->m_sanitized)
 ,		visited(nullptr)
-,		iThread(iThread)
+,		m_iThread(iThread)
 		{
+			Assert(iThread < kNumThreads);
 			Assert(nullptr != instance);
+
+			s_iThread = m_iThread;
 		}
 
-		~ThreadContext()
+		~ThreadContext() 
 		{
-			s_customAlloc.Free(visited);
+			// We don't have to free this memory
+//			s_threadCustomAlloc[m_iThread]->FreeUnsafe(visited);
 		}
 
 		void OnExecuteThread()
 		{
 			// Handle allocation and initialization of grid memory (local to our thread, again).
 			const auto gridSize = width*height;
-			visited = static_cast<char*>(s_customAlloc.Allocate(gridSize*sizeof(char), kCacheLine));
-			memcpy(visited, sanitized, gridSize*sizeof(char));
+			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread]->AllocateUnsafe(gridSize, kCacheLine));
+			memcpy(visited, sanitized, gridSize);
 
 			// Reserve
-			wordsFound.reserve(s_threadInfo[iThread].load); 
+			wordsFound.reserve(s_threadInfo[m_iThread].load); 
 		}
 
 		// Input
@@ -849,7 +859,7 @@ public:
 		unsigned maxDepth;
 #endif
 
-		const unsigned iThread;
+		const unsigned m_iThread;
 	}; 
 
 public:
@@ -867,7 +877,7 @@ public:
 //			m_results.Count  = 0;
 //			m_results.Score  = 0;
 
-			m_results.Words = static_cast<char**>(s_customAlloc.AllocateUnsafe(s_wordCount*sizeof(char*), kCacheLine));
+			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateUnsafe(s_wordCount*sizeof(char*), kCacheLine));
 
 			// Kick off threads.
 			std::vector<std::thread> threads;
@@ -879,7 +889,7 @@ public:
 			
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
-				contexts.emplace_back(ThreadContext(iThread, this));
+				contexts.emplace_back(std::move(ThreadContext(iThread, this)));
 				threads.emplace_back(std::thread(ExecuteThread, &contexts[iThread]));
 
 #ifdef _WIN32
@@ -893,7 +903,7 @@ public:
 
 			for (auto& thread : threads)
 				thread.join();
-
+					
 #if !defined(NED_FLANDERS)
 			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data; we'll just be copying pointers (not fool proof).
 
@@ -908,7 +918,7 @@ public:
 					++m_results.Count;
 				}
 
-				debug_print("Thread %u joined with %zu words (score %u).\n", context.iThread, wordsFound.size(), m_results.Score);
+				debug_print("Thread %u joined with %zu words (score %u).\n", context.m_iThread, wordsFound.size(), m_results.Score);
 			}
 #else
 			size_t totReqStrBufLen = 0;
@@ -962,7 +972,7 @@ private:
 	context->OnExecuteThread();
 
 	// Create copy of source dictionary tree
-	auto threadCopy = DictionaryNode::ThreadCopy(context->iThread);
+	auto threadCopy = DictionaryNode::ThreadCopy(context->m_iThread);
 	auto* root = threadCopy.Get();
 
 	// Grab stuff from context
@@ -995,7 +1005,7 @@ private:
 
 			if (auto* child = root->GetChildChecked(*curVisited))
 			{
-				size_t before = wordsFound.size();
+//				size_t before = wordsFound.size();
 
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
@@ -1195,9 +1205,10 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
 		const unsigned gridSize = width*height;
-		char* sanitized = static_cast<char*>(s_customAlloc.AllocateUnsafe(gridSize*sizeof(char), kCacheLine));
 
 #ifdef NED_FLANDERS
+		char* sanitized = static_cast<char*>(s_globalCustomAlloc.Allocate(gridSize*sizeof(char), kCacheLine));
+
 		// Sanitize that checks for illegal input and uppercases.
 		size_t index = 0;
 		for (unsigned iY = 0; iY < height; ++iY)
@@ -1221,6 +1232,8 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			}
 		}
 #else
+		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateUnsafe(gridSize, kCacheLine));
+
 		// Sanitize that just reorders and expects uppercase.
 		for (unsigned index = 0; index < gridSize; ++index)
 		{
@@ -1230,10 +1243,36 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		}
 #endif
 
+		// Allocate allocators (yup)
+		for (auto iThread = 0; iThread < kNumThreads; ++iThread)
+		{
+			const size_t threadHeapSize = 
+				gridSize + 
+				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + 
+				(s_threadInfo[iThread].load*sizeof(int)) 
+				+ (1024*1024/4); // <- A bit dodgy, I'll admit :)
+
+#ifdef NED_FLANDERS			
+			s_threadCustomAlloc.push_back(new CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
+#else
+			s_threadCustomAlloc.push_back(new CustomAlloc(static_cast<char*>(s_globalCustomAlloc.AllocateUnsafe(threadHeapSize, kPageSize)), threadHeapSize));
+#endif
+		}
+
 		Query query(results, sanitized, width, height);
 		query.Execute();
 
-		s_customAlloc.Free(sanitized);
+		// FIXME: beautify
+		for (auto iThread = 0; iThread < kNumThreads; ++iThread)
+			s_globalCustomAlloc.Free(s_threadCustomAlloc[iThread]->GetPool());
+
+		s_threadCustomAlloc.clear();
+
+#ifdef NED_FLANDERS
+		s_globalCustomAlloc.Free(sanitized);
+#else
+		s_globalCustomAlloc.FreeUnsafe(sanitized);
+#endif
 	}
 
 	return results;
@@ -1247,11 +1286,11 @@ void FreeWords(Results results)
 		// Allocated a single buffer.
 		delete[] results.Words[0];
 	}
+#else
+	if (nullptr != results.Words)
+		s_globalCustomAlloc.FreeUnsafe((void*) results.Words);
 #endif
 
-	if (nullptr != results.Words)
-		s_customAlloc.Free((void*)results.Words);
-	
 	results.Words = nullptr;
 
 	results.Count = results.Score = 0;

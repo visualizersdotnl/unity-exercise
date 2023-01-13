@@ -9,7 +9,7 @@
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECS 380000 // Stress test Ryzen 5900x
-	#define NUM_QUERIES 5
+	#define NUM_QUERIES 10
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
@@ -68,7 +68,7 @@ int main(int argC, char **arguments)
 	initialize_random_generator();
 
 	printf("- Loading dictionary...\n");
-	//	const char *dictPath = "dictionary-short.txt";
+	// const char *dictPath = "dictionary-short.txt";
 	const char *dictPath = "dictionary.txt";
 	//	const char *dictPath = "dictionary-bigger.txt";
 	LoadDictionary(dictPath);

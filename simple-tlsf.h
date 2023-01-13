@@ -18,23 +18,32 @@ const size_t kPageSize = 4096; // Usually right ;)
 class CustomAlloc
 {
 public:
-	CustomAlloc() :
-		CustomAlloc(1024*1024*1000 /* 1GB */) {}
-
-	CustomAlloc(size_t poolSize)
+	CustomAlloc(size_t poolSize) :
+		m_isOwner(true)
+,		m_pool(mallocAligned(poolSize, kPageSize))
 	{
-		m_pool = mallocAligned(poolSize, kPageSize);
 		m_instance = tlsf_create_with_pool(m_pool, poolSize);
+	}
+
+	CustomAlloc(char* pool, size_t poolSize) :
+		m_isOwner(false)
+,		m_pool(pool)
+	{
+		m_instance = tlsf_create_with_pool(pool, poolSize);
 	}
 
 	~CustomAlloc()
 	{
 		tlsf_destroy(m_instance);
-		freeAligned(m_pool);
+
+		if (true == m_isOwner)
+			freeAligned(m_pool);
 	}
 
 	BOGGLE_INLINE void* AllocateUnsafe(size_t size, size_t align)
 	{
+//		m_peakUse += size;
+
 		void* address = tlsf_memalign(m_instance, align, size);
 		return address;
 	}
@@ -42,9 +51,7 @@ public:
 	BOGGLE_INLINE void* Allocate(size_t size, size_t align)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-//		m_lock.lock();
 		void* address = AllocateUnsafe(size, align);
-//		m_lock.unlock();
 		return address;
 	}
 
@@ -56,22 +63,35 @@ public:
 	BOGGLE_INLINE void Free(void* address)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-//		m_lock.lock();
 		tlsf_free(m_instance, address);
-//		m_lock.unlock();
 	}
 
-//	inline tlsf_t Get() { return m_instance; }
+	void* GetPool() const
+	{
+		return m_pool;
+	}
+
+//	BOGGLE_INLINE size_t GetPeakUse() const
+//	{
+//		return m_peakUse;
+//	}
 
 private: 
+	bool m_isOwner;
 	void* m_pool;
 	tlsf_t m_instance;
  
 	std::mutex m_mutex;
-	// SpinLock m_lock;
+
+//	size_t m_peakUse = 0;
 };
 
-// For global use, otherwise use TLSF directly
-static CustomAlloc s_customAlloc;
-#define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size, 32 /* 256-bit register */); }
-#define CUSTOM_DELETE void operator delete(void* address) { return s_customAlloc.Free(address); }
+// Global heap/pool
+static CustomAlloc s_globalCustomAlloc(GLOBAL_MEMORY_POOL_SIZE);
+#define CUSTOM_NEW void* operator new(size_t size) { return s_globalCustomAlloc.AllocateUnsafe(size, 8); }
+#define CUSTOM_DELETE void operator delete(void* address) { return s_globalCustomAlloc.FreeUnsafe(address); }
+
+// Per thread heap/pool
+static std::vector<CustomAlloc*> s_threadCustomAlloc;
+#define CUSTOM_NEW_THREAD(ThreadIndex) void* operator new(size_t size) { return s_threadCustomAlloc[ThreadIndex]->AllocateUnsafe(size, 8); }
+#define CUSTOM_DELETE_THREAD(ThreadIndex) void operator delete(void* address) { return s_threadCustomAlloc[ThreadIndex]->FreeUnsafe(address); }
