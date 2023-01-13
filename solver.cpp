@@ -358,7 +358,7 @@ public:
 		CUSTOM_DELETE_THREAD(s_iThread)
 	
 		ThreadCopy(unsigned iThread) : 
-			m_iThread(iThread), 
+//			m_iThread(iThread), 
 			m_iAlloc(0)
 		{
 			// Allocate pool for all necessary nodes: why here, you glorious titwillow?
@@ -425,7 +425,7 @@ public:
 		}
 
 	private:
-		const unsigned m_iThread;
+//		const unsigned m_iThread;
 
 		DictionaryNode* m_pool;
 		size_t m_iAlloc;
@@ -771,7 +771,7 @@ void FreeDictionary()
 		s_threadDicts.clear();
 
 		// Reset thread information.		
-		s_threadInfo.resize(kNumThreads, std::move(ThreadInfo())); // Useless std::move()?
+		s_threadInfo.resize(kNumThreads, std::move(ThreadInfo()));
 
 		// Reset counters.
 		s_longestWord = 0;
@@ -889,7 +889,7 @@ public:
 			
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
-				contexts.emplace_back(std::move(ThreadContext(iThread, this)));
+				contexts.emplace_back(ThreadContext(iThread, this));
 				threads.emplace_back(std::thread(ExecuteThread, &contexts[iThread]));
 
 #ifdef _WIN32
