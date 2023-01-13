@@ -48,6 +48,11 @@ public:
 		return address;
 	}
 
+	BOGGLE_INLINE_FORCE void FreeUnsafe(void* address)
+	{
+		tlsf_free(m_instance, address);
+	}
+
 	BOGGLE_INLINE void Free(void* address)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);

@@ -191,7 +191,7 @@ constexpr size_t kCacheLine = sizeof(size_t)*8;
 
 #ifndef NO_PREFETCHES
 
-// Far prefetch (most temporal)
+// Far prefetch (Win32: only L3)
 BOGGLE_INLINE_FORCE static void FarPrefetch(const char* address)
 {
 #ifdef __GNUC__
@@ -201,7 +201,7 @@ BOGGLE_INLINE_FORCE static void FarPrefetch(const char* address)
 #endif
 }
 
-// Near prefetch (near temporal)
+// Near prefetch (Win32: Only L2+)
 BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
 {
 #ifdef __GNUC__
@@ -236,6 +236,9 @@ struct Word
 class ThreadInfo
 {
 public:
+	CUSTOM_NEW
+	CUSTOM_DELETE
+
 	ThreadInfo() : 
 		load(0), nodes(1) {}
 
@@ -322,7 +325,7 @@ public:
 private:
 	int32_t m_wordIdx = -1; 
 	uint32_t m_indexBits = 0;
-	int32_t m_wordRefCount = 1;
+	uint32_t m_wordRefCount = 1;
 	LoadDictionaryNode* m_children[kAlphaRange] = { nullptr };
 };
 
@@ -427,6 +430,7 @@ public:
 	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1; }
 	BOGGLE_INLINE_FORCE bool IsExhausted() const     { return m_wordRefCount == 0; }
 
+#if 0
 	// FIXME: experimental
 	BOGGLE_INLINE void Prune(const std::string& word)
 	{
@@ -454,6 +458,7 @@ public:
 			}
 		}
 	}
+#endif
 
 	BOGGLE_INLINE_FORCE void PruneReverse()
 	{
@@ -500,10 +505,7 @@ public:
 		if (!HasChild(index))
 			return nullptr;
 		else
-		{
-			const auto childLower32 = m_children[index];
-			return reinterpret_cast<DictionaryNode*>(m_poolUpper32|childLower32); // This dirty trick courtesty of Alex B.
-		}
+			return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]); // This dirty trick courtesty of Alex B.
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
@@ -515,13 +517,12 @@ public:
 private:
 	uint32_t m_indexBits;
 public:
-	int32_t m_wordRefCount;
-private:
-	uint64_t m_poolUpper32;
-	uint32_t m_children[kAlphaRange];
+	uint32_t m_wordRefCount;
 public:
 	int32_t m_wordIdx;
 private:
+	uint64_t m_poolUpper32;
+	uint32_t m_children[kAlphaRange];
 	uint32_t m_padding; // Pads to 128 bytes, plus we can use it!
 };
 
@@ -1047,7 +1048,7 @@ private:
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
 			
-			if (!child->HasChildren()) // || child->IsExhausted())
+			if (!child->HasChildren() || child->IsExhausted())
 			{
 				node->RemoveChild(tile);
 			}
@@ -1142,8 +1143,6 @@ private:
 	}
 #endif
 
-	*visited ^= kTileVisitedBit;
-
 #if defined(DEBUG_STATS)
 	--depth;
 #endif
@@ -1159,6 +1158,8 @@ private:
 		node->m_wordIdx = -1;
 		node->PruneReverse();
 	}
+
+	*visited ^= kTileVisitedBit;
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)

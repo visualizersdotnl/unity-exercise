@@ -3,12 +3,13 @@
 // #define PRINT_WORDS
 // #define PRINT_GRID
 // #define DUPE_CHECK
+// #define PRINT_ITER_RESULTS
 
 // When board randomization enabled, it pays off (usually) to do more queries to get better performance.
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECS 380000 // Stress test Ryzen 5900x
-	#define NUM_QUERIES 10
+	#define NUM_QUERIES 4
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
@@ -129,9 +130,13 @@ GenerateBoard:
 
 #endif
 
-RetrySameBoard:
+#ifdef HIGHSCORE_LOOP
+	printf("- Finding (looping for high score!) in %ux%u... (%u iterations per try)\n", xSize, ySize, NUM_QUERIES);
+#else
 	printf("- Finding in %ux%u... (%u iterations)\n", xSize, ySize, NUM_QUERIES);
+#endif
 
+RetrySameBoard:
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
 		auto start = std::chrono::high_resolution_clock::now();
@@ -139,28 +144,28 @@ RetrySameBoard:
 		auto end = std::chrono::high_resolution_clock::now();
 		auto timing = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 		durations.push_back(timing);
+
+#ifdef PRINT_ITER_RESULTS
+		const auto count = results[iQuery].Count;
+		const auto score = results[iQuery].Score;
+		printf("Results (run %u): ", iQuery+1);
+		printf("count: %u, score: %u, duration %.4lf\n", count, score, durations[iQuery].count()*0.000001);
+#endif
 	}
 
 	// Sort so we can conveniently pick the fastest run
 	std::sort(durations.begin(), durations.end());
 
-	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
-	{
-		const auto count  = results[iQuery].Count;
-		const auto score = results[iQuery].Score;
-		printf("Results (run %u): ", iQuery+1);
-		printf("count: %u, score: %u, duration %.4lf\n", count, score, durations[iQuery].count()*0.000001);
-	}
-
 #ifdef HIGHSCORE_LOOP
 	if (durations[0].count() >= HIGHSCORE_MICROSECS) 
 	{
 		if (durations[0] < bestSoFar || initializeBestSoFar)
+		{
 			bestSoFar = durations[0];
+			printf("Best so far (in microsec.): %lld\n", bestSoFar.count());
+		}
 
 		initializeBestSoFar = false;
-
-		printf("Best so far (in microsec.): %lld\n", bestSoFar.count());
 
 		for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 			FreeWords(results[iQuery]);
