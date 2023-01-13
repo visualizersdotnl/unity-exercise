@@ -466,7 +466,7 @@ public:
 			if (--current->m_wordRefCount == 0)
 			{
 				current->m_indexBits = 0;
-				break;
+				// FIXME: break or not?
 			}
 
 			current = temporary;

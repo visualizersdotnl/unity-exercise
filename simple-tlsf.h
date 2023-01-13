@@ -73,5 +73,5 @@ private:
 
 // For global use, otherwise use TLSF directly
 static CustomAlloc s_customAlloc;
-#define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size, sizeof(16)); }
+#define CUSTOM_NEW void* operator new(size_t size) { return s_customAlloc.Allocate(size, 32 /* 256-bit register */); }
 #define CUSTOM_DELETE void operator delete(void* address) { return s_customAlloc.Free(address); }
