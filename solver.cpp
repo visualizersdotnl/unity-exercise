@@ -378,7 +378,6 @@ public:
 
 			auto indexBits = node->m_indexBits = parent->m_indexBits;
 			node->m_wordRefCount = parent->m_wordRefCount;
-			node->m_wordIdx = parent->m_wordIdx;
 			node->m_poolUpper32 = m_poolUpper32; // Store for cache
 
 			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node)&0xffffffff;
@@ -407,6 +406,7 @@ public:
 				}
 			}
 	
+			node->m_wordIdx = parent->m_wordIdx;
 
 			return nodeLower32;
 		}
@@ -502,7 +502,9 @@ public:
 		if (!HasChild(index))
 			return nullptr;
 		else
+		{
 			return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]); // This dirty trick courtesty of Alex B.
+		}
 	}
 
 	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
@@ -514,7 +516,7 @@ public:
 private:
 	uint32_t m_indexBits;
 public:
-	uint32_t m_wordRefCount;
+	int32_t m_wordRefCount;
 private:
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
@@ -1046,7 +1048,7 @@ private:
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
 			
-			if (!child->HasChildren() || child->IsExhausted())
+			if (!child->HasChildren()) // || child->IsExhausted())
 			{
 				node->RemoveChild(tile);
 			}
@@ -1230,7 +1232,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		Query query(results, sanitized, width, height);
 		query.Execute();
 
-		s_customAlloc.FreeUnsafe(sanitized);
+		s_customAlloc.Free(sanitized);
 	}
 
 	return results;
@@ -1247,7 +1249,7 @@ void FreeWords(Results results)
 #endif
 
 	if (nullptr != results.Words)
-		s_customAlloc.FreeUnsafe((void*)results.Words);
+		s_customAlloc.Free((void*)results.Words);
 	
 	results.Words = nullptr;
 
