@@ -101,6 +101,10 @@
 	- I've move adding the offset to the 'visited' address to the caller.
 	- It, logically (right?), seems important to have as little on the stack as possible during traversal.
 	- Trying some things using prefetches; it looks as if there's not much to gain. On Apple M though...
+
+	** 13/01/2023 **
+	
+	- Allocators: own thread pool?
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -220,8 +224,9 @@ BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address) {}
 
 
 // Dictionary word (score is best precalculated)
-struct Word
+class Word
 {
+public:
 	CUSTOM_NEW
 	CUSTOM_DELETE
 
@@ -236,6 +241,9 @@ struct Word
 class ThreadInfo
 {
 public:
+	CUSTOM_NEW
+	CUSTOM_DELETE
+
 	ThreadInfo() : 
 		load(0), nodes(1) {}
 
@@ -276,7 +284,7 @@ class LoadDictionaryNode
 
 public:
 	CUSTOM_NEW
-	CUSTOM_DELETE	
+	CUSTOM_DELETE
 
 	LoadDictionaryNode() {}
 
@@ -341,8 +349,8 @@ public:
 	class ThreadCopy
 	{
 	public:
-		CUSTOM_NEW
-		CUSTOM_DELETE
+//		CUSTOM_NEW
+//		CUSTOM_DELETE
 
 		ThreadCopy(unsigned iThread) : 
 //			m_iThread(iThread), 
@@ -355,7 +363,7 @@ public:
 			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
 
 			// Recursively copy them.
-			Copy(s_threadDicts[iThread]);
+			Copy(s_threadDicts[iThread], 0);
 			m_pool->m_children[kIndexU] = 0;
 		}
 
@@ -370,7 +378,7 @@ public:
 		}
 
 	private:
-		uint32_t Copy(LoadDictionaryNode* parent)
+		uint32_t Copy(LoadDictionaryNode* parent, int depth)
 		{
 //			Assert(m_iAlloc < s_threadInfo[m_iThread].nodes);
 			DictionaryNode* node = m_pool + m_iAlloc;
@@ -378,7 +386,7 @@ public:
 
 			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node)&0xffffffff;
 
-			auto indexBits = node->m_indexBits = parent->m_indexBits;
+			unsigned indexBits = node->m_indexBits = parent->m_indexBits;
 			node->m_wordRefCount = parent->m_wordRefCount;
 			node->m_wordIdx = parent->m_wordIdx;
 			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Yup, this will be downright dirty!
@@ -398,15 +406,15 @@ public:
 				{
 					if (indexBits & 1)
 					{
-						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexU] = nodeLower32;
+						node->m_children[index] = Copy(parent->GetChild(index), depth+1);
+						node->GetChild(index)->m_children[kIndexU] = nodeLower32; // (depth < 2) ? 0 : nodeLower32;
 					}
 
 					indexBits >>= 1;
 				}
 			}
 	
-			node->m_children[kIndexU] = 0;
+//			node->m_children[kIndexU] = 0;
 
 			return nodeLower32;
 		}
