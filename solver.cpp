@@ -353,7 +353,6 @@ public:
 			// one huge block at once.
 			const auto size = s_threadInfo[iThread].nodes*sizeof(DictionaryNode);
 			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
-			m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Yup, this will be downright dirty!
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
@@ -377,12 +376,12 @@ public:
 			DictionaryNode* node = m_pool + m_iAlloc;
 			++m_iAlloc;
 
+			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node)&0xffffffff;
+
 			auto indexBits = node->m_indexBits = parent->m_indexBits;
 			node->m_wordRefCount = parent->m_wordRefCount;
-			node->m_poolUpper32 = m_poolUpper32; // Store for cache
-
-			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node)&0xffffffff;
-			node->m_children[kIndexU] = 0;
+			node->m_wordIdx = parent->m_wordIdx;
+			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Yup, this will be downright dirty!
 
 #ifdef _WIN32
 			unsigned long index;
@@ -407,7 +406,7 @@ public:
 				}
 			}
 	
-			node->m_wordIdx = parent->m_wordIdx;
+			node->m_children[kIndexU] = 0;
 
 			return nodeLower32;
 		}
@@ -416,15 +415,13 @@ public:
 
 		DictionaryNode* m_pool;
 		size_t m_iAlloc;
-
-		uint64_t m_poolUpper32;
 	};
 
 	// Destructor is not called when using ThreadCopy!
 	~DictionaryNode() = delete;
 
 public:
-	BOGGLE_INLINE_FORCE unsigned HasChildren() const { return m_indexBits; } // Check for non-zero.
+	BOGGLE_INLINE_FORCE unsigned HasChildren() const { return m_indexBits != 0; } // Check for non-zero.
 	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1; }
 	BOGGLE_INLINE_FORCE bool IsExhausted() const     { return m_wordRefCount == 0; }
 
