@@ -461,7 +461,7 @@ public:
 		while (uint32_t currentLower32 = current->m_children[kIndexU])
 		{
 			auto* temporary = reinterpret_cast<DictionaryNode*>(m_poolUpper32|currentLower32);
-			NearPrefetch((const char*)(temporary->m_children + kIndexU)); // Sometimes it's just easier to say fuck it and use a C-style cast
+			// NearPrefetch((const char*)(temporary->m_children + kIndexU)); // Sometimes it's just easier to say fuck it and use a C-style cast
 
 			if (--current->m_wordRefCount == 0)
 			{
