@@ -348,11 +348,12 @@ public:
 //			m_iThread(iThread), 
 			m_iAlloc(0)
 		{
-			// Allocate pool for all necessary nodes.
-			const auto numNodes = s_threadInfo[iThread].nodes;
-			const auto size = numNodes*sizeof(DictionaryNode);
+			// Allocate pool for all necessary nodes: why here, you glorious titwillow?
+			// Well, it sits nice and snug on it's on (probably) page boundary aligning nicely with this thread's cache as opposed to allocating
+			// one huge block at once.
+			const auto size = s_threadInfo[iThread].nodes*sizeof(DictionaryNode);
 			m_pool = static_cast<DictionaryNode*>(s_customAlloc.Allocate(size, kCacheLine));
-			m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Yup, this will be downright dirty
+			m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Yup, this will be downright dirty!
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
@@ -460,7 +461,7 @@ public:
 	BOGGLE_INLINE_FORCE void PruneReverse()
 	{
 		DictionaryNode* current = this;
-		while (const uint32_t currentLower32 = current->m_children[kIndexU])
+		while (uint32_t currentLower32 = current->m_children[kIndexU])
 		{
 			auto* temporary = reinterpret_cast<DictionaryNode*>(m_poolUpper32|currentLower32);
 
@@ -817,7 +818,7 @@ public:
 
 		void OnExecuteThread()
 		{
-			// Handle allocation and initialization of memory.
+			// Handle allocation and initialization of grid memory (local to our thread, again).
 			const auto gridSize = width*height;
 			visited = static_cast<char*>(s_customAlloc.Allocate(gridSize*sizeof(char), kCacheLine));
 			memcpy(visited, sanitized, gridSize*sizeof(char));
@@ -940,7 +941,7 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	static void BOGGLE_INLINE_FORCE TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
 	static void BOGGLE_INLINE TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
 #endif
 
@@ -1029,7 +1030,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE void Query::TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+/* static */ BOGGLE_INLINE_FORCE void Query::TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 
@@ -1183,12 +1184,6 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	results.Count = 0;
 	results.Score = 0;
 	results.UserData = nullptr; // Didn't need it in this implementation.
-
-//	if (width > 65535)
-//	{
-//		printf("Board width can't be greater than 65535 (16-bit).\n");
-//		return results;
-//	}
 
 	// Board parameters check out?
 	if (nullptr != board && !(0 == width || 0 == height))
