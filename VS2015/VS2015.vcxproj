@@ -196,6 +196,7 @@
     <ClInclude Include="..\random.h" />
     <ClInclude Include="..\simple-tlsf.h" />
     <ClInclude Include="..\spinlock.h" />
+    <ClInclude Include="..\timing.h" />
     <ClInclude Include="..\tlsf\tlsf.h" />
   </ItemGroup>
   <ItemGroup>

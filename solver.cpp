@@ -346,8 +346,8 @@ class DictionaryNode
 
 public:
 	// Nothing is allocated here, so no use for:
-	CUSTOM_NEW
-	CUSTOM_DELETE	
+	CUSTOM_NEW_THREAD(s_iThread)
+	CUSTOM_DELETE_THREAD(s_iThread)
 
 	DictionaryNode() {}
 
@@ -1002,7 +1002,7 @@ private:
 
 			// Try to prefetch next cache line in board
 			NearPrefetch(curVisited + kCacheLine);
-
+			
 			if (auto* child = root->GetChildChecked(*curVisited))
 			{
 //				size_t before = wordsFound.size();
@@ -1244,14 +1244,15 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 #endif
 
 		// Allocate allocators (yup)
+		s_threadCustomAlloc.reserve(kNumThreads);
 		for (auto iThread = 0; iThread < kNumThreads; ++iThread)
 		{
 			const size_t threadHeapSize = 
 				gridSize + 
 				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + 
 				(s_threadInfo[iThread].load*sizeof(int)) 
-				+ (1024*1024/4); // <- A bit dodgy, I'll admit :)
-
+				+ 1024*1024*10; // 4MB leeway, enough? (FIXME)
+	
 #ifdef NED_FLANDERS			
 			s_threadCustomAlloc.push_back(new CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
 #else
@@ -1262,9 +1263,18 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		Query query(results, sanitized, width, height);
 		query.Execute();
 
-		// FIXME: beautify
-		for (auto iThread = 0; iThread < kNumThreads; ++iThread)
-			s_globalCustomAlloc.Free(s_threadCustomAlloc[iThread]->GetPool());
+		for (auto* allocator : s_threadCustomAlloc)
+		{
+			void* pool = allocator->GetPool();
+
+#ifdef NED_FLANDERS
+			s_globalCustomAlloc.Free(pool);
+#else
+			s_globalCustomAlloc.FreeUnsafe(pool);
+#endif
+
+			delete allocator;
+		}
 
 		s_threadCustomAlloc.clear();
 

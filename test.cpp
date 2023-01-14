@@ -1,4 +1,4 @@
-
+﻿
 // #define USE_UNITY_REF_GRID
 // #define PRINT_WORDS
 // #define PRINT_GRID
@@ -8,13 +8,13 @@
 // When board randomization enabled, it pays off (usually) to do more queries to get better performance.
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
-	#define HIGHSCORE_MICROSECS 380000 // Stress test Ryzen 5900x
-	#define NUM_QUERIES 10
+	#define HIGHSCORE_MICROSECONDS 390000  // Stress test Ryzen 5900x
+	#define NUM_QUERIES 4
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
-	#define HIGHSCORE_MICROSECS 640000 // Stress test for M1 MAX
-	#define NUM_QUERIES 10
+	#define HIGHSCORE_MICROSECONDS 620000  // Stress test for M1 MAX
+	#define NUM_QUERIES 4
 	// #define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #endif
 
@@ -40,6 +40,8 @@
 	#include <windows.h>
 #endif
 
+// #include "timing.h"
+
 int main(int argC, char **arguments)
 {
 	printf("Boggle assignment solver by Niels J. de Wit, the undisputed heavyweight boggle champion!\n");
@@ -57,15 +59,11 @@ int main(int argC, char **arguments)
 		_CrtSetBreakAlloc(WIN32_CRT_BREAK_ALLOC);
 #endif
 
+	initialize_random_generator();
+
 	Results results[NUM_QUERIES];
 	std::vector<std::chrono::microseconds> durations;
-
-#ifdef HIGHSCORE_LOOP
-	bool initializeBestSoFar = true;
-	std::chrono::microseconds bestSoFar;
-#endif
-
-	initialize_random_generator();
+	durations.reserve(NUM_QUERIES);
 
 	printf("- Loading dictionary...\n");
 	// const char *dictPath = "dictionary-short.txt";
@@ -139,17 +137,16 @@ GenerateBoard:
 RetrySameBoard:
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
-		auto start = std::chrono::high_resolution_clock::now();
+		const auto start = std::chrono::high_resolution_clock::now();
 		results[iQuery] = FindWords(board.get(), xSize, ySize);
-		auto end = std::chrono::high_resolution_clock::now();
-		auto timing = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-		durations.push_back(timing);
-
+		const auto end = std::chrono::high_resolution_clock::now();
+		durations.emplace_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start));
+	
 #ifdef PRINT_ITER_RESULTS
 		const auto count = results[iQuery].Count;
 		const auto score = results[iQuery].Score;
 		printf("Results (run %u): ", iQuery+1);
-		printf("count: %u, score: %u, duration %.4lf\n", count, score, durations[iQuery].count()*0.000001);
+		printf("count: %u, score: %u, duration %.lld microsec.\n", count, score, durations[iQuery].count());
 #endif
 	}
 
@@ -157,18 +154,12 @@ RetrySameBoard:
 	std::sort(durations.begin(), durations.end());
 
 #ifdef HIGHSCORE_LOOP
-	if (durations[0].count() >= HIGHSCORE_MICROSECS) 
+	printf("Best out of %d: %.lld microsec.\n", NUM_QUERIES, durations[0].count());
+
+	if (durations[0].count() >= HIGHSCORE_MICROSECONDS) 
 	{
-		if (durations[0] < bestSoFar || initializeBestSoFar)
-		{
-			bestSoFar = durations[0];
-			printf("Best so far (in microsec.): %lld\n", bestSoFar.count());
-		}
-
-		initializeBestSoFar = false;
-
-		for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
-			FreeWords(results[iQuery]);
+		for (auto& result : results)
+			FreeWords(result);
 
 		durations.clear();
 
@@ -204,8 +195,8 @@ RetrySameBoard:
 	
 	FreeDictionary();
 
-	const double time = double(durations[0].count());
-	printf("\nSolver ran %u times, fastest: %.lf milliseconds. or approx. %.4lf second(s)\n", (unsigned) NUM_QUERIES, time, time*0.000001);
+	const auto time = durations[0].count();
+	printf("\nSolver ran %u times, fastest: %.lld microsec. / approx. %.4lf second(s)\n", (unsigned) NUM_QUERIES, time, double(time)*0.000001);
 
 	return 0;
 }

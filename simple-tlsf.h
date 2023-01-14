@@ -35,7 +35,7 @@ public:
 	~CustomAlloc()
 	{
 		tlsf_destroy(m_instance);
-
+		
 		if (true == m_isOwner)
 			freeAligned(m_pool);
 	}
@@ -43,21 +43,18 @@ public:
 	BOGGLE_INLINE void* AllocateUnsafe(size_t size, size_t align)
 	{
 //		m_peakUse += size;
-
-		void* address = tlsf_memalign(m_instance, align, size);
-		return address;
-	}
-
-	BOGGLE_INLINE void* Allocate(size_t size, size_t align)
-	{
-		std::lock_guard<std::mutex> lock(m_mutex);
-		void* address = AllocateUnsafe(size, align);
-		return address;
+		return tlsf_memalign(m_instance, align, size);
 	}
 
 	BOGGLE_INLINE_FORCE void FreeUnsafe(void* address)
 	{
 		tlsf_free(m_instance, address);
+	}
+
+	BOGGLE_INLINE void* Allocate(size_t size, size_t align)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return AllocateUnsafe(size, align);
 	}
 
 	BOGGLE_INLINE void Free(void* address)
@@ -66,7 +63,7 @@ public:
 		tlsf_free(m_instance, address);
 	}
 
-	void* GetPool() const
+	BOGGLE_INLINE_FORCE void* GetPool() const
 	{
 		return m_pool;
 	}
@@ -77,21 +74,19 @@ public:
 //	}
 
 private: 
+	tlsf_t m_instance;
 	bool m_isOwner;
 	void* m_pool;
-	tlsf_t m_instance;
- 
 	std::mutex m_mutex;
-
-//	size_t m_peakUse = 0;
+	//	size_t m_peakUse = 0;
 };
 
 // Global heap/pool
 static CustomAlloc s_globalCustomAlloc(GLOBAL_MEMORY_POOL_SIZE);
-#define CUSTOM_NEW void* operator new(size_t size) { return s_globalCustomAlloc.AllocateUnsafe(size, 8); }
+#define CUSTOM_NEW void* operator new(size_t size) { return s_globalCustomAlloc.AllocateUnsafe(size, 16); }
 #define CUSTOM_DELETE void operator delete(void* address) { return s_globalCustomAlloc.FreeUnsafe(address); }
 
 // Per thread heap/pool
 static std::vector<CustomAlloc*> s_threadCustomAlloc;
-#define CUSTOM_NEW_THREAD(ThreadIndex) void* operator new(size_t size) { return s_threadCustomAlloc[ThreadIndex]->AllocateUnsafe(size, 8); }
+#define CUSTOM_NEW_THREAD(ThreadIndex) void* operator new(size_t size) { return s_threadCustomAlloc[ThreadIndex]->AllocateUnsafe(size, 16); }
 #define CUSTOM_DELETE_THREAD(ThreadIndex) void operator delete(void* address) { return s_threadCustomAlloc[ThreadIndex]->FreeUnsafe(address); }
