@@ -102,9 +102,10 @@
 	- It, logically (right?), seems important to have as little on the stack as possible during traversal.
 	- Trying some things using prefetches; it looks as if there's not much to gain. On Apple M though...
 
-	** 13/01/2023 **
+	** 13+14/01/2023 **
 	
 	- Allocators: changed allocation strategy where each thread has it's own heap allocated from the global one.
+	- Optimized allocators in various ways; we *do* however not free the heap on exit, but who cares, right?
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -365,7 +366,7 @@ public:
 			// Well, it sits nice and snug on it's on (probably) page boundary aligning nicely with this thread's cache as opposed to allocating
 			// one huge block at once.
 			const auto size = s_threadInfo[iThread].nodes*sizeof(DictionaryNode);
-			m_pool = static_cast<DictionaryNode*>(s_threadCustomAlloc[iThread]->AllocateUnsafe(size, kCacheLine));
+			m_pool = static_cast<DictionaryNode*>(s_threadCustomAlloc[iThread].AllocateUnsafe(size, kCacheLine));
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread], 0);
@@ -836,7 +837,7 @@ public:
 		{
 			// Handle allocation and initialization of grid memory (local to our thread, again).
 			const auto gridSize = width*height;
-			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread]->AllocateUnsafe(gridSize, kCacheLine));
+			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateUnsafe(gridSize, kCacheLine));
 			memcpy(visited, sanitized, gridSize);
 
 			// Reserve
@@ -1054,7 +1055,7 @@ private:
 	auto* visited = context.visited + offsetY+iX;
 #endif
 
-	const unsigned tile = *visited; // [offsetY+iX];
+	const unsigned tile = *visited;
 	if (!(tile & kTileVisitedBit)) // Not visited?
 	{
 		if (auto* child = node->GetChildChecked(tile)) // With child?
@@ -1251,29 +1252,30 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				gridSize + 
 				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + 
 				(s_threadInfo[iThread].load*sizeof(int)) 
-				+ 1024*1024*10; // 4MB leeway, enough? (FIXME)
+				+ 1024*1024; // Enough? (FIXME)
 	
 #ifdef NED_FLANDERS			
-			s_threadCustomAlloc.push_back(new CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
+			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
 #else
-			s_threadCustomAlloc.push_back(new CustomAlloc(static_cast<char*>(s_globalCustomAlloc.AllocateUnsafe(threadHeapSize, kPageSize)), threadHeapSize));
+			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.AllocateUnsafe(threadHeapSize, kPageSize)), threadHeapSize));
 #endif
 		}
 
 		Query query(results, sanitized, width, height);
 		query.Execute();
 
-		for (auto* allocator : s_threadCustomAlloc)
+		for (auto& allocator : s_threadCustomAlloc)
 		{
-			void* pool = allocator->GetPool();
+			void* pool = allocator.GetPool();
 
 #ifdef NED_FLANDERS
 			s_globalCustomAlloc.Free(pool);
 #else
 			s_globalCustomAlloc.FreeUnsafe(pool);
 #endif
-
-			delete allocator;
+			
+			// Not necessary:
+//			delete allocator;
 		}
 
 		s_threadCustomAlloc.clear();

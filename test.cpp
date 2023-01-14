@@ -62,8 +62,13 @@ int main(int argC, char **arguments)
 	initialize_random_generator();
 
 	Results results[NUM_QUERIES];
+
 	std::vector<std::chrono::microseconds> durations;
 	durations.reserve(NUM_QUERIES);
+
+#ifdef HIGHSCORE_LOOP
+	std::chrono::microseconds prevFastest(HIGHSCORE_MICROSECONDS<<8); // Just needed safe 'big' number to compare against the first time around
+#endif
 
 	printf("- Loading dictionary...\n");
 	// const char *dictPath = "dictionary-short.txt";
@@ -154,14 +159,18 @@ RetrySameBoard:
 	std::sort(durations.begin(), durations.end());
 
 #ifdef HIGHSCORE_LOOP
-	printf("Best out of %d: %.lld microsec.\n", NUM_QUERIES, durations[0].count());
-
 	if (durations[0].count() >= HIGHSCORE_MICROSECONDS) 
 	{
-		for (auto& result : results)
-			FreeWords(result);
+		if (prevFastest > durations[0])
+		{
+			printf("New best time: %.lld microsec.\n", durations[0].count());
+			prevFastest = durations[0];
+		}
 
 		durations.clear();
+
+		for (auto& result : results)
+			FreeWords(result);
 
 #ifdef HIGHSCORE_LOOP_RANDOMIZE_BOARD
 		goto GenerateBoard;
