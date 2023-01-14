@@ -51,6 +51,7 @@ public:
 		tlsf_free(m_instance, address);
 	}
 
+#ifdef NED_FLANDERS
 	BOGGLE_INLINE void* Allocate(size_t size, size_t align)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
@@ -62,6 +63,7 @@ public:
 		std::lock_guard<std::mutex> lock(m_mutex);
 		tlsf_free(m_instance, address);
 	}
+#endif
 
 	BOGGLE_INLINE_FORCE void* GetPool() const
 	{
@@ -77,7 +79,11 @@ private:
 	tlsf_t m_instance;
 	bool m_isOwner;
 	void* m_pool;
+
+#ifdef NED_FLANDERS
 	std::mutex m_mutex;
+#endif
+
 	//	size_t m_peakUse = 0;
 };
 

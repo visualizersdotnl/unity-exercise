@@ -141,9 +141,6 @@
 #include "bit-tricks.h"
 #include "inline.h"
 
-#define GLOBAL_MEMORY_POOL_SIZE (1024*1024)*2000 // 2GB
-#include "simple-tlsf.h"
-
 // Undef. to skip dead end percentages and all prints and such.
 // #define DEBUG_STATS
 
@@ -156,6 +153,9 @@
 
 // Undef. to kill assertions.
 // #define ASSERTIONS
+
+#define GLOBAL_MEMORY_POOL_SIZE (1024*1024)*2000 // 2GB
+#include "simple-tlsf.h" // Depends on Ned Flanders :)
 
 // Undef. to kill prefetching
 #ifdef _WIN32
