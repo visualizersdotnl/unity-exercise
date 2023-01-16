@@ -1,3 +1,7 @@
+
+// This speeds things up for us ('unity-exercise'), but beware of SIMD loads that require alignment
+#define TLSF_FORCE_4_BYTE_ALIGNMENT
+
 #include <assert.h>
 #include <limits.h>
 #include <stddef.h>
@@ -214,9 +218,9 @@ enum tlsf_public
 /* Private constants: do not modify. */
 enum tlsf_private
 {
-#if defined (TLSF_64BIT)
+#if defined (TLSF_64BIT) && !defined(TLSF_FORCE_4_BYTE_ALIGNMENT)
 	/* All allocation sizes and addresses are aligned to 8 bytes. */
-	ALIGN_SIZE_LOG2 = 2,
+	ALIGN_SIZE_LOG2 = 3,
 #else
 	/* All allocation sizes and addresses are aligned to 4 bytes. */
 	ALIGN_SIZE_LOG2 = 2,

@@ -106,6 +106,11 @@
 	
 	- Allocators: changed allocation strategy where each thread has it's own heap allocated from the global one.
 	- Optimized allocators in various ways; we *do* however not free the heap on exit, but who cares, right?
+
+	** 16/01/2023 **
+	
+	- Optimized pruning.
+	- Set heap to use 4-byte alignment in 64-bit builds as well (see top of impl. file).
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -496,7 +501,8 @@ public:
 			}
 
 			--current->m_wordRefCount;
-			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);;
+			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
+			ImmPrefetch(reinterpret_cast<const char*>(current->m_children + kIndexU));
 		}
 	}
 
