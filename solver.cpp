@@ -1057,10 +1057,10 @@ private:
 	auto* visited = context.visited + offsetY+iX;
 #endif
 
-	const unsigned tile = *visited;
-	if (!(tile & kTileVisitedBit)) // Not visited?
+//	const unsigned tile = *visited;
+	if (!(*visited & kTileVisitedBit)) // Not visited?
 	{
-		if (auto* child = node->GetChildChecked(tile)) // With child?
+		if (auto* child = node->GetChildChecked(*visited)) // With child?
 		{
 #if defined(DEBUG_STATS)
 			TraverseBoard(context, child, iX, offsetY, depth);
