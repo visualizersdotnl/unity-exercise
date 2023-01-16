@@ -401,12 +401,12 @@ public:
 			DictionaryNode* node = m_pool + m_iAlloc;
 			++m_iAlloc;
 
-			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node)&0xffffffff;
-
 			unsigned indexBits = node->m_indexBits = parent->m_indexBits;
 			node->m_wordRefCount = parent->m_wordRefCount;
 			node->m_wordIdx = parent->m_wordIdx;
 			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Yup, this will be downright dirty!
+
+			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node)&0xffffffff;
 
 #ifdef _WIN32
 			unsigned long index;
