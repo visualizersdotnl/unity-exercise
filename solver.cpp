@@ -111,7 +111,7 @@
 	
 	- Optimized pruning.
 	- Set custom allocator (TLSF) heap to use 4-byte alignment in 64-bit builds as well (see top of impl. file).
-	- Reverted all menial allocations back to the CRT heap, which just performs better, lesson: don't defer it all to a single mechanism without measuring/thinking.
+	- Reverted some allocations back to the CRT heap, which just performs better, lesson: don't defer it all to a single mechanism without measuring/thinking.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -253,6 +253,9 @@ BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address) {}
 class Word
 {
 public:
+	CUSTOM_NEW
+	CUSTOM_DELETE
+
 	Word(unsigned score, const std::string& word) :
 	score(score)
 	{
