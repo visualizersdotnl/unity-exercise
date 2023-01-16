@@ -67,6 +67,13 @@ public:
 		return m_pool;
 	}
 
+	// Use this to wipe the allocator; you can only safely do this if you're not going to need anything allocated earlier
+	BOGGLE_INLINE_FORCE void Reset(size_t poolSize) // Maybe I can fetch this from TLSF, but storing it i'd rather not (for performance)
+	{
+		// Simply recreating the instance wipes all history
+		m_instance = tlsf_create_with_pool(m_pool, poolSize);
+	}
+
 private: 
 	tlsf_t m_instance;
 	void* m_pool;

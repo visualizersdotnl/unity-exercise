@@ -521,7 +521,7 @@ public:
 		}
 	}
 
-	// Returns index and wipes it (eliminating need to do so yourself whilst not changing a negative outcome)
+	// If not -1, it's pointing to a word
 	BOGGLE_INLINE_FORCE int32_t GetWordIndex() const
 	{
 		return m_wordIdx;

@@ -61,10 +61,11 @@ int main(int argC, char **arguments)
 
 	initialize_random_generator();
 
-	Results results[NUM_QUERIES];
-
 	std::vector<std::chrono::microseconds> durations;
 	durations.reserve(NUM_QUERIES);
+
+	std::vector<Results> resultsToFree;
+	resultsToFree.reserve(NUM_QUERIES);
 
 #ifdef HIGHSCORE_LOOP
 	std::chrono::microseconds prevFastest(HIGHSCORE_MICROSECONDS<<8); // Just needed safe 'big' number to compare against the first time around
@@ -143,15 +144,19 @@ RetrySameBoard:
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
 		const auto start = std::chrono::high_resolution_clock::now();
-		results[iQuery] = FindWords(board.get(), xSize, ySize);
+		Results results = FindWords(board.get(), xSize, ySize);
 		const auto end = std::chrono::high_resolution_clock::now();
 		durations.emplace_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start));
 	
 #ifdef PRINT_ITER_RESULTS
-		const auto count = results[iQuery].Count;
-		const auto score = results[iQuery].Score;
 		printf("Results (run %u): ", iQuery+1);
-		printf("count: %u, score: %u, duration %.lld microsec.\n", count, score, durations[iQuery].count());
+		printf("count: %u, score: %u, duration %.lld microsec.\n", results.count, results.score, durations[iQuery].count());
+#endif
+
+#ifdef HIGHSCORE_LOOP
+		FreeWords(results);
+#else
+		resultsToFree.emplace_back(results);
 #endif
 	}
 
@@ -169,9 +174,6 @@ RetrySameBoard:
 
 		durations.clear();
 
-		for (auto& result : results)
-			FreeWords(result);
-
 #ifdef HIGHSCORE_LOOP_RANDOMIZE_BOARD
 		goto GenerateBoard;
 #else
@@ -180,12 +182,12 @@ RetrySameBoard:
 	}
 #endif
 
-#ifdef PRINT_WORDS
+#if defined(PRINT_WORDS) && !defined(HIGHSCORE_LOOP)
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 
 		printf("%s\n", results[0].Words[iWord]);	
 #endif
 
-#ifdef DUPE_CHECK
+#if defined(DUPE_CHECK) && !defined(HIGHSCORE_LOOP)
 	std::unordered_set<std::string> words;
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord)
 	{
@@ -199,8 +201,8 @@ RetrySameBoard:
 	}
 #endif
 
-	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
-		FreeWords(results[iQuery]);
+	for (auto& result : resultsToFree)
+		FreeWords(result);
 	
 	FreeDictionary();
 
