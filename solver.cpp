@@ -797,6 +797,7 @@ void FreeDictionary()
 		#include "sse2neon-02-01-2022/sse2neon.h" // FIXME: only if ARM
 	#else
 		// FIXME
+		#include <emmintrin.h>
 	#endif
 #endif
 
