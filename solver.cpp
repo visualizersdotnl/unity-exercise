@@ -224,10 +224,21 @@ BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
 #endif
 }
 
+// Immediate prefetch (Win32: all levels if possible)
+BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
+{
+#ifdef __GNUC__
+	__builtin_prefetch(address, 1, 0);
+#elif defined(_WIN32)
+	_mm_prefetch(address, _MM_HINT_T0);
+#endif
+}
+
 #else
 
 BOGGLE_INLINE_FORCE static void FarPrefetch(const char* address) {}
 BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address) {}
+BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address) {}
 
 #endif
 
@@ -305,12 +316,6 @@ public:
 
 	LoadDictionaryNode() {}
 
-	LoadDictionaryNode(int wordIdx, unsigned indexBits) :
-		m_wordIdx(wordIdx)
-,		m_indexBits(indexBits)
-	{
-	}
-
 	// Destructor is not called when using ThreadCopy!
 	~LoadDictionaryNode()
 	{
@@ -322,6 +327,9 @@ public:
 	LoadDictionaryNode* AddChild(char letter, size_t iThread)
 	{
 		const unsigned index = LetterToIndex(letter);
+
+		// Adding child en route to a new word, so up the ref. count
+		++m_wordRefCount;
 
 		const unsigned bit = 1 << index;
 		if (m_indexBits & bit)
@@ -380,8 +388,9 @@ public:
 			m_pool = static_cast<DictionaryNode*>(s_threadCustomAlloc[iThread].AllocateAlignedUnsafe(size, kCacheLine));
 
 			// Recursively copy them.
-			Copy(s_threadDicts[iThread], 0);
+			Copy(s_threadDicts[iThread]);
 			m_pool->m_children[kIndexU] = 0;
+			m_pool->m_wordRefCount = 0;
 		}
 
 		~ThreadCopy()
@@ -395,7 +404,7 @@ public:
 		}
 
 	private:
-		uint32_t Copy(LoadDictionaryNode* parent, int depth)
+		uint32_t Copy(LoadDictionaryNode* parent)
 		{
 //			Assert(m_iAlloc < s_threadInfo[m_iThread].nodes);
 			DictionaryNode* node = m_pool + m_iAlloc;
@@ -423,8 +432,8 @@ public:
 				{
 					if (indexBits & 1)
 					{
-						node->m_children[index] = Copy(parent->GetChild(index), depth+1);
-						node->GetChild(index)->m_children[kIndexU] = nodeLower32; // (depth < 2) ? 0 : nodeLower32;
+						node->m_children[index] = Copy(parent->GetChild(index));
+						node->GetChild(index)->m_children[kIndexU] = nodeLower32;
 					}
 
 					indexBits >>= 1;
@@ -445,7 +454,6 @@ public:
 public:
 	BOGGLE_INLINE_FORCE bool HasChildren() const     { return m_indexBits > 0;     }
 	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1;      }
-	BOGGLE_INLINE_FORCE bool IsExhausted() const     { return m_wordRefCount == 0; }
 
 #if 0
 	// FIXME: experimental
@@ -480,18 +488,15 @@ public:
 	BOGGLE_INLINE_FORCE void PruneReverse()
 	{
 		DictionaryNode* current = this;
-		while (uint32_t currentLower32 = current->m_children[kIndexU])
+		while (uint32_t rootLower32 = current->m_children[kIndexU])
 		{
-			auto* temporary = reinterpret_cast<DictionaryNode*>(m_poolUpper32|currentLower32);
-			// NearPrefetch((const char*)(temporary->m_children + kIndexU)); // Sometimes it's just easier to say fuck it and use a C-style cast
-
-			if (--current->m_wordRefCount == 0)
+			if (current->m_wordRefCount == 1)
 			{
 				current->m_indexBits = 0;
-				// FIXME: break or not?
 			}
 
-			current = temporary;
+			--current->m_wordRefCount;
+			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);;
 		}
 	}
 
@@ -887,8 +892,6 @@ public:
 //			m_results.Count  = 0;
 //			m_results.Score  = 0;
 
-			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), kCacheLine));
-
 			// Kick off threads.
 			std::vector<std::thread> threads;
 			std::vector<ThreadContext> contexts;
@@ -910,6 +913,8 @@ public:
 				// FIXME: should I?
 #endif
 			}
+
+			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), kCacheLine));
 
 			for (auto& thread : threads)
 				thread.join();
@@ -1060,7 +1065,6 @@ private:
 /* static */ BOGGLE_INLINE_FORCE void Query::TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
-
 #if defined(DEBUG_STATS)
 	auto* visited = context.visited + offsetY+iX;
 #endif
@@ -1075,10 +1079,10 @@ private:
 #else
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
-			
-			if (!child->HasChildren()) // || child->IsExhausted())
+
+			if (!child->HasChildren())
 			{
-				node->RemoveChild(tile);
+				node->RemoveChild(*visited);
 			}
 		}
 	}

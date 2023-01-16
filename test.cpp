@@ -9,7 +9,7 @@
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECONDS 380000  // Stress test Ryzen 5900x
-	#define NUM_QUERIES 4
+	#define NUM_QUERIES 3
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
@@ -150,7 +150,7 @@ RetrySameBoard:
 	
 #ifdef PRINT_ITER_RESULTS
 		printf("Results (run %u): ", iQuery+1);
-		printf("count: %u, score: %u, duration %.lld microsec.\n", results.count, results.score, durations[iQuery].count());
+		printf("count: %u, score: %u, duration %.lld microsec.\n", results.Count, results.Score, durations[iQuery].count());
 #endif
 
 #ifdef HIGHSCORE_LOOP
