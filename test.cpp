@@ -144,7 +144,7 @@ RetrySameBoard:
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
 		const auto start = std::chrono::high_resolution_clock::now();
-		Results results = FindWords(board.get(), xSize, ySize);
+		const Results results = FindWords(board.get(), xSize, ySize);
 		const auto end = std::chrono::high_resolution_clock::now();
 		durations.emplace_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start));
 	

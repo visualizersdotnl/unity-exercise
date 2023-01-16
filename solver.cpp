@@ -794,9 +794,8 @@ void FreeDictionary()
 	#include <pthread.h>
 
 	#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-		#include "sse2neon-02-01-2022/sse2neon.h" // FIXME: only if ARM
-	#else
-		// FIXME
+		#include "sse2neon-02-01-2022/sse2neon.h" 
+	#else // Most likely X86/X64
 		#include <emmintrin.h>
 	#endif
 #endif
@@ -812,9 +811,7 @@ public:
 		m_results(results)
 ,		m_sanitized(sanitized)
 ,		m_width(width)
-,		m_height(height)
-	{
-	}
+,		m_height(height) {}
 
 	~Query() {}
 
