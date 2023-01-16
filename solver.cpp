@@ -110,7 +110,8 @@
 	** 16/01/2023 **
 	
 	- Optimized pruning.
-	- Set heap to use 4-byte alignment in 64-bit builds as well (see top of impl. file).
+	- Set custom allocator (TLSF) heap to use 4-byte alignment in 64-bit builds as well (see top of impl. file).
+	- Reverted all menial allocations back to the CRT heap, which just performs better, lesson: don't defer it all to a single mechanism without measuring/thinking.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -252,13 +253,7 @@ BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address) {}
 class Word
 {
 public:
-	CUSTOM_NEW
-	CUSTOM_DELETE
-
-//	Word(unsigned score, const std::string& word) :
-//		score(score), word {}
-
-Word(unsigned score, const std::string& word) :
+	Word(unsigned score, const std::string& word) :
 	score(score)
 	{
 		strcpy(this->word, word.c_str());
@@ -266,17 +261,12 @@ Word(unsigned score, const std::string& word) :
 	
 	char word[MAX_WORD_LEN+1];
 	size_t score;
-
-	//	const std::string word;
 };
 
 // Number of words and number of nodes (1 for root) per thread.
 class ThreadInfo
 {
 public:
-	CUSTOM_NEW
-	CUSTOM_DELETE
-
 	ThreadInfo() : 
 		load(0), nodes(1) {}
 
@@ -316,9 +306,6 @@ class LoadDictionaryNode
 	friend void FreeDictionary();
 
 public:
-//	CUSTOM_NEW
-//	CUSTOM_DELETE
-
 	LoadDictionaryNode() {}
 
 	// Destructor is not called when using ThreadCopy!
@@ -815,9 +802,6 @@ void FreeDictionary()
 class Query
 {
 public:
-	CUSTOM_NEW
-	CUSTOM_DELETE
-
 	Query(Results& results, const char* sanitized, unsigned width, unsigned height) :
 		m_results(results)
 ,		m_sanitized(sanitized)
