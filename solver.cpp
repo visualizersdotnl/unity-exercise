@@ -155,13 +155,16 @@
 // Undef. to kill assertions.
 // #define ASSERTIONS
 
-#define GLOBAL_MEMORY_POOL_SIZE (1024*1024)*2000 // 2GB
+#define GLOBAL_MEMORY_POOL_SIZE (1024*1024)*2000 // Min. 2GB!
 #include "simple-tlsf.h" // Depends on Ned Flanders :)
 
 // Undef. to kill prefetching
 #ifdef _WIN32
 //	#define NO_PREFETCHES // Seems to have some effect on Apple M
 #endif
+
+// Max. word length (for optimization)
+#define MAX_WORD_LEN 15
 
 #if defined(_DEBUG) || defined(ASSERTIONS)
 	#ifdef _WIN32
@@ -176,7 +179,7 @@
 #if defined(DEBUG_STATS)
 	#define debug_print printf
 #else
-	inline void debug_print(const char* format, ...) {}
+	__inline void debug_print(const char* format, ...) {}
 #endif
 
 constexpr unsigned kAlphaRange = ('Z'-'A')+1;
@@ -236,11 +239,19 @@ public:
 	CUSTOM_NEW
 	CUSTOM_DELETE
 
-	Word(unsigned score, const std::string& word) :
-		score(score), word(word) {}
+//	Word(unsigned score, const std::string& word) :
+//		score(score), word {}
 
-	const unsigned score;
-	const std::string word;
+Word(unsigned score, const std::string& word) :
+	score(score)
+	{
+		strcpy(this->word, word.c_str());
+	}
+	
+	char word[MAX_WORD_LEN+1];
+	size_t score;
+
+	//	const std::string word;
 };
 
 // Number of words and number of nodes (1 for root) per thread.
@@ -289,8 +300,8 @@ class LoadDictionaryNode
 	friend void FreeDictionary();
 
 public:
-	CUSTOM_NEW
-	CUSTOM_DELETE
+//	CUSTOM_NEW
+//	CUSTOM_DELETE
 
 	LoadDictionaryNode() {}
 
@@ -570,7 +581,7 @@ BOGGLE_INLINE static unsigned GetWordScore_Albert_1(size_t length) /* const */
 }
 #endif
 
-BOGGLE_INLINE static unsigned GetWordScore_Albert_2(size_t length) /* const */
+BOGGLE_INLINE static uint8_t GetWordScore_Albert_2(size_t length) /* const */
 {
 	length = length > 8 ? 8 : length;
 
@@ -581,7 +592,7 @@ BOGGLE_INLINE static unsigned GetWordScore_Albert_2(size_t length) /* const */
 	Albert += (length+9)>>4;
 	Albert += length<<2>>5<<2;
 	Albert += length<<2>>5<<1;
-	return (unsigned) Albert+1;
+	return uint8_t(Albert+1);
 }
 
 #ifdef NED_FLANDERS
@@ -602,9 +613,9 @@ static bool IsWordValid(const std::string& word)
 	const size_t length = word.length();
 
 	// Word not too short?
-	if (length < 3)
+	if (length < 3 || length > MAX_WORD_LEN)
 	{
-		debug_print("Invalid word because it's got less than 3 letters: %s\n", word.c_str());
+		debug_print("Invalid word because it's got less than 3 or more than %u letters: %s\n", MAX_WORD_LEN, word.c_str());
 		return false;
 	}
 
@@ -642,7 +653,6 @@ static bool IsWordValid(const std::string& word)
 
 	LoadDictionaryNode* node = s_threadDicts[iThread];
 
-	unsigned letterLen = 0;
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
 		const char letter = *iLetter;
@@ -657,11 +667,8 @@ static bool IsWordValid(const std::string& word)
 			// Skip over 'U'.
 			++iLetter;
 		}
-
-
-		++letterLen;
 	}
-	
+
 	// Store word in dictionary (FIXME: less ham-fisted please).
 	s_words.emplace_back(Word(GetWordScore_Albert_2(length), word));
 
@@ -752,7 +759,7 @@ void LoadDictionary(const char* path)
 #endif
 	}
 
-	debug_print("Dictionary loaded. %zu words, longest being %u characters\n", s_wordCount, s_longestWord);
+	printf("Dictionary loaded. %zu words, longest being %u characters\n", s_wordCount, s_longestWord);
 }
 
 void FreeDictionary()
@@ -782,9 +789,12 @@ void FreeDictionary()
 
 #ifdef _WIN32
 	#include <windows.h>
+	#include <emmintrin.h>
 #elif __GNUC__
 	#include <pthread.h>
+	#include "sse2neon-02-01-2022/sse2neon.h" // FIXME: only if ARM
 #endif
+
 
 class Query
 {
@@ -906,16 +916,17 @@ public:
 
 			for (const auto& context : contexts)
 			{
-				auto& wordsFound = context.wordsFound;
-				for (int wordIdx : wordsFound)
+				for (int wordIdx : context.wordsFound)
 				{
-					const auto& word = s_words[wordIdx]; 
-					*words_cstr++ = const_cast<char*>(word.word.c_str());
-					m_results.Score += word.score;
+					const auto& word = s_words[wordIdx];
+					_mm_stream_si64((intptr_t*) &(*words_cstr++), reinterpret_cast<int64_t>(word.word));
+					m_results.Score += unsigned(word.score);
 					++m_results.Count;
+//					*words_cstr++ = const_cast<char*>(word.word);
+//					*words_cstr++ = const_cast<char*>(word.word.c_str());
 				}
 
-				debug_print("Thread %u joined with %zu words (score %u).\n", context.m_iThread, wordsFound.size(), m_results.Score);
+				debug_print("Thread %u joined with %zu words (score %u).\n", context.m_iThread, contexts[context.m_iThread].wordsFound.size(), m_results.Score);
 			}
 #else
 			size_t totReqStrBufLen = 0;
