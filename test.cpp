@@ -164,19 +164,19 @@ RetrySameBoard:
 	std::sort(durations.begin(), durations.end());
 
 #ifdef HIGHSCORE_LOOP
+	if (prevFastest > durations[0])
+	{
+		printf("New best time: %.lld microsec.\n", durations[0].count());
+		prevFastest = durations[0];
+	}
+
 	if (durations[0].count() >= HIGHSCORE_MICROSECONDS) 
 	{
-		if (prevFastest > durations[0])
-		{
-			printf("New best time: %.lld microsec.\n", durations[0].count());
-			prevFastest = durations[0];
-		}
-
 		durations.clear();
 
-#ifdef HIGHSCORE_LOOP_RANDOMIZE_BOARD
+#if defined(HIGHSCORE_LOOP) && defined(HIGHSCORE_LOOP_RANDOMIZE_BOARD)
 		goto GenerateBoard;
-#else
+#elif defined(HIGHSCORE_LOOP)
 		goto RetrySameBoard;
 #endif
 	}
