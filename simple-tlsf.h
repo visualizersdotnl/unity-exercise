@@ -99,8 +99,8 @@ private:
 static CustomAlloc s_globalCustomAlloc(GLOBAL_MEMORY_POOL_SIZE);
 
 // For now things seem much faster when *not* using this pool for just any allocation (only the ones you gave some thought)
-// #define CUSTOM_NEW void* operator new(size_t size) { return s_globalCustomAlloc.AllocateUnsafe(size); }
-// #define CUSTOM_DELETE void operator delete(void* address) { return s_globalCustomAlloc.FreeUnsafe(address); }
+#define CUSTOM_NEW void* operator new(size_t size) { return s_globalCustomAlloc.AllocateUnsafe(size); }
+#define CUSTOM_DELETE void operator delete(void* address) { return s_globalCustomAlloc.FreeUnsafe(address); }
 
 // Per thread heap/pool
 static std::vector<CustomAlloc> s_threadCustomAlloc;

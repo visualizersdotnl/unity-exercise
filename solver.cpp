@@ -357,10 +357,9 @@ class DictionaryNode
 	friend class LoadDictionaryNode;
 
 public:
-	// Nothing is allocated here, so no use for:
 	CUSTOM_NEW_THREAD(s_iThread)
 	CUSTOM_DELETE_THREAD(s_iThread)
-
+		
 	DictionaryNode() {}
 
 	class ThreadCopy
@@ -382,7 +381,6 @@ public:
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
 			m_pool->m_children[kIndexU] = 0;
-			m_pool->m_wordRefCount = 0;
 		}
 
 		~ThreadCopy()
