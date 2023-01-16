@@ -1205,8 +1205,10 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	}
 #endif
 
+#if defined(NED_FLANDERS)
 	const size_t nodeSize = sizeof(DictionaryNode);
 	debug_print("Node size: %zu\n", nodeSize);
+#endif
 	
 	Results results;
 	results.Words = nullptr;
