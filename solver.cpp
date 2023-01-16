@@ -792,7 +792,12 @@ void FreeDictionary()
 	#include <emmintrin.h>
 #elif __GNUC__
 	#include <pthread.h>
-	#include "sse2neon-02-01-2022/sse2neon.h" // FIXME: only if ARM
+
+	#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+		#include "sse2neon-02-01-2022/sse2neon.h" // FIXME: only if ARM
+	#else
+		// FIXME
+	#endif
 #endif
 
 
@@ -919,7 +924,7 @@ public:
 				for (int wordIdx : context.wordsFound)
 				{
 					const auto& word = s_words[wordIdx];
-					_mm_stream_si64((intptr_t*) &(*words_cstr++), reinterpret_cast<int64_t>(word.word));
+					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
 					m_results.Score += unsigned(word.score);
 					++m_results.Count;
 //					*words_cstr++ = const_cast<char*>(word.word);
