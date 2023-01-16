@@ -170,7 +170,7 @@ RetrySameBoard:
 		prevFastest = durations[0];
 	}
 
-	if (durations[0].count() >= HIGHSCORE_MICROSECONDS) 
+	if (prevFastest.count() >= HIGHSCORE_MICROSECONDS) 
 	{
 		durations.clear();
 

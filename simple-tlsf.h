@@ -37,8 +37,12 @@ public:
 			freeAligned(m_pool);
 	}
 #endif
+	BOGGLE_INLINE_FORCE void* AllocateUnsafe(size_t size)
+	{
+		return tlsf_malloc(m_instance, size);
+	}
 
-	BOGGLE_INLINE_FORCE void* AllocateUnsafe(size_t size, size_t align)
+	BOGGLE_INLINE_FORCE void* AllocateAlignedUnsafe(size_t size, size_t align)
 	{
 		return tlsf_memalign(m_instance, align, size);
 	}
@@ -49,10 +53,16 @@ public:
 	}
 
 #ifdef NED_FLANDERS
-	BOGGLE_INLINE void* Allocate(size_t size, size_t align)
+	BOGGLE_INLINE void* Allocate(size_t size)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-		return AllocateUnsafe(size, align);
+		return AllocateUnsafe(size);
+	}
+
+	BOGGLE_INLINE void* AllocateAligned(size_t size, size_t align)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return AllocateAlignedUnsafe(size, align);
 	}
 
 	BOGGLE_INLINE void Free(void* address)
@@ -84,12 +94,13 @@ private:
 #endif
 };
 
+
 // Global heap/pool
 static CustomAlloc s_globalCustomAlloc(GLOBAL_MEMORY_POOL_SIZE);
-#define CUSTOM_NEW void* operator new(size_t size) { return s_globalCustomAlloc.AllocateUnsafe(size, 16); }
+#define CUSTOM_NEW void* operator new(size_t size) { return s_globalCustomAlloc.AllocateUnsafe(size); }
 #define CUSTOM_DELETE void operator delete(void* address) { return s_globalCustomAlloc.FreeUnsafe(address); }
 
 // Per thread heap/pool
 static std::vector<CustomAlloc> s_threadCustomAlloc;
-#define CUSTOM_NEW_THREAD(ThreadIndex) void* operator new(size_t size) { return s_threadCustomAlloc[ThreadIndex].AllocateUnsafe(size, 16); }
+#define CUSTOM_NEW_THREAD(ThreadIndex) void* operator new(size_t size) { return s_threadCustomAlloc[ThreadIndex].AllocateUnsafe(size); }
 #define CUSTOM_DELETE_THREAD(ThreadIndex) void operator delete(void* address) { return s_threadCustomAlloc[ThreadIndex].FreeUnsafe(address); }

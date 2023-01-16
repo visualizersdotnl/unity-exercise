@@ -366,7 +366,7 @@ public:
 			// Well, it sits nice and snug on it's on (probably) page boundary aligning nicely with this thread's cache as opposed to allocating
 			// one huge block at once.
 			const auto size = s_threadInfo[iThread].nodes*sizeof(DictionaryNode);
-			m_pool = static_cast<DictionaryNode*>(s_threadCustomAlloc[iThread].AllocateUnsafe(size, kCacheLine));
+			m_pool = static_cast<DictionaryNode*>(s_threadCustomAlloc[iThread].AllocateAlignedUnsafe(size, kCacheLine));
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread], 0);
@@ -419,15 +419,11 @@ public:
 					indexBits >>= 1;
 				}
 			}
-	
-//			node->m_children[kIndexU] = 0;
 
 			return nodeLower32;
 		}
 
 	private:
-//		const unsigned m_iThread;
-
 		DictionaryNode* m_pool;
 		size_t m_iAlloc;
 	};
@@ -837,7 +833,7 @@ public:
 		{
 			// Handle allocation and initialization of grid memory (local to our thread, again).
 			const auto gridSize = width*height;
-			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateUnsafe(gridSize, kCacheLine));
+			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateAlignedUnsafe(gridSize, kCacheLine));
 			memcpy(visited, sanitized, gridSize);
 
 			// Reserve
@@ -878,7 +874,7 @@ public:
 //			m_results.Count  = 0;
 //			m_results.Score  = 0;
 
-			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateUnsafe(s_wordCount*sizeof(char*), kCacheLine));
+			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), kCacheLine));
 
 			// Kick off threads.
 			std::vector<std::thread> threads;
@@ -1208,7 +1204,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		const unsigned gridSize = width*height;
 
 #ifdef NED_FLANDERS
-		char* sanitized = static_cast<char*>(s_globalCustomAlloc.Allocate(gridSize*sizeof(char), kCacheLine));
+		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAligned(gridSize*sizeof(char), kCacheLine));
 
 		// Sanitize that checks for illegal input and uppercases.
 		size_t index = 0;
@@ -1233,7 +1229,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			}
 		}
 #else
-		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateUnsafe(gridSize, kCacheLine));
+		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAlignedUnsafe(gridSize, kCacheLine));
 
 		// Sanitize that just reorders and expects uppercase.
 		for (unsigned index = 0; index < gridSize; ++index)
@@ -1257,7 +1253,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 #ifdef NED_FLANDERS			
 			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
 #else
-			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.AllocateUnsafe(threadHeapSize, kPageSize)), threadHeapSize));
+			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.AllocateAlignedUnsafe(threadHeapSize, kPageSize)), threadHeapSize));
 #endif
 		}
 
@@ -1274,7 +1270,9 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			s_globalCustomAlloc.FreeUnsafe(pool);
 #endif
 			
-			// Not necessary:
+			// Not necessary, because:
+			// - Allocator context itself is contained within pool just released, 100%
+			// - Allocator destructor has zero work to do
 //			delete allocator;
 		}
 
