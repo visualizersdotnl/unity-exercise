@@ -83,7 +83,7 @@
 // Undef. to kill assertions.
 // #define ASSERTIONS
 
-#define GLOBAL_MEMORY_POOL_SIZE (1024*1024)*2000 // Min. 2GB!
+#define GLOBAL_MEMORY_POOL_SIZE (1024*1024)*2000 // Just allocate as much as we can in 1 go.
 #include "custom-allocator.h" // Depends on Ned Flanders :)
 
 // Undef. to kill prefetching
@@ -1149,15 +1149,15 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		}
 #endif
 
-		// Allocate allocators (yup)
+		// Allocate for per-thread allocators
+		const size_t overhead = tlsf_alloc_overhead();
 		s_threadCustomAlloc.reserve(kNumThreads);
 		for (auto iThread = 0; iThread < kNumThreads; ++iThread)
 		{
 			const size_t threadHeapSize = 
-				gridSize + 
-				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + 
-				(s_threadInfo[iThread].load*sizeof(int)) 
-				+ 1024*1024; // Enough? (FIXME)
+				gridSize+kCacheLine+overhead +
+				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + kCacheLine+overhead +
+				1024*64;
 	
 #ifdef NED_FLANDERS			
 			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
