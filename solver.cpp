@@ -214,7 +214,8 @@ BOGGLE_INLINE_FORCE unsigned LetterToIndex(unsigned letter)
 	return (letter - static_cast<unsigned>('A')) + 1;
 }
 
-static constexpr size_t kParentIndex = 0;
+static constexpr unsigned kParentIndex = 0;
+static constexpr unsigned kIndexIndex = ('U'-'A') + 1;
 
 // FWD.
 class LoadDictionaryNode;
@@ -301,7 +302,6 @@ public:
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
 			m_pool->m_children[kParentIndex] = 0;
-//			m_pool->m_wordRefCount = 0;
 		}
 
 		~ThreadCopy()
@@ -347,7 +347,9 @@ public:
 					if (indexBits & 1)
 					{
 						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kParentIndex] = nodeLower32;
+						auto* child = node->GetChild(index);
+						child->m_children[kParentIndex] = nodeLower32;
+//						child->m_children[kIndexIndex] = index;
 					}
 
 					indexBits >>= 1;
@@ -366,26 +368,30 @@ public:
 	~DictionaryNode() = delete;
 
 public:
-	BOGGLE_INLINE_FORCE bool HasChildren() const     { return m_indexBits > 0;     }
-	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1;      }
+	BOGGLE_INLINE_FORCE bool HasChildren() const     { return m_indexBits > 0;                       }
+	BOGGLE_INLINE_FORCE bool CanBeRemoved() const    { return !HasChildren() || !m_wordRefCount;     }
+	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1;                        }
 
 	BOGGLE_INLINE_FORCE void PruneReverse()
 	{
 		DictionaryNode* current = this;
+		
 		while (const uint32_t rootLower32 = current->m_children[kParentIndex])
 		{
-			if (--current->m_wordRefCount == 0)
-			{
+			if (1 == current->m_wordRefCount)
 				current->m_indexBits = 0;
-				break;
-			}
 
-			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
+			--current->m_wordRefCount;
 
-#ifdef BOGGLE_ON_INTEL
+#if defined(BOGGLE_ON_INTEL)
 			// ARM/silicon does not like this prefetch; do we actually gain anything on Intel?
-			ImmPrefetch(reinterpret_cast<const char*>(current));
+			DictionaryNode* parent = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
+			ImmPrefetch(reinterpret_cast<const char*>(parent->m_children));
+			current = parent;
+#else
+			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 #endif
+
 		}
 	}
 
@@ -949,7 +955,7 @@ private:
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
 
-			if (!child->HasChildren())
+			if (false == child->HasChildren())
 			{
 				node->RemoveChild(*visited);
 			}
