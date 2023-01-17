@@ -52,7 +52,16 @@
 // #include <map>
 
 #ifdef _WIN32
+	#include <windows.h>
 	#include <intrin.h>
+#elif __GNUC__
+	#include <pthread.h>
+
+	#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+		#include "sse2neon-02-01-2022/sse2neon.h" 
+	#else // Most likely X86/X64
+		#include <intrin.h>
+	#endif
 #endif
 
 #include "api.h"
@@ -690,20 +699,6 @@ void FreeDictionary()
 // This class contains the actual solver and it's entire context, including a local copy of the dictionary.
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
-
-#ifdef _WIN32
-	#include <windows.h>
-	#include <emmintrin.h>
-#elif __GNUC__
-	#include <pthread.h>
-
-	#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-		#include "sse2neon-02-01-2022/sse2neon.h" 
-	#else // Most likely X86/X64
-		#include <emmintrin.h>
-	#endif
-#endif
-
 
 class Query
 {
