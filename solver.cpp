@@ -182,7 +182,7 @@ public:
 	}
 	
 	char word[MAX_WORD_LEN+1];
-	size_t score;
+	unsigned score;
 };
 
 // Number of words and number of nodes (1 for root) per thread.
@@ -287,7 +287,6 @@ public:
 	{
 	public:
 		ThreadCopy(unsigned iThread) : 
-//			m_iThread(iThread), 
 			m_iAlloc(0)
 		{
 			// Allocate pool for all necessary nodes: why here, you glorious titwillow?
@@ -298,8 +297,6 @@ public:
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
-			m_pool->m_children[kIndexParent] = 0;
-//			m_pool->m_wordRefCount = 0;
 		}
 
 		~ThreadCopy()
@@ -315,7 +312,6 @@ public:
 	private:
 		uint32_t Copy(LoadDictionaryNode* parent)
 		{
-//			Assert(m_iAlloc < s_threadInfo[m_iThread].nodes);
 			DictionaryNode* node = m_pool + m_iAlloc;
 			++m_iAlloc;
 
@@ -327,6 +323,8 @@ public:
 			// Quite volatile, but usually works out fine.
 			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000;
 			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node) & 0xffffffff;
+
+			const unsigned rootMask = (m_pool != node) * 0xffffffff;
 
 #ifdef _WIN32
 			unsigned long index;
@@ -344,7 +342,7 @@ public:
 					if (indexBits & 1)
 					{
 						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexParent] = (m_pool == node) ? 0 : nodeLower32;
+						node->GetChild(index)->m_children[kIndexParent] = nodeLower32 & rootMask;
 					}
 
 					indexBits >>= 1;
@@ -363,7 +361,7 @@ public:
 	~DictionaryNode() = delete;
 
 public:
-	BOGGLE_INLINE_FORCE bool HasChildren() const { 
+	BOGGLE_INLINE_FORCE unsigned HasChildren() const { 
 		return m_indexBits;  
 	}
 
@@ -378,7 +376,7 @@ public:
 			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
 
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-//			ImmPrefetch(reinterpret_cast<const char*>(current->m_children));
+			ImmPrefetch((const char*) current->m_children);
 		}
 	}
 
@@ -792,7 +790,7 @@ public:
 				{
 					const auto& word = s_words[wordIdx];
 					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
-					m_results.Score += unsigned(word.score);
+					m_results.Score += word.score;
 					++m_results.Count;
 //					*words_cstr++ = const_cast<char*>(word.word);
 //					*words_cstr++ = const_cast<char*>(word.word.c_str());
@@ -897,7 +895,11 @@ private:
 
 	}
 
+#ifdef FOR_ARM
+	std::sort(wordsFound.begin(), wordsFound.end());
+#else
 	std::sort(context->wordsFound.begin(), context->wordsFound.end());
+#endif
 
 #if defined(NED_FLANDERS)
 	for (unsigned wordIdx : context->wordsFound)
@@ -937,10 +939,8 @@ private:
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
 
-			if (!child->HasChildren())
-			{
+			if (0 == child->HasChildren())
 				node->RemoveChild(*visited);
-			}
 		}
 	}
 }
