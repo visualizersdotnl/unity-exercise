@@ -302,6 +302,7 @@ public:
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
 			m_pool->m_children[kParentIndex] = 0;
+			m_pool->m_wordRefCount = 0;
 		}
 
 		~ThreadCopy()
@@ -378,20 +379,14 @@ public:
 		
 		while (const uint32_t rootLower32 = current->m_children[kParentIndex])
 		{
-			if (1 == current->m_wordRefCount)
+			if (0 == --current->m_wordRefCount) // Should be able to jump by flag
 				current->m_indexBits = 0;
 
-			--current->m_wordRefCount;
+			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 
 #if defined(BOGGLE_ON_INTEL)
-			// ARM/silicon does not like this prefetch; do we actually gain anything on Intel?
-			DictionaryNode* parent = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-			ImmPrefetch(reinterpret_cast<const char*>(parent->m_children));
-			current = parent;
-#else
-			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-#endif
-
+			ImmPrefetch(reinterpret_cast<const char*>(current->m_children));
+#endif		
 		}
 	}
 
@@ -894,6 +889,8 @@ private:
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
+			NearPrefetch(visited + offsetY+iX + kCacheLine);
+
 			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
 #if defined(DEBUG_STATS)
@@ -905,8 +902,6 @@ private:
 				TraverseBoard(context->wordsFound, &visited[offsetY+iX], child, width, height, iX, offsetY);
 #endif
 			}
-
-			NearPrefetch(visited + offsetY+iX + kCacheLine);
 		}
 
 	}
@@ -954,7 +949,8 @@ private:
 #else
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
-
+			
+			// This happens in succession to an exhausted lead.
 			if (false == child->HasChildren())
 			{
 				node->RemoveChild(*visited);
