@@ -409,6 +409,8 @@ public:
 				current->m_indexBits = 0;
 			}
 
+			--current->m_wordRefCount;
+
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 
 #ifdef BOGGLE_ON_INTEL
