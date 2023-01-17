@@ -52,14 +52,18 @@
 // #include <map>
 
 #ifdef _WIN32
+	#define BOGGLE_ON_INTEL
 	#include <windows.h>
 	#include <intrin.h>
 #elif __GNUC__
 	#include <pthread.h>
 
 	#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+		#define BOGGLE_ON_ARM
 		#include "sse2neon-02-01-2022/sse2neon.h" 
-	#else // Most likely X86/X64
+	#else 
+		// Most likely X86/X64
+		#define BOGGLE_ON_INTEL
 		#include <intrin.h>
 	#endif
 #endif
@@ -406,7 +410,11 @@ public:
 			}
 
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
+
+#ifdef BOGGLE_ON_INTEL
+			// ARM/silicon does not like this prefetch; do we actually gain anything on Intel?
 			ImmPrefetch(reinterpret_cast<const char*>(current->m_children + kIndexU));
+#endif
 		}
 	}
 
@@ -798,10 +806,12 @@ public:
 
 #ifdef _WIN32
 				// Works as a mild stimulant, if you will
-
 				SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
 #elif defined(__GNUC__)
-				// FIXME: should I?
+				sched_param parameters;
+				const auto maximum = sched_get_priority_max(SCHED_RR);
+				parameters.sched_priority = maximum-1;
+				pthread_setschedparam(threads[iThread].native_handle(), SCHED_RR, &parameters);
 #endif
 			}
 
@@ -890,7 +900,7 @@ private:
 	// Attempt to prefetch grid
 	NearPrefetch(visited);
 
-	auto& wordsFound = context->wordsFound;
+//	auto& wordsFound = context->wordsFound;
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->iThread, s_threadInfo[context->iThread].load, s_threadInfo[context->iThread].nodes);
@@ -918,7 +928,7 @@ private:
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
 #else
-				TraverseBoard(wordsFound, curVisited, child, width, height, iX, offsetY);
+				TraverseBoard(context->wordsFound, curVisited, child, width, height, iX, offsetY);
 #endif
 
 //				while (before < wordsFound.size())
@@ -931,7 +941,7 @@ private:
 
 	}
 
-	std::sort(wordsFound.begin(), wordsFound.end());
+	std::sort(context->wordsFound.begin(), context->wordsFound.end());
 
 #if defined(NED_FLANDERS)
 	for (int wordIdx : wordsFound)
