@@ -888,7 +888,7 @@ private:
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
 #elif defined(FOR_ARM)
-				TraverseBoard(wordsFound, pRead, child, width, height, iX, offsetY);
+				TraverseBoard(wordsFound, address, child, width, height, iX, offsetY);
 #elif defined(FOR_INTEL)
 				TraverseBoard(context->wordsFound, address, child, width, height, iX, offsetY);
 #endif
