@@ -888,22 +888,19 @@ private:
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			auto* curVisited = visited + offsetY+iX;
-
-			// Try to prefetch next cache line in board
-			NearPrefetch(curVisited + kCacheLine);
-			
-			if (auto* child = root->GetChildChecked(*curVisited))
+			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
 #elif !defined(BOGGLE_ON_ARM)
-				TraverseBoard(wordsFound, curVisited, child, width, height, iX, offsetY);
+				TraverseBoard(wordsFound, &visited[offsetY+iX], child, width, height, iX, offsetY);
 #else
-				TraverseBoard(context->wordsFound, curVisited, child, width, height, iX, offsetY);
+				TraverseBoard(context->wordsFound, &visited[offsetY+iX], child, width, height, iX, offsetY);
 #endif
 			}
+
+			NearPrefetch(visited + offsetY+iX + kCacheLine);
 		}
 
 	}
