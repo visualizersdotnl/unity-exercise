@@ -52,6 +52,7 @@
 // #include <map>
 
 #ifdef _WIN32
+	#define BOGGLE_ON_INTEL
 	#include <windows.h>
 	#include <intrin.h>
 	#define FOR_INTEL
@@ -59,9 +60,12 @@
 	#include <pthread.h>
 
 	#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+		#define BOGGLE_ON_ARM
 		#include "sse2neon-02-01-2022/sse2neon.h" 
 		#define FOR_ARM
 	#else // Most likely X86/X64
+	#else 
+		// Most likely X86/X64
 		#include <intrin.h>
 		#define FOR_INTEL
 	#endif
@@ -207,7 +211,7 @@ static std::vector<Word> s_words;
 // Cheap way to tag along the tiles (few bits left)
 constexpr unsigned kTileVisitedBit = 1<<7;
 
-// If you see 'letter' and 'index' used: all it means is that an index is 0-based.
+// If you see 'letter' and 'index' used: all it means is that an index is 1-based (slot #0 reserved for parent).
 BOGGLE_INLINE_FORCE unsigned LetterToIndex(unsigned letter)
 {
 	return (letter - static_cast<unsigned>('A'))+1;
@@ -290,7 +294,6 @@ public:
 	{
 	public:
 		ThreadCopy(unsigned iThread) : 
-//			m_iThread(iThread), 
 			m_iAlloc(0)
 		{
 			// Allocate pool for all necessary nodes: why here, you glorious titwillow?
@@ -307,6 +310,7 @@ public:
 
 		~ThreadCopy()
 		{
+			// No need, we'll be ditching these blocks as a whole
 //			s_threadCustomAlloc[m_iThread]->FreeUnsafe(m_pool);
 		}
 
@@ -396,6 +400,7 @@ public:
 	// Returns non-zero if true.
 	BOGGLE_INLINE_FORCE unsigned HasChild(unsigned index) const
 	{
+		Assert(index > 0);
 		Assert(index < kAlphaRange+1);
 		return m_indexBits & (1 << index);
 	}
@@ -434,6 +439,7 @@ private:
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange+1];
 	int32_t m_wordIdx;
+	// ^ Exactly 128 bytes, keep it that way please!
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -702,8 +708,6 @@ public:
 		{
 			Assert(iThread < kNumThreads);
 			Assert(nullptr != instance);
-
-			s_iThread = m_iThread;
 		}
 
 		~ThreadContext() 
@@ -714,6 +718,8 @@ public:
 
 		void OnExecuteThread()
 		{
+			s_iThread = m_iThread;
+
 			// Handle allocation and initialization of grid memory (local to our thread, again).
 			const auto gridSize = width*height;
 			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateAlignedUnsafe(gridSize, kCacheLine));
@@ -772,7 +778,6 @@ public:
 
 #ifdef _WIN32
 				// Works as a mild stimulant, if you will
-
 				SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
 #elif defined(__GNUC__)
 				sched_param parameters;
@@ -914,7 +919,7 @@ private:
 #if defined(DEBUG_STATS)
 	if (s_threadInfo[context->iThread].load > 0)
 	{
-		const float hitPct = float(wordsFound.size())/s_threadInfo[context->iThread].load;
+		const float hitPct = float(context->wordsFound.size())/s_threadInfo[context->iThread].load;
 		debug_print("Thread %u has max. traversal depth %u (max. %u), hit rate %.2f\n", context->iThread, context->maxDepth, s_longestWord, hitPct); 
 	}
 #endif
@@ -940,8 +945,9 @@ private:
 #else
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
-
-			if (!child->HasChildren())
+			
+			// This happens in succession to an exhausted lead.
+			if (false == child->HasChildren())
 			{
 				node->RemoveChild(*visited);
 			}

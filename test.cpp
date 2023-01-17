@@ -14,7 +14,7 @@
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
 	#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-		#define HIGHSCORE_MICROSECONDS 620000  // Stress test for M1 MAX
+		#define HIGHSCORE_MICROSECONDS 610000  // Stress test for M1 MAX
 	#else
 		#define HIGHSCORE_MICROSECONDS 600000  // And for anything else, like Albert's Intel
 	#endif
