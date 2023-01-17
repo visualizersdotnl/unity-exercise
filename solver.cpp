@@ -290,7 +290,6 @@ public:
 	{
 	public:
 		ThreadCopy(unsigned iThread) : 
-//			m_iThread(iThread), 
 			m_iAlloc(0)
 		{
 			// Allocate pool for all necessary nodes: why here, you glorious titwillow?
@@ -307,6 +306,7 @@ public:
 
 		~ThreadCopy()
 		{
+			// No need, we'll be ditching these blocks as a whole
 //			s_threadCustomAlloc[m_iThread]->FreeUnsafe(m_pool);
 		}
 
@@ -738,8 +738,6 @@ public:
 		{
 			Assert(iThread < kNumThreads);
 			Assert(nullptr != instance);
-
-			s_iThread = m_iThread;
 		}
 
 		~ThreadContext() 
@@ -750,6 +748,8 @@ public:
 
 		void OnExecuteThread()
 		{
+			s_iThread = m_iThread;
+
 			// Handle allocation and initialization of grid memory (local to our thread, again).
 			const auto gridSize = width*height;
 			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateAlignedUnsafe(gridSize, kCacheLine));
