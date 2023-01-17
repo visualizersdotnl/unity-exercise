@@ -208,13 +208,13 @@ static std::vector<Word> s_words;
 // Cheap way to tag along the tiles (few bits left)
 constexpr unsigned kTileVisitedBit = 1<<7;
 
-// If you see 'letter' and 'index' used: all it means is that an index is 0-based.
+// If you see 'letter' and 'index' used: all it means is that an index is 1-based (slot #0 reserved for parent).
 BOGGLE_INLINE_FORCE unsigned LetterToIndex(unsigned letter)
 {
-	return letter - static_cast<unsigned>('A');
+	return (letter - static_cast<unsigned>('A')) + 1;
 }
 
-constexpr auto kIndexU = 'U'-'A'; // LetterToIndex('U');
+static constexpr size_t kParentIndex = 0;
 
 // FWD.
 class LoadDictionaryNode;
@@ -275,7 +275,7 @@ private:
 	int32_t m_wordIdx = -1; 
 	uint32_t m_indexBits = 0;
 	uint32_t m_wordRefCount = 1;
-	LoadDictionaryNode* m_children[kAlphaRange] = { nullptr };
+	LoadDictionaryNode* m_children[kAlphaRange + 1] = { nullptr };
 };
 
 // Actual processing node.
@@ -300,7 +300,7 @@ public:
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
-			m_pool->m_children[kIndexU] = 0;
+			m_pool->m_children[kParentIndex] = 0;
 //			m_pool->m_wordRefCount = 0;
 		}
 
@@ -342,12 +342,12 @@ public:
 #endif
 				indexBits >>= index;
 			
-				for (; index < kAlphaRange; ++index)
+				for (; index < kAlphaRange+1; ++index)
 				{
 					if (indexBits & 1)
 					{
 						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexU] = nodeLower32;
+						node->GetChild(index)->m_children[kParentIndex] = nodeLower32;
 					}
 
 					indexBits >>= 1;
@@ -369,39 +369,10 @@ public:
 	BOGGLE_INLINE_FORCE bool HasChildren() const     { return m_indexBits > 0;     }
 	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1;      }
 
-#if 0 // FIXME: review / optimize?
-	BOGGLE_INLINE void Prune(const std::string& word)
-	{
-		auto* current = this;
-		for (auto iLetter = 0; iLetter < word.size(); ++iLetter)
-		{
-			const auto index = LetterToIndex(word[iLetter]);
-			if (kIndexU != index)
-			{
-				auto* child = current->GetChildChecked(index); // Because we prune topmost in TraverseCall()
-				if (nullptr != child)
-				{
-					if (--child->m_wordRefCount == 0)
-					{
-						current->RemoveChild(index);
-					}
-
-					current = child;
-				}
-				else
-				{
-					// Most often if topmost was already pruned during traversal
-					break;
-				}
-			}
-		}
-	}
-#endif
-
 	BOGGLE_INLINE_FORCE void PruneReverse()
 	{
 		DictionaryNode* current = this;
-		while (const uint32_t rootLower32 = current->m_children[kIndexU])
+		while (const uint32_t rootLower32 = current->m_children[kParentIndex])
 		{
 			if (current->m_wordRefCount == 1)
 			{
@@ -415,15 +386,15 @@ public:
 
 #ifdef BOGGLE_ON_INTEL
 			// ARM/silicon does not like this prefetch; do we actually gain anything on Intel?
-			ImmPrefetch(reinterpret_cast<const char*>(current->m_children + kIndexU));
+			ImmPrefetch(reinterpret_cast<const char*>(current));
 #endif
 		}
 	}
 
 	BOGGLE_INLINE_FORCE void RemoveChild(unsigned index)
 	{
-		Assert(index < kAlphaRange);
-//		Assert(HasChild(index));
+		Assert(index < kAlphaRange+1);
+		Assert(HasChild(index));
 
 		m_indexBits ^= 1 << index;
 	}
@@ -431,17 +402,18 @@ public:
 	// Returns non-zero if true.
 	BOGGLE_INLINE_FORCE unsigned HasChild(unsigned index) const
 	{
-		Assert(index < kAlphaRange);
+		Assert(index > 0);
+		Assert(index < kAlphaRange+1);
 		return m_indexBits & (1 << index);
 	}
 
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index) const
 	{
-		Assert(kIndexU || HasChild(index));
+		Assert(HasChild(index));
 		return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
 	}
 
-	// Returns NULL if no child
+	// Returns NULL if no child; do *not* use to access parent (index zero)
 	BOGGLE_INLINE_FORCE DictionaryNode* GetChildChecked(unsigned index) const
 	{
 		if (!HasChild(index))
@@ -467,9 +439,9 @@ private:
 	uint32_t m_indexBits;
 	uint32_t m_wordRefCount;
 	uint64_t m_poolUpper32;
-	uint32_t m_children[kAlphaRange];
+	uint32_t m_children[kAlphaRange+1];
 	int32_t m_wordIdx;
-	uint32_t m_padding; // Pads to 128 bytes, plus we can use it!
+	// ^ Exactly 128 bytes, keep it that way please!
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -925,8 +897,6 @@ private:
 			
 			if (auto* child = root->GetChildChecked(*curVisited))
 			{
-//				size_t before = wordsFound.size();
-
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
@@ -935,12 +905,6 @@ private:
 #else
 				TraverseBoard(context->wordsFound, curVisited, child, width, height, iX, offsetY);
 #endif
-
-//				while (before < wordsFound.size())
-//				{
-//					root->Prune(s_words[wordsFound[before]].word);
-//					++before;
-//				}
 			}
 		}
 
