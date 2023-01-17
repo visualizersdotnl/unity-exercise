@@ -8,20 +8,14 @@
 	- FIXMEs.
 
 	To do (low priority):
-		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver.
+		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver; or should I precalculate even more?
 		- Fix class members (notation).
 
-	There's this idea floating that if you have a hash and eliminate a part of the dict. tree that way
-	by special-casing the first 3 characters you're golden, but it did not really help at all plus it 
-	makes the algorithm less flexible. What if someone decides to change the rules? ;)
-
 	Notes:
-		- Currently tested on Windows 10 (VS2017), Linux & OSX.
-		- It's currently faster on a proper multi-core CPU than the (Intel) Core M, probably due to those allocator locks.
+		- Currently tested on Windows 10 (VS2019), Linux & OSX.
+		- It's currently faster on a proper multi-core CPU than the (Intel) Core M.
 		- Compile with full optimization (-O3 for ex.) for best performance.
 		  Disabling C++ exceptions helps too, as they hinder inlining and are not used.
-		  Please look at Albert's makefile for Linux/OSX optimal parameters!
-		  And don't hesitate to play with them a little!
 		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
 		  ** I violate this to tell if this was compiled with or without NED_FLANDERS (see below).
 		- If LoadDictionary() fails, the current dictionary will be empty and FindWords() will simply yield zero results.
@@ -30,88 +24,7 @@
 		- If an invalid board is supplied (anything non-alphanumerical detected) the query is skipped, yielding zero results.
 		- My class design isn't really tight (functions and public member values galore), but for now that's fine.
 		
-		** Some of these stability claims only work if NED_FLANDERS (see below) is defined! **
-
-	** 14/01/2020 **
-
-	Fiddling around to make this faster; I have a few obvious things in mind; I won't be beautifying
-	the code, so you're warned.
-
-	- This is a non-Morton version that now handily outperforms the Morton version, so I deleted that one.
-	- There's quite a bit of branching going on but trying to be smart doesn't always please the predictor/pipeline the best way, rather it's quite fast
-	  in critical places because the predictor can do it's work very well (i.e. the cases lean 99% towards one side).
-	- Just loosely using per-thread instances of CustomAlloc doesn't improve performance, I still think it could work because it enhances
-	  locality and eliminates the need for those mutex locks.
-
-	Threading issues (as seen in/by Superluminal):
-
-	- Even distribution of words does not work well, but distributing them by letter is faster even though the thread loads are
-	  uneven; it's a matter of how much traversal is done and the impact that has.
-	- Using twice the amount of threads that would be sensible works way faster than bigger loads (once again, loads matter).
-	- Currently there is code in place to use the "right" amount of threads and distribute words evenly but it is commented out.
-	- I could add an option to sort the main dictionary, though currently I am loading a sorted version.
-
-	Use profilers (MSVC & Superluminal) to really figure out what either works so well by accident or what could be fixed
-	to use the "normal" amount of threads, evenly distributing the load. My gut says it's a matter of recursion.
-
-	Thinking out loud: let's say I end up at the point of traversal with only one letter constantly being asked for (since the
-	only child of the root node is 1 single letter), that probably means I ask for the same piece of memory again and again and
-	cause less cache misses and less needless traversal.
-
-	Conclusion for now: this model works because multiple smaller threads have a smaller footprint due to touching less memory,
-	traversing less and thus are likely to be done much faster. The fact that some sleep more than others might just have to be
-	taken for granted. That however does not mean that the memory allocation strategy for the tree must be altered by using sequential
-	pools.
-
-	** 16/01/2020 **
-
-	I replaced DeepCopy for ThreadCopy, which keeps a sequential list of nodes and hands them out as needed, and releases the
-	entire block of memory when the thread is done. I can see a speed increase without breaking consistent results.
-
-	** 26/12/2022 **
-
-	Uncle Henrik pointed out clearly and justly that my load balancing is off. I'm also toying around with the allocation
-	and initialization of the node.
-
-	** 30/12/2022 **
-	
-	More optimizations w/Albert. Now splitting the dictionary over an/the amount of threads.
-
-	** 02/01/2023 **
-
-	Introducing 'sse2neon'.
-	Try OpenMP?
-
-	** 03/01/2023 **
-
-	Things that matter:
-	- Node size (multiple megabytes per thread!).
-	- Keep traversal as simple as possible, smart early-outs not seldom cause execution to shoot up due to unpredictability.
-	- SSE non-cached writes did not help at all -> Removed.
-	- Most low-level concerns are valid at this point.
-
-	** 05/01/2023 **
-
-	- Just using one block of memory per thread now, got a few bits to spare even.
-	- Misc. fixes & cleaning.
-
-	** 12/01/2023 **
-	
-	- Several mcro-optimizations (see Github history), still adhering, somewhat, to the Unity test API requirements.
-	- I've move adding the offset to the 'visited' address to the caller.
-	- It, logically (right?), seems important to have as little on the stack as possible during traversal.
-	- Trying some things using prefetches; it looks as if there's not much to gain. On Apple M though...
-
-	** 13+14/01/2023 **
-	
-	- Allocators: changed allocation strategy where each thread has it's own heap allocated from the global one.
-	- Optimized allocators in various ways; we *do* however not free the heap on exit, but who cares, right?
-
-	** 16/01/2023 **
-	
-	- Optimized pruning.
-	- Set custom allocator (TLSF) heap to use 4-byte alignment in 64-bit builds as well (see top of impl. file).
-	- Reverted some allocations back to the CRT heap, which just performs better, lesson: don't defer it all to a single mechanism without measuring/thinking.
+	Most of these (mostly thread-safety related) stability claims only work if NED_FLANDERS (see below) is defined.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -162,7 +75,7 @@
 // #define ASSERTIONS
 
 #define GLOBAL_MEMORY_POOL_SIZE (1024*1024)*2000 // Min. 2GB!
-#include "simple-tlsf.h" // Depends on Ned Flanders :)
+#include "custom-allocator.h" // Depends on Ned Flanders :)
 
 // Undef. to kill prefetching
 #ifdef _WIN32
@@ -242,9 +155,9 @@ BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
 
 #else
 
-BOGGLE_INLINE_FORCE static void FarPrefetch(const char* address) {}
+BOGGLE_INLINE_FORCE static void FarPrefetch(const char* address)  {}
 BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address) {}
-BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address) {}
+BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)  {}
 
 #endif
 
@@ -253,9 +166,6 @@ BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address) {}
 class Word
 {
 public:
-	CUSTOM_NEW
-	CUSTOM_DELETE
-
 	Word(unsigned score, const std::string& word) :
 	score(score)
 	{
@@ -314,8 +224,8 @@ public:
 	// Destructor is not called when using ThreadCopy!
 	~LoadDictionaryNode()
 	{
-		for (unsigned iChar = 0; iChar < kAlphaRange; ++iChar)
-			delete m_children[iChar];
+		for (auto* child : m_children)
+			delete child;
 	}
 
 	// Only called from LoadDictionary().
@@ -348,6 +258,7 @@ public:
 	}
 
 private:
+	// This order in conjuction with ThreadCopy below has proven to be fast.
 	int32_t m_wordIdx = -1; 
 	uint32_t m_indexBits = 0;
 	uint32_t m_wordRefCount = 1;
@@ -360,17 +271,11 @@ class DictionaryNode
 	friend class LoadDictionaryNode;
 
 public:
-	CUSTOM_NEW_THREAD(s_iThread)
-	CUSTOM_DELETE_THREAD(s_iThread)
-		
 	DictionaryNode() {}
 
 	class ThreadCopy
 	{
 	public:
-		CUSTOM_NEW_THREAD(s_iThread)
-		CUSTOM_DELETE_THREAD(s_iThread)
-	
 		ThreadCopy(unsigned iThread) : 
 //			m_iThread(iThread), 
 			m_iAlloc(0)
@@ -511,7 +416,6 @@ public:
 
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index) const
 	{
-		constexpr auto kIndexU = 'U'-'A'; // LetterToIndex('U');
 		Assert(kIndexU || HasChild(index));
 		return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
 	}
@@ -533,16 +437,17 @@ public:
 		return m_wordIdx;
 	}
 
+	BOGGLE_INLINE_FORCE void OnWordFound()
+	{
+		m_wordIdx = -1;
+	}
+
 private:
 	uint32_t m_indexBits;
-public:
 	int32_t m_wordRefCount;
-private:
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
-public:
 	int32_t m_wordIdx;
-private:
 	uint32_t m_padding; // Pads to 128 bytes, plus we can use it!
 };
 
@@ -767,14 +672,14 @@ void FreeDictionary()
 	DictionaryLock lock;
 #endif
 	{
-		// Delete roots;
+		// Delete per-thread dictionary trees.
 		for (auto* root : s_threadDicts) 
 			delete root;
 
 		s_threadDicts.clear();
 
-		// Reset thread information.		
-		s_threadInfo.resize(kNumThreads, std::move(ThreadInfo()));
+		// Reset thread information.
+		s_threadInfo.resize(kNumThreads);
 
 		// Reset counters.
 		s_longestWord = 0;
@@ -816,8 +721,6 @@ public:
 	class ThreadContext
 	{
 	public:
-		CUSTOM_NEW_THREAD(s_iThread)
-		CUSTOM_DELETE_THREAD(s_iThread)
 
 		ThreadContext(unsigned iThread, const Query* instance) :
 		width(instance->m_width)
@@ -979,7 +882,7 @@ private:
 	context->OnExecuteThread();
 
 	// Create copy of source dictionary tree
-	auto threadCopy = DictionaryNode::ThreadCopy(context->m_iThread);
+	const auto threadCopy = DictionaryNode::ThreadCopy(context->m_iThread);
 	auto* root = threadCopy.Get();
 
 	// Grab stuff from context
@@ -1180,7 +1083,7 @@ private:
 		wordsFound.push_back(wordIdx);
 #endif
 
-		node->m_wordIdx = -1;
+		node->OnWordFound();
 		node->PruneReverse();
 	}
 }

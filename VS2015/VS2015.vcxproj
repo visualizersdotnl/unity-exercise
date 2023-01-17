@@ -194,8 +194,9 @@
     <ClInclude Include="..\bit-tricks.h" />
     <ClInclude Include="..\inline.h" />
     <ClInclude Include="..\random.h" />
-    <ClInclude Include="..\simple-tlsf.h" />
+    <ClInclude Include="..\custom-allocator.h" />
     <ClInclude Include="..\spinlock.h" />
+    <ClInclude Include="..\sse2neon-02-01-2022\sse2neon.h" />
     <ClInclude Include="..\timing.h" />
     <ClInclude Include="..\tlsf\tlsf.h" />
   </ItemGroup>
@@ -214,9 +215,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\solver_submitted.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\test.cpp">

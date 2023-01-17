@@ -19,6 +19,12 @@
     <Filter Include="tlsf">
       <UniqueIdentifier>{367b98c2-379d-42f3-8dd2-c7ba96e26d59}</UniqueIdentifier>
     </Filter>
+    <Filter Include="sse2neon">
+      <UniqueIdentifier>{beef2ba3-06ac-4c65-8266-e42c1e7d259a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="legacy">
+      <UniqueIdentifier>{e6170751-ce8f-4dd5-bd73-99c86a521d0e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\api.h">
@@ -36,7 +42,7 @@
     <ClInclude Include="..\bit-tricks.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\simple-tlsf.h">
+    <ClInclude Include="..\custom-allocator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\spinlock.h">
@@ -47,6 +53,9 @@
     </ClInclude>
     <ClInclude Include="..\timing.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sse2neon-02-01-2022\sse2neon.h">
+      <Filter>sse2neon</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -75,7 +84,7 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\solver_submitted.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>legacy</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
