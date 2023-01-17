@@ -1015,15 +1015,11 @@ private:
 			TraverseCall(context, node, iX+1, offsetY+width, depth);
 	}
 #else
-	// 1st [ X X X ]
-	// 2nd [ X O X ]
-	// 3rd [ X X X ]
-
 	if (offsetY >= width) 
 	{
-		if (iX > 0) TraverseCall(wordsFound, visited - width-1, node, width, height, iX-1, offsetY-width);
-		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
 		if (iX < width-1) TraverseCall(wordsFound, visited - width+1, node, width, height, iX+1, offsetY-width);
+		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
+		if (iX > 0) TraverseCall(wordsFound, visited - width-1, node, width, height, iX-1, offsetY-width);
 	}
 
 	if (iX > 0)
@@ -1038,9 +1034,9 @@ private:
 
 	if (offsetY < width*(height-1))
 	{
-		if (iX > 0) TraverseCall(wordsFound, visited + width-1, node, width, height, iX-1, offsetY+width);
-		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width);
 		if (iX < width-1) TraverseCall(wordsFound, visited + width+1, node, width, height, iX+1, offsetY+width);
+		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width);
+		if (iX > 0) TraverseCall(wordsFound, visited + width-1, node, width, height, iX-1, offsetY+width);
 	}
 #endif
 
