@@ -298,6 +298,7 @@ public:
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
 			m_pool->m_children[kIndexU] = 0;
+//			m_pool->m_wordRefCount = 0;
 		}
 
 		~ThreadCopy()
@@ -320,9 +321,11 @@ public:
 			unsigned indexBits = node->m_indexBits = parent->m_indexBits;
 			node->m_wordRefCount = parent->m_wordRefCount;
 			node->m_wordIdx = parent->m_wordIdx;
-			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000; // Yup, this will be downright dirty!
 
-			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node)&0xffffffff;
+			// Yes, you're seeing this correctly, we're chopping a 64-bit pointer in half.
+			// Quite volatile, but usually works out fine.
+			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000;
+			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node) & 0xffffffff;
 
 #ifdef _WIN32
 			unsigned long index;
@@ -395,14 +398,13 @@ public:
 	BOGGLE_INLINE_FORCE void PruneReverse()
 	{
 		DictionaryNode* current = this;
-		while (uint32_t rootLower32 = current->m_children[kIndexU])
+		while (const uint32_t rootLower32 = current->m_children[kIndexU])
 		{
 			if (current->m_wordRefCount == 1)
 			{
 				current->m_indexBits = 0;
 			}
 
-			--current->m_wordRefCount;
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 			ImmPrefetch(reinterpret_cast<const char*>(current->m_children + kIndexU));
 		}
@@ -453,7 +455,7 @@ public:
 
 private:
 	uint32_t m_indexBits;
-	int32_t m_wordRefCount;
+	uint32_t m_wordRefCount;
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange];
 	int32_t m_wordIdx;

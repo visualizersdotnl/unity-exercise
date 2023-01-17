@@ -115,8 +115,8 @@ static CustomAlloc s_globalCustomAlloc(GLOBAL_MEMORY_POOL_SIZE);
 
 // Per-thread heap/pool
 static std::vector<CustomAlloc> s_threadCustomAlloc;
-#define CUSTOM_NEW_THREAD(ThreadIndex) void* operator new(size_t size)                { printf("THREADNEW\n"); return s_threadCustomAlloc[ThreadIndex].AllocateUnsafe(size); }
-#define CUSTOM_NEW_ARRAY_THREAD(ThreadIndex) void* operator new[](size_t size)        { printf("THREADNEWARR\n"); return s_threadCustomAlloc[ThreadIndex].AllocateUnsafe(size); }
+#define CUSTOM_NEW_THREAD(ThreadIndex) void* operator new(size_t size)                { return s_threadCustomAlloc[ThreadIndex].AllocateUnsafe(size); }
+#define CUSTOM_NEW_ARRAY_THREAD(ThreadIndex) void* operator new[](size_t size)        { return s_threadCustomAlloc[ThreadIndex].AllocateUnsafe(size); }
 #define CUSTOM_DELETE_THREAD(ThreadIndex) void operator delete(void* address)         { return s_threadCustomAlloc[ThreadIndex].FreeUnsafe(address);  }
 #define CUSTOM_DELETE_ARRAY_THREAD(ThreadIndex) void operator delete[](void* address) { return s_threadCustomAlloc[ThreadIndex].FreeUnsafe(address);  }
 
