@@ -128,9 +128,6 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 
 #endif
 
-// TLS
-static thread_local unsigned s_iThread;
-
 constexpr size_t kCacheLine = sizeof(size_t)*8;
 
 #ifndef NO_PREFETCHES
@@ -347,7 +344,7 @@ public:
 					if (indexBits & 1)
 					{
 						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexParent] = nodeLower32;
+						node->GetChild(index)->m_children[kIndexParent] = (m_pool == node) ? 0 : nodeLower32;
 					}
 
 					indexBits >>= 1;
@@ -381,7 +378,7 @@ public:
 			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
 
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-			ImmPrefetch(reinterpret_cast<const char*>(current->m_children));
+//			ImmPrefetch(reinterpret_cast<const char*>(current->m_children));
 		}
 	}
 
@@ -429,6 +426,7 @@ public:
 	}
 
 private:
+	// This is aligned to 128 bytes, keep it that way!
 	uint32_t m_indexBits;
 	int32_t m_wordRefCount;
 	uint64_t m_poolUpper32;
@@ -702,8 +700,6 @@ public:
 		{
 			Assert(iThread < kNumThreads);
 			Assert(nullptr != instance);
-
-			s_iThread = m_iThread;
 		}
 
 		~ThreadContext() 
