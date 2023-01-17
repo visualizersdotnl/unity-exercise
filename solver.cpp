@@ -369,8 +369,7 @@ public:
 	BOGGLE_INLINE_FORCE bool HasChildren() const     { return m_indexBits > 0;     }
 	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1;      }
 
-#if 0
-	// FIXME: experimental
+#if 0 // FIXME: review / optimize?
 	BOGGLE_INLINE void Prune(const std::string& word)
 	{
 		auto* current = this;
@@ -404,12 +403,13 @@ public:
 		DictionaryNode* current = this;
 		while (const uint32_t rootLower32 = current->m_children[kIndexU])
 		{
-			if (--current->m_wordRefCount == 0)
+			if (current->m_wordRefCount == 1)
 			{
 				current->m_indexBits = 0;
-				current->m_wordRefCount = 0;
 				break;
 			}
+
+			--current->m_wordRefCount;
 
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 
@@ -1093,13 +1093,14 @@ private:
 
 	if (wordIdx >= 0) 
 	{
+		node->OnWordFound();
+
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
 #else
 		wordsFound.push_back(wordIdx);
 #endif
 
-		node->OnWordFound();
 		node->PruneReverse();
 	}
 }
