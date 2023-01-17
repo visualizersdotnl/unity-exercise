@@ -825,7 +825,7 @@ public:
 
 			for (const auto& context : contexts)
 			{
-				for (int wordIdx : context.wordsFound)
+				for (unsigned wordIdx : context.wordsFound)
 				{
 					const auto& word = s_words[wordIdx];
 					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
@@ -850,8 +850,7 @@ public:
 
 			for (const auto& context : contexts)
 			{
-				const auto& wordsFound = context->wordsFound;
-				for (int wordIdx : wordsFound)
+				for (unsigned wordIdx : context->wordsFound)
 				{
 					const auto& word = s_words[wordIdx]; 
 					*words_cstr = resBuf;
@@ -900,7 +899,9 @@ private:
 	// Attempt to prefetch grid
 	NearPrefetch(visited);
 
-//	auto& wordsFound = context->wordsFound;
+#if !defined(BOGGLE_ON_ARM)
+	auto& wordsFound = context->wordsFound;
+#endif
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->iThread, s_threadInfo[context->iThread].load, s_threadInfo[context->iThread].nodes);
@@ -927,6 +928,8 @@ private:
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
+#elif !defined(BOGGLE_ON_ARM)
+				TraverseBoard(wordsFound, curVisited, child, width, height, iX, offsetY);
 #else
 				TraverseBoard(context->wordsFound, curVisited, child, width, height, iX, offsetY);
 #endif
@@ -941,10 +944,14 @@ private:
 
 	}
 
+#if !defined(BOGGLE_ON_ARM)
+	std::sort(wordsFound.begin(), wordsFound.end());
+#else
 	std::sort(context->wordsFound.begin(), context->wordsFound.end());
+#endif
 
 #if defined(NED_FLANDERS)
-	for (int wordIdx : wordsFound)
+	for (unsigned wordIdx : context->wordsFound)
 	{
 		const size_t length = s_words[wordIdx].word.length();
 		context->reqStrBufSize += length + 1; // Plus one for zero terminator
@@ -954,7 +961,7 @@ private:
 #if defined(DEBUG_STATS)
 	if (s_threadInfo[context->iThread].load > 0)
 	{
-		const float hitPct = float(wordsFound.size())/s_threadInfo[context->iThread].load;
+		const float hitPct = float(context->wordsFound.size())/s_threadInfo[context->iThread].load;
 		debug_print("Thread %u has max. traversal depth %u (max. %u), hit rate %.2f\n", context->iThread, context->maxDepth, s_longestWord, hitPct); 
 	}
 #endif
