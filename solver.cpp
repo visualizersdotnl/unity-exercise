@@ -404,12 +404,12 @@ public:
 		DictionaryNode* current = this;
 		while (const uint32_t rootLower32 = current->m_children[kIndexU])
 		{
-			if (current->m_wordRefCount == 1)
+			if (--current->m_wordRefCount == 0)
 			{
 				current->m_indexBits = 0;
+				current->m_wordRefCount = 0;
+				break;
 			}
-
-			--current->m_wordRefCount;
 
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 
