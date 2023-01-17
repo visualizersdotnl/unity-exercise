@@ -54,13 +54,16 @@
 #ifdef _WIN32
 	#include <windows.h>
 	#include <intrin.h>
+	#define FOR_INTEL
 #elif __GNUC__
 	#include <pthread.h>
 
 	#if defined(__ARM_NEON) || defined(__ARM_NEON__)
 		#include "sse2neon-02-01-2022/sse2neon.h" 
+		#define FOR_ARM
 	#else // Most likely X86/X64
 		#include <intrin.h>
+		#define FOR_INTEL
 	#endif
 #endif
 
@@ -155,7 +158,7 @@ BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
 // Immediate prefetch (Win32: all levels if possible)
 BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
 {
-#ifdef __GNUC__
+#if defined(__GNUC__) && defined(FOR_INTEL)
 	__builtin_prefetch(address, 1, 0);
 #elif defined(_WIN32)
 	_mm_prefetch(address, _MM_HINT_T0);
@@ -207,10 +210,11 @@ constexpr unsigned kTileVisitedBit = 1<<7;
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
 BOGGLE_INLINE_FORCE unsigned LetterToIndex(unsigned letter)
 {
-	return letter - static_cast<unsigned>('A');
+	return (letter - static_cast<unsigned>('A'))+1;
 }
 
-constexpr auto kIndexU = 'U'-'A'; // LetterToIndex('U');
+// constexpr auto kIndexU = 'U'-'A'; // LetterToIndex('U');
+constexpr auto kIndexParent = 0;
 
 // FWD.
 class LoadDictionaryNode;
@@ -270,8 +274,8 @@ private:
 	// This order in conjuction with ThreadCopy below has proven to be fast.
 	int32_t m_wordIdx = -1; 
 	uint32_t m_indexBits = 0;
-	uint32_t m_wordRefCount = 1;
-	LoadDictionaryNode* m_children[kAlphaRange] = { nullptr };
+	int32_t m_wordRefCount = 1;
+	LoadDictionaryNode* m_children[kAlphaRange+1] = { nullptr };
 };
 
 // Actual processing node.
@@ -297,7 +301,7 @@ public:
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
-			m_pool->m_children[kIndexU] = 0;
+			m_pool->m_children[kIndexParent] = 0;
 //			m_pool->m_wordRefCount = 0;
 		}
 
@@ -338,12 +342,12 @@ public:
 #endif
 				indexBits >>= index;
 			
-				for (; index < kAlphaRange; ++index)
+				for (; index < kAlphaRange+1; ++index)
 				{
 					if (indexBits & 1)
 					{
 						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexU] = nodeLower32;
+						node->GetChild(index)->m_children[kIndexParent] = nodeLower32;
 					}
 
 					indexBits >>= 1;
@@ -362,57 +366,28 @@ public:
 	~DictionaryNode() = delete;
 
 public:
-	BOGGLE_INLINE_FORCE bool HasChildren() const     { return m_indexBits > 0;     }
-	BOGGLE_INLINE_FORCE bool IsWord() const          { return m_wordIdx > -1;      }
-
-#if 0
-	// FIXME: experimental
-	BOGGLE_INLINE void Prune(const std::string& word)
-	{
-		auto* current = this;
-		for (auto iLetter = 0; iLetter < word.size(); ++iLetter)
-		{
-			const auto index = LetterToIndex(word[iLetter]);
-			if (kIndexU != index)
-			{
-				auto* child = current->GetChildChecked(index); // Because we prune topmost in TraverseCall()
-				if (nullptr != child)
-				{
-					if (--child->m_wordRefCount == 0)
-					{
-						current->RemoveChild(index);
-					}
-
-					current = child;
-				}
-				else
-				{
-					// Most often if topmost was already pruned during traversal
-					break;
-				}
-			}
-		}
+	BOGGLE_INLINE_FORCE bool HasChildren() const { 
+		return m_indexBits;  
 	}
-#endif
 
 	BOGGLE_INLINE_FORCE void PruneReverse()
 	{
 		DictionaryNode* current = this;
-		while (const uint32_t rootLower32 = current->m_children[kIndexU])
+		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
 		{
-			if (current->m_wordRefCount == 1)
-			{
+			if (1 == current->m_wordRefCount)
 				current->m_indexBits = 0;
-			}
+
+			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
 
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-			ImmPrefetch(reinterpret_cast<const char*>(current->m_children + kIndexU));
+			ImmPrefetch(reinterpret_cast<const char*>(current->m_children));
 		}
 	}
 
 	BOGGLE_INLINE_FORCE void RemoveChild(unsigned index)
 	{
-		Assert(index < kAlphaRange);
+		Assert(index < kAlphaRange+1);
 //		Assert(HasChild(index));
 
 		m_indexBits ^= 1 << index;
@@ -421,17 +396,17 @@ public:
 	// Returns non-zero if true.
 	BOGGLE_INLINE_FORCE unsigned HasChild(unsigned index) const
 	{
-		Assert(index < kAlphaRange);
+		Assert(index < kAlphaRange+1);
 		return m_indexBits & (1 << index);
 	}
 
 	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index) const
 	{
-		Assert(kIndexU || HasChild(index));
+		Assert(0 == index || HasChild(index));
 		return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
 	}
 
-	// Returns NULL if no child
+	// Returns NULL if no child.
 	BOGGLE_INLINE_FORCE DictionaryNode* GetChildChecked(unsigned index) const
 	{
 		if (!HasChild(index))
@@ -442,7 +417,7 @@ public:
 		}
 	}
 
-	// If not -1, it's pointing to a word
+	// If not -1, it's pointing to a word.
 	BOGGLE_INLINE_FORCE int32_t GetWordIndex() const
 	{
 		return m_wordIdx;
@@ -455,11 +430,10 @@ public:
 
 private:
 	uint32_t m_indexBits;
-	uint32_t m_wordRefCount;
+	int32_t m_wordRefCount;
 	uint64_t m_poolUpper32;
-	uint32_t m_children[kAlphaRange];
+	uint32_t m_children[kAlphaRange+1];
 	int32_t m_wordIdx;
-	uint32_t m_padding; // Pads to 128 bytes, plus we can use it!
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -801,7 +775,10 @@ public:
 
 				SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
 #elif defined(__GNUC__)
-				// FIXME: should I?
+				sched_param parameters;
+				const auto maximum = sched_get_priority_max(SCHED_RR);
+				parameters.sched_priority = maximum-1;
+				pthread_setschedparam(threads[iThread].native_handle(), SCHED_RR, &parameters);
 #endif
 			}
 
@@ -815,7 +792,7 @@ public:
 
 			for (const auto& context : contexts)
 			{
-				for (int wordIdx : context.wordsFound)
+				for (unsigned wordIdx : context.wordsFound)
 				{
 					const auto& word = s_words[wordIdx];
 					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
@@ -840,8 +817,7 @@ public:
 
 			for (const auto& context : contexts)
 			{
-				const auto& wordsFound = context->wordsFound;
-				for (int wordIdx : wordsFound)
+				for (unsigned wordIdx : context.wordsFound)
 				{
 					const auto& word = s_words[wordIdx]; 
 					*words_cstr = resBuf;
@@ -890,7 +866,9 @@ private:
 	// Attempt to prefetch grid
 	NearPrefetch(visited);
 
+#ifndef FOR_INTEL
 	auto& wordsFound = context->wordsFound;
+#endif
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->iThread, s_threadInfo[context->iThread].load, s_threadInfo[context->iThread].nodes);
@@ -905,36 +883,28 @@ private:
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			auto* curVisited = visited + offsetY+iX;
-
 			// Try to prefetch next cache line in board
-			NearPrefetch(curVisited + kCacheLine);
-			
-			if (auto* child = root->GetChildChecked(*curVisited))
-			{
-//				size_t before = wordsFound.size();
+			NearPrefetch(visited + offsetY+iX + kCacheLine);
 
+			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
+			{
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
-#else
-				TraverseBoard(wordsFound, curVisited, child, width, height, iX, offsetY);
+#elif defined(FOR_ARM)
+				TraverseBoard(wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
+#elif defined(FOR_INTEL)
+				TraverseBoard(context->wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
 #endif
-
-//				while (before < wordsFound.size())
-//				{
-//					root->Prune(s_words[wordsFound[before]].word);
-//					++before;
-//				}
 			}
 		}
 
 	}
 
-	std::sort(wordsFound.begin(), wordsFound.end());
+	std::sort(context->wordsFound.begin(), context->wordsFound.end());
 
 #if defined(NED_FLANDERS)
-	for (int wordIdx : wordsFound)
+	for (unsigned wordIdx : context->wordsFound)
 	{
 		const size_t length = s_words[wordIdx].word.length();
 		context->reqStrBufSize += length + 1; // Plus one for zero terminator
@@ -1037,32 +1007,24 @@ private:
 			TraverseCall(context, node, iX+1, offsetY+width, depth);
 	}
 #else
-	// 1st [ X X X ]
-	// 2nd [ X O X ]
-	// 3rd [ X X X ]
-
 	if (offsetY >= width) 
 	{
-		if (iX > 0) TraverseCall(wordsFound, visited - width-1, node, width, height, iX-1, offsetY-width);
-		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
 		if (iX < width-1) TraverseCall(wordsFound, visited - width+1, node, width, height, iX+1, offsetY-width);
+		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
+		if (iX > 0) TraverseCall(wordsFound, visited - width-1, node, width, height, iX-1, offsetY-width);
 	}
 
 	if (iX > 0)
-	{
 		TraverseCall(wordsFound, visited-1, node, width, height, iX-1, offsetY);
-	}
 
 	if (iX < width-1) 
-	{
 		TraverseCall(wordsFound, visited+1, node, width, height, iX+1, offsetY);
-	}
 
 	if (offsetY < width*(height-1))
 	{
-		if (iX > 0) TraverseCall(wordsFound, visited + width-1, node, width, height, iX-1, offsetY+width);
-		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width);
 		if (iX < width-1) TraverseCall(wordsFound, visited + width+1, node, width, height, iX+1, offsetY+width);
+		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width);
+		if (iX > 0) TraverseCall(wordsFound, visited + width-1, node, width, height, iX-1, offsetY+width);
 	}
 #endif
 
@@ -1074,13 +1036,14 @@ private:
 
 	if (wordIdx >= 0) 
 	{
+		node->OnWordFound();
+
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
 #else
 		wordsFound.push_back(wordIdx);
 #endif
 
-		node->OnWordFound();
 		node->PruneReverse();
 	}
 }
