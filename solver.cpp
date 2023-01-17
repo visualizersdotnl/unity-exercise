@@ -90,9 +90,7 @@
 #include "custom-allocator.h" // Depends on Ned Flanders :)
 
 // Undef. to kill prefetching
-#ifdef _WIN32
-//	#define NO_PREFETCHES // Seems to have some effect on Apple M
-#endif
+// #define NO_PREFETCHES 
 
 // Max. word length (for optimization)
 #define MAX_WORD_LEN 15
@@ -313,6 +311,9 @@ public:
 		uint32_t Copy(LoadDictionaryNode* parent)
 		{
 			DictionaryNode* node = m_pool + m_iAlloc;
+
+			const unsigned rootMask = (m_pool != node) * 0xffffffff;
+
 			++m_iAlloc;
 
 			unsigned indexBits = node->m_indexBits = parent->m_indexBits;
@@ -324,7 +325,6 @@ public:
 			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000;
 			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node) & 0xffffffff;
 
-			const unsigned rootMask = (m_pool != node) * 0xffffffff;
 
 #ifdef _WIN32
 			unsigned long index;
@@ -370,7 +370,7 @@ public:
 		DictionaryNode* current = this;
 		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
 		{
-			if (1 == current->m_wordRefCount)
+			if (0 == current->m_wordRefCount - 1)
 				current->m_indexBits = 0;
 
 			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
@@ -672,9 +672,13 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
+static thread_local unsigned s_iThread;
+
 class Query
 {
 public:
+//	THREAD_CUSTOM_ALLOC_OPERATORS(s_iThread)
+
 	Query(Results& results, const char* sanitized, unsigned width, unsigned height) :
 		m_results(results)
 ,		m_sanitized(sanitized)
@@ -693,7 +697,6 @@ public:
 		width(instance->m_width)
 ,		height(instance->m_height)
 ,		sanitized(instance->m_sanitized)
-,		visited(nullptr)
 ,		m_iThread(iThread)
 		{
 			Assert(iThread < kNumThreads);
@@ -708,6 +711,8 @@ public:
 
 		void OnExecuteThread()
 		{
+			s_iThread = m_iThread;
+
 			// Handle allocation and initialization of grid memory (local to our thread, again).
 			const auto gridSize = width*height;
 			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateAlignedUnsafe(gridSize, kCacheLine));
@@ -853,12 +858,11 @@ private:
 	auto* root = threadCopy.Get();
 
 	// Grab stuff from context
-	auto* visited = context->visited;
 	const unsigned width  = context->width;
 	const unsigned height = context->height;
 
-	// Attempt to prefetch grid
-	NearPrefetch(visited);
+	auto* visited = context->visited; // Attempt to prefetch grid
+	FarPrefetch(visited);
 
 #ifndef FOR_INTEL
 	auto& wordsFound = context->wordsFound;
@@ -877,29 +881,24 @@ private:
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			// Try to prefetch next cache line in board
-			NearPrefetch(visited + offsetY+iX + kCacheLine);
-
-			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
+			auto *address = &visited[offsetY+iX];
+			if (auto* child = root->GetChildChecked(*address))
 			{
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
 #elif defined(FOR_ARM)
-				TraverseBoard(wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
+				TraverseBoard(wordsFound, pRead, child, width, height, iX, offsetY);
 #elif defined(FOR_INTEL)
-				TraverseBoard(context->wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
+				TraverseBoard(context->wordsFound, address, child, width, height, iX, offsetY);
 #endif
 			}
-		}
 
+			NearPrefetch(visited + offsetY+iX+kCacheLine);
+		}
 	}
 
-#ifdef FOR_ARM
-	std::sort(wordsFound.begin(), wordsFound.end());
-#else
 	std::sort(context->wordsFound.begin(), context->wordsFound.end());
-#endif
 
 #if defined(NED_FLANDERS)
 	for (unsigned wordIdx : context->wordsFound)
@@ -939,7 +938,7 @@ private:
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
 
-			if (0 == child->HasChildren())
+			if (!child->HasChildren())
 				node->RemoveChild(*visited);
 		}
 	}
@@ -1033,14 +1032,13 @@ private:
 	if (wordIdx >= 0) 
 	{
 		node->OnWordFound();
+		node->PruneReverse();
 
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
 #else
 		wordsFound.push_back(wordIdx);
 #endif
-
-		node->PruneReverse();
 	}
 }
 
