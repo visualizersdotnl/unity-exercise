@@ -1155,9 +1155,9 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		for (auto iThread = 0; iThread < kNumThreads; ++iThread)
 		{
 			const size_t threadHeapSize = 
-				gridSize+kCacheLine+overhead +
-				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + kCacheLine+overhead +
-				1024*64;
+				gridSize + overhead +                                           // Visited grid
+				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + overhead + // Dictionary nodes
+				1024*1024;                                                      // For overhead and alignment
 	
 #ifdef NED_FLANDERS			
 			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
