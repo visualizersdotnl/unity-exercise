@@ -67,11 +67,11 @@ int main(int argC, char **arguments)
 	std::vector<std::chrono::microseconds> durations;
 	durations.reserve(NUM_QUERIES);
 
-	std::vector<Results> resultsToFree;
-	resultsToFree.reserve(NUM_QUERIES);
-
 #ifdef HIGHSCORE_LOOP
 	std::chrono::microseconds prevFastest(HIGHSCORE_MICROSECONDS<<8); // Just needed safe 'big' number to compare against the first time around
+#else
+	std::vector<Results> resultsToFree;
+	resultsToFree.reserve(NUM_QUERIES);
 #endif
 
 	printf("- Loading dictionary...\n");
@@ -146,6 +146,8 @@ GenerateBoard:
 RetrySameBoard:
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
+		std::this_thread::sleep_for(std::chrono::microseconds(10000)); // Sleep for 0,01s
+
 		const auto start = std::chrono::high_resolution_clock::now();
 		const Results results = FindWords(board.get(), xSize, ySize);
 		const auto end = std::chrono::high_resolution_clock::now();
@@ -185,12 +187,14 @@ RetrySameBoard:
 	}
 #endif
 
-#if defined(PRINT_WORDS) && !defined(HIGHSCORE_LOOP)
+#ifdef HIGHSCORE_LOOP
+
+#if defined(PRINT_WORDS)
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 
 		printf("%s\n", results[0].Words[iWord]);	
 #endif
 
-#if defined(DUPE_CHECK) && !defined(HIGHSCORE_LOOP)
+#if defined(DUPE_CHECK)
 	std::unordered_set<std::string> words;
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord)
 	{
@@ -202,10 +206,12 @@ RetrySameBoard:
 			printf("Word found twice: %s\n", word.c_str());
 		}
 	}
-#endif
 
 	for (auto& result : resultsToFree)
 		FreeWords(result);
+#endif
+
+#endif
 	
 	FreeDictionary();
 

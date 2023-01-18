@@ -86,8 +86,9 @@
 // Undef. to kill assertions.
 // #define ASSERTIONS
 
+static thread_local unsigned s_iThread;          // Dep. for thread heaps.
 #define GLOBAL_MEMORY_POOL_SIZE (1024*1024)*2000 // Just allocate as much as we can in 1 go.
-#include "custom-allocator.h" // Depends on Ned Flanders :)
+#include "custom-allocator.h"                    // Depends on Ned Flanders & co. :)
 
 // Undef. to kill prefetching
 // #define NO_PREFETCHES 
@@ -373,10 +374,13 @@ public:
 			if (0 == current->m_wordRefCount - 1)
 				current->m_indexBits = 0;
 
-			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
+			// _mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
+			--current->m_wordRefCount;
 
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-			ImmPrefetch((const char*) current->m_children);
+#ifdef FOR_INTEL
+			ImmPrefetch(reinterpret_cast<const char*>(current));
+#endif
 		}
 	}
 
@@ -672,13 +676,9 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
-static thread_local unsigned s_iThread;
-
 class Query
 {
 public:
-//	THREAD_CUSTOM_ALLOC_OPERATORS(s_iThread)
-
 	Query(Results& results, const char* sanitized, unsigned width, unsigned height) :
 		m_results(results)
 ,		m_sanitized(sanitized)
@@ -692,7 +692,6 @@ public:
 	class ThreadContext
 	{
 	public:
-
 		ThreadContext(unsigned iThread, const Query* instance) :
 		width(instance->m_width)
 ,		height(instance->m_height)
@@ -728,7 +727,7 @@ public:
 		char* visited; // Contains letters and a few bits for state.
 
 		// Output
-		std::vector<unsigned> wordsFound;
+		std::vector<unsigned, ThreadAllocator<unsigned>> wordsFound;
 
 #if defined(NED_FLANDERS)
 		size_t reqStrBufSize = 0;
@@ -781,7 +780,7 @@ public:
 #endif
 			}
 
-			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), kCacheLine));
+			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), 16));
 
 			for (auto& thread : threads)
 				thread.join();
@@ -839,8 +838,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE_FORCE TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
-	static void BOGGLE_INLINE TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	static void BOGGLE_INLINE_FORCE TraverseCall(std::vector<unsigned, ThreadAllocator<unsigned>>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseBoard(std::vector<unsigned, ThreadAllocator<unsigned>>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
@@ -862,7 +861,7 @@ private:
 	const unsigned height = context->height;
 
 	auto* visited = context->visited; // Attempt to prefetch grid
-	FarPrefetch(visited);
+	NearPrefetch(visited);
 
 #ifndef FOR_INTEL
 	auto& wordsFound = context->wordsFound;
@@ -920,7 +919,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE_FORCE void Query::TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+/* static */ BOGGLE_INLINE_FORCE void Query::TraverseCall(std::vector<unsigned, ThreadAllocator<unsigned>>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 #if defined(DEBUG_STATS)
@@ -947,7 +946,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned, ThreadAllocator<unsigned>>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 	Assert(nullptr != node);
@@ -1097,7 +1096,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			}
 		}
 #else
-		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAlignedUnsafe(gridSize, kCacheLine));
+		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAlignedUnsafe(gridSize, 16));
 
 		// Sanitize that just reorders and expects uppercase.
 		for (unsigned index = 0; index < gridSize; ++index)
@@ -1116,6 +1115,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			const size_t threadHeapSize = 
 				gridSize + overhead +                                           // Visited grid
 				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + overhead + // Dictionary nodes
+				s_threadInfo[iThread].load*sizeof(unsigned) + overhead +        // Dictionary word indices
 				1024*1024;                                                      // For overhead and alignment
 	
 #ifdef NED_FLANDERS			

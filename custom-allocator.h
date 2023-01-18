@@ -101,27 +101,49 @@ private:
 // Global heap/pool
 static CustomAlloc s_globalCustomAlloc(GLOBAL_MEMORY_POOL_SIZE);
 
-// Be careful using these, it could just be better just to use the CRT heap!
-#define CUSTOM_NEW void* operator new(size_t size)                { return s_globalCustomAlloc.AllocateUnsafe(size); }
-#define CUSTOM_NEW_ARRAY void* operator new[](size_t size)        { return s_globalCustomAlloc.AllocateUnsafe(size); }
-#define CUSTOM_DELETE void operator delete(void* address)         { return s_globalCustomAlloc.FreeUnsafe(address);  }
-#define CUSTOM_DELETE_ARRAY void operator delete[](void* address) { return s_globalCustomAlloc.FreeUnsafe(address);  }
-
-#define GLOBAL_CUSTOM_ALLOC_OPERATORS \
-	CUSTOM_NEW \
-	CUSTOM_NEW_ARRAY \
-	CUSTOM_DELETE \
-	CUSTOM_DELETE_ARRAY
-
 // Per-thread heap/pool
 static std::vector<CustomAlloc> s_threadCustomAlloc;
-#define CUSTOM_NEW_THREAD(ThreadIndex) void* operator new(size_t size)                { return s_threadCustomAlloc[ThreadIndex].AllocateUnsafe(size); }
-#define CUSTOM_NEW_ARRAY_THREAD(ThreadIndex) void* operator new[](size_t size)        { return s_threadCustomAlloc[ThreadIndex].AllocateUnsafe(size); }
-#define CUSTOM_DELETE_THREAD(ThreadIndex) void operator delete(void* address)         { return s_threadCustomAlloc[ThreadIndex].FreeUnsafe(address);  }
-#define CUSTOM_DELETE_ARRAY_THREAD(ThreadIndex) void operator delete[](void* address) { return s_threadCustomAlloc[ThreadIndex].FreeUnsafe(address);  }
 
-#define THREAD_CUSTOM_ALLOC_OPERATORS(ThreadIndex) \
-	CUSTOM_NEW_THREAD(ThreadIndex) \
-	CUSTOM_NEW_ARRAY_THREAD(ThreadIndex) \
-	CUSTOM_DELETE_THREAD(ThreadIndex) \
-	CUSTOM_DELETE_ARRAY_THREAD(ThreadIndex)
+// STL per-thread allocator (C++17) -> use with caution!
+// Source: https://codereview.stackexchange.com/questions/217488/a-c17-stdallocator-implementation
+template <typename T>
+	class ThreadAllocator {
+public:
+	using value_type = T;
+	using propagate_on_container_move_assignment = std::true_type;
+	using is_always_equal = std::true_type;
+
+	ThreadAllocator() = default;
+	ThreadAllocator(const ThreadAllocator&) = default;
+	~ThreadAllocator() = default;
+
+	template <class U>
+		constexpr ThreadAllocator(const ThreadAllocator<U>&) noexcept {}
+
+	BOGGLE_INLINE_FORCE T* allocate(std::size_t n)
+	{
+		return static_cast<T*>(
+			s_threadCustomAlloc[s_iThread].AllocateAlignedUnsafe(n * sizeof(T), 16)
+			);
+		
+		/*
+		if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+			return static_cast<T*>(
+				s_threadCustomAlloc[s_iThread].AllocateAlignedUnsafe(n * sizeof(T), static_cast<std::align_val_t>(alignof(T)))
+				);
+		else
+			return static_cast<T*>(
+				s_threadCustomAlloc[s_iThread].AllocateUnsafe(n * sizeof(T))
+				);
+		*/
+	}
+
+	BOGGLE_INLINE_FORCE void deallocate(T* p, std::size_t n)
+	{	
+		// Don't have to 
+//		s_threadCustomAlloc[s_iThread].FreeUnsafe(p);
+	}
+};
+
+template <class T, class U> constexpr bool operator==(const ThreadAllocator<T>&, const ThreadAllocator<U>&) noexcept { return true;  }
+template <class T, class U> constexpr bool operator!=(const ThreadAllocator<T>&, const ThreadAllocator<U>&) noexcept { return false; }
