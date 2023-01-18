@@ -155,9 +155,9 @@ BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
 BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
 {
 #if defined(__GNUC__) && defined(FOR_INTEL)
-	__builtin_prefetch(address, 1, 0);
+//	__builtin_prefetch(address, 1, 0);
 #elif defined(_WIN32)
-	_mm_prefetch(address, _MM_HINT_T0);
+//	_mm_prefetch(address, _MM_HINT_T0);
 #endif
 }
 
@@ -233,8 +233,11 @@ public:
 	// Destructor is not called when using ThreadCopy!
 	~LoadDictionaryNode()
 	{
+//		for (auto* child : m_children)
+//			delete child;
+
 		for (auto* child : m_children)
-			delete child;
+			s_globalCustomAlloc.FreeUnsafe(child);
 	}
 
 	// Only called from LoadDictionary().
@@ -257,7 +260,8 @@ public:
 
 		m_indexBits |= bit;
 
-		return m_children[index] = new LoadDictionaryNode();
+		return m_children[index] = // static_cast<LoadDictionaryNode*>(s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode)));
+		new (s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode))) LoadDictionaryNode();
 	}
 
 	BOGGLE_INLINE_FORCE LoadDictionaryNode* GetChild(unsigned index)
