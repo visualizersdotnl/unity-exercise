@@ -157,7 +157,7 @@ BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
 #if defined(__GNUC__) && defined(FOR_INTEL)
 //	__builtin_prefetch(address, 1, 0);
 #elif defined(_WIN32)
-//	_mm_prefetch(address, _MM_HINT_T0);
+	_mm_prefetch(address, _MM_HINT_T0);
 #endif
 }
 
@@ -379,12 +379,14 @@ public:
 			if (0 == current->m_wordRefCount - 1)
 				current->m_indexBits = 0;
 
-			// _mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
+//			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
+
 			--current->m_wordRefCount;
 
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
+
 #ifdef FOR_INTEL
-			ImmPrefetch(reinterpret_cast<const char*>(current));
+//			ImmPrefetch(reinterpret_cast<const char*>(current));
 #endif
 		}
 	}
