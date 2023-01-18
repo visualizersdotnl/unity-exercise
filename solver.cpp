@@ -74,11 +74,11 @@
 #include "inline.h"
 
 // Undef. to skip dead end percentages and all prints and such.
-// #define DEBUG_STATS
+#define DEBUG_STATS
 
 // Undef. to enable all the work I put in to place a, as it turns out, very forgiving test harness.
 // But basically the only gaurantee here is that this works with my own test!
-#define NED_FLANDERS
+// #define NED_FLANDERS
 
 // Undef. to use only 1 thread.
 // #define SINGLE_THREAD
@@ -873,7 +873,7 @@ private:
 #endif
 
 #if defined(DEBUG_STATS)
-	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->iThread, s_threadInfo[context->iThread].load, s_threadInfo[context->iThread].nodes);
+	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->m_iThread, s_threadInfo[context->m_iThread].load, s_threadInfo[context->m_iThread].nodes);
 
 	context->maxDepth = 0;
 #endif
@@ -916,10 +916,10 @@ private:
 #endif
 
 #if defined(DEBUG_STATS)
-	if (s_threadInfo[context->iThread].load > 0)
+	if (s_threadInfo[context->m_iThread].load > 0)
 	{
-		const float hitPct = float(wordsFound.size())/s_threadInfo[context->iThread].load;
-		debug_print("Thread %u has max. traversal depth %u (max. %u), hit rate %.2f\n", context->iThread, context->maxDepth, s_longestWord, hitPct); 
+		const float hitPct = float(context->wordsFound.size())/s_threadInfo[context->m_iThread].load;
+		debug_print("Thread %u has max. traversal depth %u (max. %u), hit rate %.2f\n", context->m_iThread, context->maxDepth, s_longestWord, hitPct); 
 	}
 #endif
 }
