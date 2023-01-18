@@ -68,6 +68,7 @@ int main(int argC, char **arguments)
 	durations.reserve(NUM_QUERIES);
 
 #ifdef HIGHSCORE_LOOP
+	Results results;
 	std::chrono::microseconds prevFastest(HIGHSCORE_MICROSECONDS<<8); // Just needed safe 'big' number to compare against the first time around
 #else
 	std::vector<Results> resultsToFree;
@@ -146,12 +147,8 @@ GenerateBoard:
 RetrySameBoard:
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
-#ifdef _WIN32
-		std::this_thread::sleep_for(std::chrono::microseconds(10000)); // Sleep for 0,01s
-#endif
-
 		const auto start = std::chrono::high_resolution_clock::now();
-		const Results results = FindWords(board.get(), xSize, ySize);
+		results = FindWords(board.get(), xSize, ySize);
 		const auto end = std::chrono::high_resolution_clock::now();
 		durations.emplace_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start));
 	
@@ -171,13 +168,13 @@ RetrySameBoard:
 	std::sort(durations.begin(), durations.end());
 
 #ifdef HIGHSCORE_LOOP
-	if (prevFastest > durations[0])
+	if (prevFastest.count() > durations[0].count())
 	{
 		printf("New best time: %.lld microsec.\n", durations[0].count());
 		prevFastest = durations[0];
 	}
 
-	if (prevFastest.count() >= HIGHSCORE_MICROSECONDS) 
+	if (prevFastest.count() > HIGHSCORE_MICROSECONDS) 
 	{
 		durations.clear();
 

@@ -261,8 +261,8 @@ public:
 		m_indexBits |= bit;
 
 		// What's won here is not so much locality, but fast sequential allocation
-		return m_children[index] = // static_cast<LoadDictionaryNode*>(s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode)));
-		new (s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode))) LoadDictionaryNode();
+		return m_children[index] = // new LoadDictionaryNode(); // static_cast<LoadDictionaryNode*>(s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode)));
+			new (s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode))) LoadDictionaryNode();
 	}
 
 	BOGGLE_INLINE_FORCE LoadDictionaryNode* GetChild(unsigned index)
@@ -301,7 +301,7 @@ public:
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
-			// m_pool->m_children[kIndexParent] = 0;
+			m_pool->m_children[kIndexParent] = 0;
 		}
 
 		~ThreadCopy()
@@ -1130,7 +1130,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				gridSize + overhead +                                           // Visited grid
 				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + overhead + // Dictionary nodes
 				s_threadInfo[iThread].load*sizeof(unsigned) + overhead +        // Dictionary word indices
-				1024*1024*2;                                                    // For overhead and alignment
+				1024*1024;                                                      // For overhead and alignment
 	
 #ifdef NED_FLANDERS			
 			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
