@@ -260,6 +260,7 @@ public:
 
 		m_indexBits |= bit;
 
+		// What's won here is not so much locality, but fast sequential allocation
 		return m_children[index] = // static_cast<LoadDictionaryNode*>(s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode)));
 		new (s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode))) LoadDictionaryNode();
 	}
