@@ -155,7 +155,7 @@ BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
 BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
 {
 #if defined(__GNUC__) && defined(FOR_INTEL)
-//	__builtin_prefetch(address, 1, 0);
+	__builtin_prefetch(address, 1, 0);
 #elif defined(_WIN32)
 	_mm_prefetch(address, _MM_HINT_T0);
 #endif
@@ -301,7 +301,7 @@ public:
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
-			m_pool->m_children[kIndexParent] = 0;
+			// m_pool->m_children[kIndexParent] = 0;
 		}
 
 		~ThreadCopy()
@@ -321,7 +321,7 @@ public:
 
 			// The idea here is that PruneReverse() doesn't have to hop back to the actual
 			// root node, saving 1 hop. We're counting microseconds here, right?
-//			const unsigned rootMask = (m_pool != node) * 0xffffffff;
+			const unsigned rootMask = (m_pool != node) * 0xffffffff;
 
 			++m_iAlloc;
 
@@ -351,7 +351,7 @@ public:
 					if (indexBits & 1)
 					{
 						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexParent] = nodeLower32; // & rootMask;
+						node->GetChild(index)->m_children[kIndexParent] = nodeLower32 & rootMask;
 					}
 
 					indexBits >>= 1;
