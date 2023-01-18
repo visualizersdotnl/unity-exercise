@@ -74,7 +74,7 @@
 #include "inline.h"
 
 // Undef. to skip dead end percentages and all prints and such.
-#define DEBUG_STATS
+// #define DEBUG_STATS
 
 // Undef. to enable all the work I put in to place a, as it turns out, very forgiving test harness.
 // But basically the only gaurantee here is that this works with my own test!
@@ -86,7 +86,7 @@
 // Undef. to kill assertions.
 // #define ASSERTIONS
 
-static thread_local unsigned s_iThread;          // Dep. for thread heaps.
+// static thread_local unsigned s_iThread;       // Dep. for thread heaps.
 #define GLOBAL_MEMORY_POOL_SIZE 1024*1024*2000   // Just allocate as much as we can in 1 go.
 #include "custom-allocator.h"                    // Depends on Ned Flanders & co. :)
 
@@ -715,7 +715,7 @@ public:
 
 		void OnExecuteThread()
 		{
-			s_iThread = m_iThread;
+//			s_iThread = m_iThread;
 
 			// Handle allocation and initialization of grid memory (local to our thread, again).
 			const auto gridSize = width*height;
