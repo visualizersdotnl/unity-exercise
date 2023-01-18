@@ -146,7 +146,9 @@ GenerateBoard:
 RetrySameBoard:
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
+#ifdef _WIN32
 		std::this_thread::sleep_for(std::chrono::microseconds(10000)); // Sleep for 0,01s
+#endif
 
 		const auto start = std::chrono::high_resolution_clock::now();
 		const Results results = FindWords(board.get(), xSize, ySize);
