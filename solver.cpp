@@ -127,6 +127,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 
 #endif
 
+constexpr size_t kAlignTo = 16; // 128-bit
 constexpr size_t kCacheLine = sizeof(size_t)*8;
 
 #ifndef NO_PREFETCHES
@@ -206,7 +207,7 @@ constexpr unsigned kTileVisitedBit = 1<<7;
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
 BOGGLE_INLINE_FORCE unsigned LetterToIndex(unsigned letter)
 {
-	return (letter - static_cast<unsigned>('A'))+1;
+	return 1 + (letter - static_cast<unsigned>('A'));
 }
 
 // constexpr auto kIndexU = 'U'-'A'; // LetterToIndex('U');
@@ -233,11 +234,11 @@ public:
 	// Destructor is not called when using ThreadCopy!
 	~LoadDictionaryNode()
 	{
-//		for (auto* child : m_children)
-//			delete child;
-
 		for (auto* child : m_children)
+		{
+			child->~LoadDictionaryNode();
 			s_globalCustomAlloc.FreeUnsafe(child);
+		}
 	}
 
 	// Only called from LoadDictionary().
@@ -261,8 +262,7 @@ public:
 		m_indexBits |= bit;
 
 		// What's won here is not so much locality, but fast sequential allocation
-		return m_children[index] = // new LoadDictionaryNode(); // static_cast<LoadDictionaryNode*>(s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode)));
-			new (s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode))) LoadDictionaryNode();
+		return m_children[index] = new (s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode))) LoadDictionaryNode();
 	}
 
 	BOGGLE_INLINE_FORCE LoadDictionaryNode* GetChild(unsigned index)
@@ -297,11 +297,10 @@ public:
 			// Well, it sits nice and snug on it's on (probably) page boundary aligning nicely with this thread's cache as opposed to allocating
 			// one huge block at once.
 			const auto size = s_threadInfo[iThread].nodes*sizeof(DictionaryNode);
-			m_pool = static_cast<DictionaryNode*>(s_threadCustomAlloc[iThread].AllocateAlignedUnsafe(size, kCacheLine));
+			m_pool = static_cast<DictionaryNode*>(s_threadCustomAlloc[iThread].AllocateAlignedUnsafe(size, kAlignTo));
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
-			m_pool->m_children[kIndexParent] = 0;
 		}
 
 		~ThreadCopy()
@@ -318,11 +317,6 @@ public:
 		uint32_t Copy(LoadDictionaryNode* parent)
 		{
 			DictionaryNode* node = m_pool + m_iAlloc;
-
-			// The idea here is that PruneReverse() doesn't have to hop back to the actual
-			// root node, saving 1 hop. We're counting microseconds here, right?
-			const unsigned rootMask = (m_pool != node) * 0xffffffff;
-
 			++m_iAlloc;
 
 			unsigned indexBits = node->m_indexBits = parent->m_indexBits;
@@ -351,7 +345,7 @@ public:
 					if (indexBits & 1)
 					{
 						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexParent] = nodeLower32 & rootMask;
+						node->GetChild(index)->m_children[kIndexParent] = nodeLower32 * IsZero(m_iAlloc-1);
 					}
 
 					indexBits >>= 1;
@@ -379,26 +373,19 @@ public:
 		DictionaryNode* current = this;
 		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
 		{
-//			current->m_indexBits &= IsNotZero(current->m_wordRefCount-1)*0xff*0x01010101;
-
-			if (0 == current->m_wordRefCount - 1)
+			if (0 == current->m_wordRefCount-1)
 				current->m_indexBits = 0;
 
 //			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
 			--current->m_wordRefCount;
-
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-
-#ifdef FOR_INTEL
-			ImmPrefetch(reinterpret_cast<const char*>(current->m_children));
-#endif
 		}
 	}
 
 	BOGGLE_INLINE_FORCE void RemoveChild(unsigned index)
 	{
 		Assert(index < kAlphaRange+1);
-//		Assert(HasChild(index));
+		Assert(HasChild(index));
 
 		m_indexBits ^= 1 << index;
 	}
@@ -410,7 +397,7 @@ public:
 		return m_indexBits & (1 << index);
 	}
 
-	BOGGLE_INLINE DictionaryNode* GetChild(unsigned index) const
+	BOGGLE_INLINE_FORCE DictionaryNode* GetChild(unsigned index) const
 	{
 		Assert(0 == index || HasChild(index));
 		return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
@@ -552,6 +539,7 @@ static bool IsWordValid(const std::string& word)
 	}
 
 	LoadDictionaryNode* node = s_threadDicts[iThread];
+	Assert(nullptr != node);
 
 	for (auto iLetter = word.begin(); iLetter != word.end(); ++iLetter)
 	{
@@ -598,9 +586,8 @@ void LoadDictionary(const char* path)
 	DictionaryLock lock;
 #endif
 	{
-		size_t iThread = kNumThreads;
-		while (iThread-- > 0)
-			s_threadDicts.push_back(new LoadDictionaryNode());
+		for (auto iThread = 0; iThread < kNumThreads; ++iThread)
+			s_threadDicts.push_back(new LoadDictionaryNode()); // Allocated in AddWordToDictionary() for (ever so slightly) better locality
 
 		int character;
 		std::string word;
@@ -632,7 +619,7 @@ void LoadDictionary(const char* path)
 		const size_t numWords = words.size();
 		const size_t wordsPerThread = numWords/kNumThreads;
 
-		iThread = 0;
+		unsigned iThread = 0;
 		size_t threadNumWords = 0;
 
 		for (const auto &word : words)
@@ -669,8 +656,15 @@ void FreeDictionary()
 #endif
 	{
 		// Delete per-thread dictionary trees.
-		for (auto* root : s_threadDicts) 
+		for (auto* root : s_threadDicts)
 			delete root;
+//		{
+//			if (nullptr != root)
+//			{
+//				root->~LoadDictionaryNode();
+//				s_globalCustomAlloc.FreeUnsafe(root);
+//			}
+//		}
 
 		s_threadDicts.clear();
 
@@ -725,7 +719,7 @@ public:
 
 			// Handle allocation and initialization of grid memory (local to our thread, again).
 			const auto gridSize = width*height;
-			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateAlignedUnsafe(gridSize, kCacheLine));
+			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateAlignedUnsafe(gridSize, kAlignTo));
 			memcpy(visited, sanitized, gridSize);
 
 			// Reserve
@@ -791,7 +785,7 @@ public:
 #endif
 			}
 
-			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), 16));
+			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), kAlignTo));
 
 			for (auto& thread : threads)
 				thread.join();
@@ -1017,9 +1011,9 @@ private:
 #else
 	if (offsetY >= width) 
 	{
-		if (iX < width-1) TraverseCall(wordsFound, visited - width+1, node, width, height, iX+1, offsetY-width);
+		if (iX < width-1) TraverseCall(wordsFound, (visited - width) + 1, node, width, height, iX+1, offsetY-width);
 		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
-		if (iX > 0) TraverseCall(wordsFound, visited - width-1, node, width, height, iX-1, offsetY-width);
+		if (iX > 0) TraverseCall(wordsFound, (visited - width) - 1, node, width, height, iX-1, offsetY-width);
 	}
 
 	if (iX > 0)
@@ -1030,9 +1024,9 @@ private:
 
 	if (offsetY < width*(height-1))
 	{
-		if (iX < width-1) TraverseCall(wordsFound, visited + width+1, node, width, height, iX+1, offsetY+width);
+		if (iX < width-1) TraverseCall(wordsFound, (visited + width) + 1, node, width, height, iX+1, offsetY+width);
 		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width);
-		if (iX > 0) TraverseCall(wordsFound, visited + width-1, node, width, height, iX-1, offsetY+width);
+		if (iX > 0) TraverseCall(wordsFound, (visited + width) - 1, node, width, height, iX-1, offsetY+width);
 	}
 #endif
 
@@ -1045,13 +1039,14 @@ private:
 	if (wordIdx >= 0) 
 	{
 		node->OnWordFound();
-		node->PruneReverse();
 
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
 #else
 		wordsFound.emplace_back(wordIdx);
 #endif
+
+		node->PruneReverse();
 	}
 }
 
@@ -1129,8 +1124,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			const size_t threadHeapSize = 
 				gridSize + overhead +                                           // Visited grid
 				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + overhead + // Dictionary nodes
-				s_threadInfo[iThread].load*sizeof(unsigned) + overhead +        // Dictionary word indices
-				1024*1024;                                                      // For overhead and alignment
+				1024*1024*2;                                                    // For overhead and alignment
 	
 #ifdef NED_FLANDERS			
 			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
@@ -1178,13 +1172,13 @@ void FreeWords(Results results)
 		// Allocated a single buffer.
 		delete[] results.Words[0];
 	}
+
+	results.UserData = nullptr;
 #else
 	if (nullptr != results.Words)
 		s_globalCustomAlloc.FreeUnsafe((void*) results.Words);
 #endif
 
 	results.Words = nullptr;
-
 	results.Count = results.Score = 0;
-	results.UserData = nullptr;
 }

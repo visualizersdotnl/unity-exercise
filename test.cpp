@@ -68,8 +68,7 @@ int main(int argC, char **arguments)
 	durations.reserve(NUM_QUERIES);
 
 #ifdef HIGHSCORE_LOOP
-	Results results;
-	std::chrono::microseconds prevFastest(HIGHSCORE_MICROSECONDS<<8); // Just needed safe 'big' number to compare against the first time around
+	std::chrono::microseconds prevFastest(HIGHSCORE_MICROSECONDS*10); // Just needed safe 'big' number to compare against the first time around
 #else
 	std::vector<Results> resultsToFree;
 	resultsToFree.reserve(NUM_QUERIES);
@@ -148,9 +147,9 @@ RetrySameBoard:
 	for (unsigned iQuery = 0; iQuery < NUM_QUERIES; ++iQuery)
 	{
 		const auto start = std::chrono::high_resolution_clock::now();
-		results = FindWords(board.get(), xSize, ySize);
+		Results results = FindWords(board.get(), xSize, ySize);
 		const auto end = std::chrono::high_resolution_clock::now();
-		durations.emplace_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start));
+		durations.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start));
 	
 #ifdef PRINT_ITER_RESULTS
 		printf("Results (run %u): ", iQuery+1);
@@ -168,13 +167,13 @@ RetrySameBoard:
 	std::sort(durations.begin(), durations.end());
 
 #ifdef HIGHSCORE_LOOP
-	if (prevFastest.count() > durations[0].count())
+	if (prevFastest > durations[0])
 	{
 		printf("New best time: %.lld microsec.\n", durations[0].count());
 		prevFastest = durations[0];
 	}
 
-	if (prevFastest.count() > HIGHSCORE_MICROSECONDS) 
+	if (prevFastest.count() >= HIGHSCORE_MICROSECONDS) 
 	{
 		durations.clear();
 
@@ -186,7 +185,7 @@ RetrySameBoard:
 	}
 #endif
 
-#ifdef HIGHSCORE_LOOP
+#ifndef HIGHSCORE_LOOP
 
 #if defined(PRINT_WORDS)
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 
@@ -205,10 +204,10 @@ RetrySameBoard:
 			printf("Word found twice: %s\n", word.c_str());
 		}
 	}
+#endif
 
 	for (auto& result : resultsToFree)
 		FreeWords(result);
-#endif
 
 #endif
 	

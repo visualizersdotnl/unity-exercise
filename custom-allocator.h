@@ -105,6 +105,8 @@ static CustomAlloc s_globalCustomAlloc(GLOBAL_MEMORY_POOL_SIZE);
 // Per-thread heap/pool
 static std::vector<CustomAlloc> s_threadCustomAlloc;
 
+#if 0
+
 // STL per-thread allocator (C++17) -> use with caution!
 // Source: https://codereview.stackexchange.com/questions/217488/a-c17-stdallocator-implementation
 template <typename T>
@@ -141,3 +143,5 @@ public:
 
 template <class T, class U> constexpr bool operator==(const ThreadAllocator<T>&, const ThreadAllocator<U>&) noexcept { return true;  }
 template <class T, class U> constexpr bool operator!=(const ThreadAllocator<T>&, const ThreadAllocator<U>&) noexcept { return false; }
+
+#endif
