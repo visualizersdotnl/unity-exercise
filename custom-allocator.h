@@ -125,7 +125,7 @@ public:
 	{
 		if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
 			return static_cast<T*>(
-				s_threadCustomAlloc[s_iThread].AllocateAlignedUnsafe(n * sizeof(T), static_cast<ssize_t>(alignof(T)))
+				s_threadCustomAlloc[s_iThread].AllocateAlignedUnsafe(n * sizeof(T), static_cast<size_t>(alignof(T)))
 				);
 		else
 			return static_cast<T*>(
