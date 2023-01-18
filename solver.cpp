@@ -78,7 +78,7 @@
 
 // Undef. to enable all the work I put in to place a, as it turns out, very forgiving test harness.
 // But basically the only gaurantee here is that this works with my own test!
-// #define NED_FLANDERS
+#define NED_FLANDERS
 
 // Undef. to use only 1 thread.
 // #define SINGLE_THREAD
@@ -87,7 +87,7 @@
 // #define ASSERTIONS
 
 static thread_local unsigned s_iThread;          // Dep. for thread heaps.
-#define GLOBAL_MEMORY_POOL_SIZE (1024*1024)*2000 // Just allocate as much as we can in 1 go.
+#define GLOBAL_MEMORY_POOL_SIZE 1024*1024*2000   // Just allocate as much as we can in 1 go.
 #include "custom-allocator.h"                    // Depends on Ned Flanders & co. :)
 
 // Undef. to kill prefetching
@@ -810,7 +810,7 @@ public:
 #else
 			size_t totReqStrBufLen = 0;
 			for (const auto& context : contexts)
-				totReqStrBufLen += context->reqStrBufSize;
+				totReqStrBufLen += context.reqStrBufSize;
 
 			// Copy words to Results structure.
 			// I'd rather set pointers into the dictionary, but that would break the results as soon as new dictionary is loaded.
@@ -824,12 +824,12 @@ public:
 				{
 					const auto& word = s_words[wordIdx]; 
 					*words_cstr = resBuf;
-					strcpy(*words_cstr++, word.word.c_str());
-					const size_t length = word.word.length();
+					strcpy(*words_cstr++, word.word);
+					const size_t length = strlen(word.word);
 					resBuf += length+1;
 				}
 
-				debug_print("Thread %u joined with %zu words (score %u).\n", context->iThread, wordsFound.size(), m_results.Score);
+				debug_print("Thread %u joined with %zu words (score %u).\n", context.m_iThread, context.wordsFound.size(), m_results.Score);
 			}
 #endif
 		}
@@ -910,7 +910,7 @@ private:
 #if defined(NED_FLANDERS)
 	for (unsigned wordIdx : context->wordsFound)
 	{
-		const size_t length = s_words[wordIdx].word.length();
+		const size_t length = strlen(s_words[wordIdx].word);
 		context->reqStrBufSize += length + 1; // Plus one for zero terminator
 	}
 #endif
@@ -1127,7 +1127,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				1024*1024*2;                                                    // For overhead and alignment
 	
 #ifdef NED_FLANDERS			
-			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
+			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.AllocateAligned(threadHeapSize, kPageSize)), threadHeapSize));
 #else
 			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.AllocateAlignedUnsafe(threadHeapSize, kPageSize)), threadHeapSize));
 #endif

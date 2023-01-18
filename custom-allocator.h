@@ -27,7 +27,7 @@ public:
 	explicit CustomAlloc(char* pool, size_t poolSize) :
 		m_instance(tlsf_create_with_pool(m_pool = pool, poolSize)) {}
 
-#ifdef NED_FLANDERS // We can get away by leaking some memory at the very end, right?
+#if defined(NED_FLANDERS)
 	~CustomAlloc()
 	{
 		// Does nothing!
@@ -35,6 +35,15 @@ public:
 		
 		if (true == m_isOwner)
 			freeAligned(m_pool);
+	}
+
+	CustomAlloc(const CustomAlloc& RHS) :
+		m_instance(RHS.m_instance)
+,		m_pool(RHS.m_pool)
+,		m_isOwner(RHS.m_isOwner)
+	{
+		// Disown RHS
+		RHS.m_isOwner = false;
 	}
 #endif
 
@@ -56,7 +65,7 @@ public:
 		tlsf_free(m_instance, address);
 	}
 
-#ifdef NED_FLANDERS
+#if defined(NED_FLANDERS)
 	BOGGLE_INLINE void* Allocate(size_t size)
 	{
 		std::lock_guard lock(m_mutex);
@@ -93,7 +102,7 @@ private:
 	void* m_pool;
 
 #ifdef NED_FLANDERS
-	const bool m_isOwner = false;
+	mutable bool m_isOwner = false;
 	std::mutex m_mutex;
 #endif
 
