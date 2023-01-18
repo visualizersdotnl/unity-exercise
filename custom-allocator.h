@@ -59,19 +59,19 @@ public:
 #ifdef NED_FLANDERS
 	BOGGLE_INLINE void* Allocate(size_t size)
 	{
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard lock(m_mutex);
 		return AllocateUnsafe(size);
 	}
 
 	BOGGLE_INLINE void* AllocateAligned(size_t size, size_t align)
 	{
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard lock(m_mutex);
 		return AllocateAlignedUnsafe(size, align);
 	}
 
 	BOGGLE_INLINE void Free(void* address)
 	{
-		std::lock_guard<std::mutex> lock(m_mutex);
+		std::lock_guard lock(m_mutex);
 		tlsf_free(m_instance, address);
 	}
 #endif
@@ -96,6 +96,7 @@ private:
 	const bool m_isOwner = false;
 	std::mutex m_mutex;
 #endif
+
 };
 
 // Global heap/pool
@@ -122,11 +123,6 @@ public:
 
 	BOGGLE_INLINE_FORCE T* allocate(std::size_t n)
 	{
-		return static_cast<T*>(
-			s_threadCustomAlloc[s_iThread].AllocateAlignedUnsafe(n * sizeof(T), 16)
-			);
-		
-		/*
 		if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
 			return static_cast<T*>(
 				s_threadCustomAlloc[s_iThread].AllocateAlignedUnsafe(n * sizeof(T), static_cast<std::align_val_t>(alignof(T)))
@@ -135,13 +131,11 @@ public:
 			return static_cast<T*>(
 				s_threadCustomAlloc[s_iThread].AllocateUnsafe(n * sizeof(T))
 				);
-		*/
 	}
 
 	BOGGLE_INLINE_FORCE void deallocate(T* p, std::size_t n)
 	{	
-		// Don't have to 
-//		s_threadCustomAlloc[s_iThread].FreeUnsafe(p);
+		s_threadCustomAlloc[s_iThread].FreeUnsafe(p);
 	}
 };
 

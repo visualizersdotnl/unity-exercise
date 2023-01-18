@@ -45,9 +45,6 @@
     <ClInclude Include="..\custom-allocator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\spinlock.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\inline.h">
       <Filter>Header Files</Filter>
     </ClInclude>

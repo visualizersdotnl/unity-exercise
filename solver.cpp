@@ -301,6 +301,7 @@ public:
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
+			m_pool->m_children[kIndexParent] = 0;
 		}
 
 		~ThreadCopy()
@@ -320,7 +321,7 @@ public:
 
 			// The idea here is that PruneReverse() doesn't have to hop back to the actual
 			// root node, saving 1 hop. We're counting microseconds here, right?
-			const unsigned rootMask = (m_pool != node) * 0xffffffff;
+//			const unsigned rootMask = (m_pool != node) * 0xffffffff;
 
 			++m_iAlloc;
 
@@ -350,7 +351,7 @@ public:
 					if (indexBits & 1)
 					{
 						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexParent] = nodeLower32 & rootMask;
+						node->GetChild(index)->m_children[kIndexParent] = nodeLower32; // & rootMask;
 					}
 
 					indexBits >>= 1;
@@ -378,17 +379,18 @@ public:
 		DictionaryNode* current = this;
 		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
 		{
+//			current->m_indexBits &= IsNotZero(current->m_wordRefCount-1)*0xff*0x01010101;
+
 			if (0 == current->m_wordRefCount - 1)
 				current->m_indexBits = 0;
 
 //			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
-
 			--current->m_wordRefCount;
 
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 
 #ifdef FOR_INTEL
-//			ImmPrefetch(reinterpret_cast<const char*>(current));
+			ImmPrefetch(reinterpret_cast<const char*>(current->m_children));
 #endif
 		}
 	}
@@ -736,7 +738,7 @@ public:
 		char* visited; // Contains letters and a few bits for state.
 
 		// Output
-		std::vector<unsigned, ThreadAllocator<unsigned>> wordsFound;
+		std::vector<unsigned> wordsFound;
 
 #if defined(NED_FLANDERS)
 		size_t reqStrBufSize = 0;
@@ -847,8 +849,8 @@ private:
 	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE_FORCE TraverseCall(std::vector<unsigned, ThreadAllocator<unsigned>>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
-	static void BOGGLE_INLINE TraverseBoard(std::vector<unsigned, ThreadAllocator<unsigned>>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	static void BOGGLE_INLINE_FORCE TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	static void BOGGLE_INLINE TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
@@ -889,16 +891,15 @@ private:
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			auto *address = &visited[offsetY+iX];
-			if (auto* child = root->GetChildChecked(*address))
+			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
 #elif defined(FOR_ARM)
-				TraverseBoard(wordsFound, address, child, width, height, iX, offsetY);
+				TraverseBoard(wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
 #elif defined(FOR_INTEL)
-				TraverseBoard(context->wordsFound, address, child, width, height, iX, offsetY);
+				TraverseBoard(context->wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
 #endif
 			}
 
@@ -906,7 +907,11 @@ private:
 		}
 	}
 
+#ifndef FOR_INTEL
+	std::sort(wordsFound.begin(), wordsFound.end());
+#else
 	std::sort(context->wordsFound.begin(), context->wordsFound.end());
+#endif
 
 #if defined(NED_FLANDERS)
 	for (unsigned wordIdx : context->wordsFound)
@@ -928,7 +933,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE_FORCE void Query::TraverseCall(std::vector<unsigned, ThreadAllocator<unsigned>>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+/* static */ BOGGLE_INLINE_FORCE void Query::TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 #if defined(DEBUG_STATS)
@@ -955,7 +960,7 @@ private:
 #if defined(DEBUG_STATS)
 /* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned, ThreadAllocator<unsigned>>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 	Assert(nullptr != node);
@@ -1045,7 +1050,7 @@ private:
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
 #else
-		wordsFound.push_back(wordIdx);
+		wordsFound.emplace_back(wordIdx);
 #endif
 	}
 }
@@ -1125,7 +1130,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				gridSize + overhead +                                           // Visited grid
 				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + overhead + // Dictionary nodes
 				s_threadInfo[iThread].load*sizeof(unsigned) + overhead +        // Dictionary word indices
-				1024*1024;                                                      // For overhead and alignment
+				1024*1024*2;                                                    // For overhead and alignment
 	
 #ifdef NED_FLANDERS			
 			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.Allocate(threadHeapSize, kPageSize)), threadHeapSize));
