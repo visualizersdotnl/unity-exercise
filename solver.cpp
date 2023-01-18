@@ -318,6 +318,8 @@ public:
 		{
 			DictionaryNode* node = m_pool + m_iAlloc;
 
+			// The idea here is that PruneReverse() doesn't have to hop back to the actual
+			// root node, saving 1 hop. We're counting microseconds here, right?
 			const unsigned rootMask = (m_pool != node) * 0xffffffff;
 
 			++m_iAlloc;
