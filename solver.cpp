@@ -86,6 +86,9 @@
 // Undef. to kill assertions.
 // #define ASSERTIONS
 
+// Undef. to enable streamed (non-temporal) writes
+// #define STREAM_WRITES
+
 // static thread_local unsigned s_iThread;       // Dep. for thread heaps.
 #define GLOBAL_MEMORY_POOL_SIZE 1024*1024*2000   // Just allocate as much as we can in 1 go.
 #include "custom-allocator.h"                    // Depends on Ned Flanders & co. :)
@@ -404,7 +407,7 @@ public:
 		{
 			current->m_indexBits = current->m_indexBits*IsZero(current->m_wordRefCount-1);
 
-#if defined(FOR_INTEL)
+#if defined(FOR_INTEL) && defined(STREAM_WRITES)
 			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
 #else
 			--current->m_wordRefCount;
@@ -835,12 +838,12 @@ public:
 					m_results.Score += unsigned(word.score);
 					++m_results.Count;
 
-#if !defined(FOR_INTEL)
-					*words_cstr++ = const_cast<char*>(word.word);
-//					*words_cstr++ = const_cast<char*>(word.word.c_str());
-#else 
+#if defined(FOR_INTEL) && defined(STREAM_WRITES)
 					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
 //					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word.c_str()));
+#else
+					*words_cstr++ = const_cast<char*>(word.word);
+//					*words_cstr++ = const_cast<char*>(word.word.c_str());
 #endif
 				}
 
