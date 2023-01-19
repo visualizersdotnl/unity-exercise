@@ -385,8 +385,11 @@ public:
 				current->m_indexBits = 0;
 
 
+#if defined(FOR_INTEL)
 			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
-//			--current->m_wordRefCount;
+#else
+			--current->m_wordRefCount;
+#endif
 	
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 		}
@@ -740,7 +743,7 @@ public:
 
 		// Input
 		const unsigned m_iThread;
-		const unsigned width, const height;
+		const unsigned width; const unsigned height;
 		const char* sanitized;
 		char* visited; // Contains letters and a few bits for state.
 
@@ -813,10 +816,13 @@ public:
 					m_results.Score += unsigned(word.score);
 					++m_results.Count;
 
-//					*words_cstr++ = const_cast<char*>(word.word);
+#if !defined(FOR_INTEL)
+					*words_cstr++ = const_cast<char*>(word.word);
 //					*words_cstr++ = const_cast<char*>(word.word.c_str());
+#else 
 					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
 //					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word.c_str()));
+#endif
 				}
 
 				debug_print("Thread %u joined with %zu words (score %u).\n", context.m_iThread, contexts[context.m_iThread].wordsFound.size(), m_results.Score);
