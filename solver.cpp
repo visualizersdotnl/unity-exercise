@@ -80,14 +80,14 @@
 // But basically the only gaurantee here is that this works with my own test!
 // #define NED_FLANDERS
 
-// Undef. to use only 1 thread.
+// Undef. to use only 1 thread; makes certain things easier to debug.
 // #define SINGLE_THREAD
 
 // Undef. to kill assertions.
 // #define ASSERTIONS
 
 // Undef. to enable streamed (non-temporal) writes
-// #define STREAM_WRITES
+#define STREAM_WRITES
 
 // static thread_local unsigned s_iThread;       // Dep. for thread heaps.
 #define GLOBAL_MEMORY_POOL_SIZE 1024*1024*2000   // Just allocate as much as we can in 1 go.
@@ -302,8 +302,7 @@ public:
 	class ThreadCopy
 	{
 	public:
-		ThreadCopy(unsigned iThread) : 
-			m_iAlloc(0)
+		ThreadCopy(unsigned iThread) 
 		{
 			// Allocate pool for all necessary nodes: why here, you glorious titwillow?
 			// Well, it sits nice and snug on it's on (probably) page boundary aligning nicely with this thread's cache as opposed to allocating
@@ -313,6 +312,7 @@ public:
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
+			m_pool->m_children[0] = 0; // Terminate at root.
 		}
 
 		~ThreadCopy()
@@ -356,7 +356,7 @@ public:
 					if (indexBits & 1)
 					{
 						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexParent] = nodeLower32 * IsZero(unsigned(m_iAlloc-1)); // Multiply to 0 if parent is root.
+						node->GetChild(index)->m_children[kIndexParent] = nodeLower32;
 					}
 
 					indexBits >>= 1;
@@ -368,7 +368,7 @@ public:
 
 	private:
 		DictionaryNode* m_pool;
-		size_t m_iAlloc;
+		size_t m_iAlloc = 0;
 	};
 
 	// Destructor is not called when using ThreadCopy!
@@ -379,8 +379,7 @@ public:
 		return m_indexBits;  
 	}
 
-/*
-	BOGGLE_INLINE_FORCE void PruneReverse_Old()
+	BOGGLE_INLINE_FORCE void PruneReverse()
 	{
 		DictionaryNode* current = this;
 		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
@@ -388,8 +387,7 @@ public:
 			if (0 == current->m_wordRefCount-1)
 				current->m_indexBits = 0;
 
-
-#if defined(FOR_INTEL)
+#if defined(STREAM_WRITES)
 			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
 #else
 			--current->m_wordRefCount;
@@ -398,16 +396,15 @@ public:
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 		}
 	}
-*/
 
-	BOGGLE_INLINE_FORCE void PruneReverse()
+	BOGGLE_INLINE_FORCE void PruneReverse_NoCompare()
 	{
 		DictionaryNode* current = this;
 		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
 		{
-			current->m_indexBits = current->m_indexBits*IsZero(current->m_wordRefCount-1);
+			current->m_indexBits = current->m_indexBits*IsNotZero(current->m_wordRefCount-1);
 
-#if defined(FOR_INTEL) && defined(STREAM_WRITES)
+#if defined(STREAM_WRITES)
 			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
 #else
 			--current->m_wordRefCount;
@@ -838,7 +835,7 @@ public:
 					m_results.Score += unsigned(word.score);
 					++m_results.Count;
 
-#if defined(FOR_INTEL) && defined(STREAM_WRITES)
+#if defined(STREAM_WRITES)
 					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
 //					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word.c_str()));
 #else
@@ -1095,7 +1092,8 @@ private:
 		wordsFound.emplace_back(wordIdx);
 #endif
 
-		node->PruneReverse();
+		node->PruneReverse_NoCompare();
+//		node->PruneReverse();
 	}
 }
 
