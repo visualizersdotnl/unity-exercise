@@ -128,7 +128,7 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #endif
 
 constexpr size_t kAlignTo = 16; // 128-bit
-constexpr size_t kCacheLine = sizeof(size_t)*8;
+constexpr size_t kCacheLineSize = sizeof(size_t)*8;
 
 #ifndef NO_PREFETCHES
 
@@ -177,12 +177,16 @@ class Word
 public:
 	Word(unsigned score, const std::string& word) :
 	score(score)
+//,	word(word)
 	{
 		strcpy(this->word, word.c_str());
 	}
 	
+	size_t score;
 	char word[MAX_WORD_LEN+1];
-	unsigned score;
+
+//	std::string word;
+//	uint8_t padding[2]; // Pad to 32 bytes
 };
 
 // Number of words and number of nodes (1 for root) per thread.
@@ -234,10 +238,14 @@ public:
 	// Destructor is not called when using ThreadCopy!
 	~LoadDictionaryNode()
 	{
-		for (auto* child : m_children)
+		for (unsigned iBit = 1; iBit < kAlphaRange+1; ++iBit)
 		{
-			child->~LoadDictionaryNode();
-			s_globalCustomAlloc.FreeUnsafe(child);
+			if (m_indexBits & (1<<iBit))
+			{
+				auto* child = m_children[iBit-1];
+				child->~LoadDictionaryNode();
+				s_globalCustomAlloc.FreeUnsafe(child);
+			}
 		}
 	}
 
@@ -252,7 +260,7 @@ public:
 		const unsigned bit = 1 << index;
 		if (m_indexBits & bit)
 		{
-			auto* child = m_children[index];
+			auto* child = m_children[index-1];
 			++child->m_wordRefCount;
 			return child;
 		}
@@ -262,21 +270,22 @@ public:
 		m_indexBits |= bit;
 
 		// What's won here is not so much locality, but fast sequential allocation
-		return m_children[index] = new (s_globalCustomAlloc.AllocateUnsafe(sizeof(LoadDictionaryNode))) LoadDictionaryNode();
+		return m_children[index-1] = new (s_globalCustomAlloc.AllocateAlignedUnsafe(sizeof(LoadDictionaryNode), kAlignTo)) LoadDictionaryNode();
 	}
 
 	BOGGLE_INLINE_FORCE LoadDictionaryNode* GetChild(unsigned index)
 	{
-		Assert(nullptr != m_children[index]);
-		return m_children[index];
+//		Assert(nullptr != m_children[index]);
+		return m_children[index-1];
 	}
 
 private:
 	// This order in conjuction with ThreadCopy below has proven to be fast.
 	int32_t m_wordIdx = -1; 
 	uint32_t m_indexBits = 0;
-	int32_t m_wordRefCount = 1;
-	LoadDictionaryNode* m_children[kAlphaRange+1] = { nullptr };
+	uint32_t m_wordRefCount = 1;
+	uint32_t m_padding;
+	LoadDictionaryNode* m_children[kAlphaRange];
 };
 
 // Actual processing node.
@@ -317,7 +326,7 @@ public:
 		uint32_t Copy(LoadDictionaryNode* parent)
 		{
 			DictionaryNode* node = m_pool + m_iAlloc;
-			++m_iAlloc;
+			++m_iAlloc; // Next node!
 
 			unsigned indexBits = node->m_indexBits = parent->m_indexBits;
 			node->m_wordRefCount = parent->m_wordRefCount;
@@ -327,7 +336,6 @@ public:
 			// Quite volatile, but usually works out fine.
 			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000;
 			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node) & 0xffffffff;
-
 
 #ifdef _WIN32
 			unsigned long index;
@@ -345,7 +353,7 @@ public:
 					if (indexBits & 1)
 					{
 						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexParent] = nodeLower32 * IsZero(m_iAlloc-1);
+						node->GetChild(index)->m_children[kIndexParent] = nodeLower32 * IsZero(unsigned(m_iAlloc-1)); // Multiply to 0 if parent is root.
 					}
 
 					indexBits >>= 1;
@@ -376,8 +384,10 @@ public:
 			if (0 == current->m_wordRefCount-1)
 				current->m_indexBits = 0;
 
-//			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
-			--current->m_wordRefCount;
+
+			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
+//			--current->m_wordRefCount;
+	
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 		}
 	}
@@ -431,7 +441,7 @@ private:
 	int32_t m_wordRefCount;
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange+1];
-	int32_t m_wordIdx;
+	int32_t m_wordIdx; // Sits on a 16-byte boundary
 };
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
@@ -698,10 +708,10 @@ public:
 	{
 	public:
 		ThreadContext(unsigned iThread, const Query* instance) :
-		width(instance->m_width)
+		m_iThread(iThread)
+,		width(instance->m_width)
 ,		height(instance->m_height)
 ,		sanitized(instance->m_sanitized)
-,		m_iThread(iThread)
 		{
 			Assert(iThread < kNumThreads);
 			Assert(nullptr != instance);
@@ -717,17 +727,20 @@ public:
 		{
 //			s_iThread = m_iThread;
 
-			// Handle allocation and initialization of grid memory (local to our thread, again).
+			// Handle allocation and initialization of thread grid.
 			const auto gridSize = width*height;
 			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateAlignedUnsafe(gridSize, kAlignTo));
-			memcpy(visited, sanitized, gridSize);
 
-			// Reserve
+			// Reserve.
 			wordsFound.reserve(s_threadInfo[m_iThread].load); 
+
+			// Copy *after* allocation.
+			memcpy(visited, sanitized, gridSize);
 		}
 
 		// Input
-		const unsigned width, height;
+		const unsigned m_iThread;
+		const unsigned width, const height;
 		const char* sanitized;
 		char* visited; // Contains letters and a few bits for state.
 
@@ -741,8 +754,6 @@ public:
 #if defined(DEBUG_STATS)
 		unsigned maxDepth;
 #endif
-
-		const unsigned m_iThread;
 	}; 
 
 public:
@@ -795,14 +806,17 @@ public:
 
 			for (const auto& context : contexts)
 			{
-				for (unsigned wordIdx : context.wordsFound)
+				for (const auto wordIdx : context.wordsFound)
 				{
 					const auto& word = s_words[wordIdx];
-					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
-					m_results.Score += word.score;
+
+					m_results.Score += unsigned(word.score);
 					++m_results.Count;
+
 //					*words_cstr++ = const_cast<char*>(word.word);
 //					*words_cstr++ = const_cast<char*>(word.word.c_str());
+					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
+//					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word.c_str()));
 				}
 
 				debug_print("Thread %u joined with %zu words (score %u).\n", context.m_iThread, contexts[context.m_iThread].wordsFound.size(), m_results.Score);
@@ -820,12 +834,19 @@ public:
 
 			for (const auto& context : contexts)
 			{
-				for (unsigned wordIdx : context.wordsFound)
+				for (const auto wordIdx : context.wordsFound)
 				{
 					const auto& word = s_words[wordIdx]; 
+
+					m_results.Score += unsigned(word.score);
+					++m_results.Count;
+
 					*words_cstr = resBuf;
+//					strcpy(*words_cstr++, word.word.c_str()); 
+//					const size_t length = word.word.length(); 
 					strcpy(*words_cstr++, word.word);
 					const size_t length = strlen(word.word);
+
 					resBuf += length+1;
 				}
 
@@ -868,7 +889,7 @@ private:
 	auto* visited = context->visited; // Attempt to prefetch grid
 	NearPrefetch(visited);
 
-#ifndef FOR_INTEL
+#if !defined(FOR_INTEL)
 	auto& wordsFound = context->wordsFound;
 #endif
 
@@ -885,6 +906,8 @@ private:
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
+			NearPrefetch(visited + offsetY+iX + kCacheLineSize);
+
 			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
 #if defined(DEBUG_STATS)
@@ -896,12 +919,10 @@ private:
 				TraverseBoard(context->wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
 #endif
 			}
-
-			NearPrefetch(visited + offsetY+iX+kCacheLine);
 		}
 	}
 
-#ifndef FOR_INTEL
+#if !defined(FOR_INTEL)
 	std::sort(wordsFound.begin(), wordsFound.end());
 #else
 	std::sort(context->wordsFound.begin(), context->wordsFound.end());
@@ -910,7 +931,7 @@ private:
 #if defined(NED_FLANDERS)
 	for (unsigned wordIdx : context->wordsFound)
 	{
-		const size_t length = strlen(s_words[wordIdx].word);
+		const size_t length = s_words[wordIdx].word.length(); // strlen(s_words[wordIdx].word);
 		context->reqStrBufSize += length + 1; // Plus one for zero terminator
 	}
 #endif
@@ -959,6 +980,8 @@ private:
 {
 	Assert(nullptr != node);
 
+	const auto wordIdx = node->GetWordIndex();
+
 #if defined(DEBUG_STATS)
 	auto* visited = context.visited + offsetY+iX;
 
@@ -967,8 +990,6 @@ private:
 	Assert(depth < s_longestWord);
 	context.maxDepth = std::max<unsigned>(context.maxDepth, unsigned(depth));
 #endif
-
-	const auto wordIdx = node->GetWordIndex();
 
 	*visited |= kTileVisitedBit;
 
@@ -1105,7 +1126,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			}
 		}
 #else
-		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAlignedUnsafe(gridSize, 16));
+		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAlignedUnsafe(gridSize, kAlignTo));
 
 		// Sanitize that just reorders and expects uppercase.
 		for (unsigned index = 0; index < gridSize; ++index)
@@ -1124,7 +1145,7 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			const size_t threadHeapSize = 
 				gridSize + overhead +                                           // Visited grid
 				s_threadInfo[iThread].nodes*sizeof(DictionaryNode) + overhead + // Dictionary nodes
-				1024*1024*2;                                                    // For overhead and alignment
+				1024*1024*1;                                                    // For overhead and alignment
 	
 #ifdef NED_FLANDERS			
 			s_threadCustomAlloc.emplace_back(CustomAlloc(static_cast<char*>(s_globalCustomAlloc.AllocateAligned(threadHeapSize, kPageSize)), threadHeapSize));

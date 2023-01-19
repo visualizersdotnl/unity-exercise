@@ -1,6 +1,6 @@
 
 // This speeds things up for us ('unity-exercise'), but beware of SIMD loads that require alignment
-#define TLSF_FORCE_4_BYTE_ALIGNMENT
+#// define TLSF_FORCE_4_BYTE_ALIGNMENT
 
 #include <assert.h>
 #include <limits.h>

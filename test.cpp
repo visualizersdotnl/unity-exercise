@@ -9,7 +9,7 @@
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECONDS 361000  // Stress test Ryzen 5900x
-	#define NUM_QUERIES 30
+	#define NUM_QUERIES 4
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
@@ -18,7 +18,7 @@
 	#else
 		#define HIGHSCORE_MICROSECONDS 600000  // And for anything else, like Albert's Intel
 	#endif
-	#define NUM_QUERIES 30
+	#define NUM_QUERIES 4
 	// #define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #endif
 
@@ -64,15 +64,11 @@ int main(int argC, char **arguments)
 
 	initialize_random_generator();
 
-	std::vector<std::chrono::microseconds> durations;
-	durations.reserve(NUM_QUERIES);
+	std::chrono::microseconds curFastest(HIGHSCORE_MICROSECONDS*10); // Just needed something 'big'
+	std::chrono::microseconds prevFastest(curFastest);
 
-#ifdef HIGHSCORE_LOOP
-	std::chrono::microseconds prevFastest(HIGHSCORE_MICROSECONDS*10); // Just needed safe 'big' number to compare against the first time around
-#else
 	std::vector<Results> resultsToFree;
 	resultsToFree.reserve(NUM_QUERIES);
-#endif
 
 	printf("- Loading dictionary...\n");
 	// const char *dictPath = "dictionary-short.txt";
@@ -138,7 +134,7 @@ GenerateBoard:
 #endif
 
 #ifdef HIGHSCORE_LOOP
-	printf("- Finding (looping for high score!) in %ux%u... (%u iterations per try)\n", xSize, ySize, NUM_QUERIES);
+	printf("- Finding (looping for high score!) in %ux%u... (%u iterations per run)\n", xSize, ySize, NUM_QUERIES);
 #else
 	printf("- Finding in %ux%u... (%u iterations)\n", xSize, ySize, NUM_QUERIES);
 #endif
@@ -148,34 +144,35 @@ RetrySameBoard:
 	{
 		const auto start = std::chrono::high_resolution_clock::now();
 		Results results = FindWords(board.get(), xSize, ySize);
-		const auto end = std::chrono::high_resolution_clock::now();
-		durations.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start));
+		const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start);
+
+		if (duration < curFastest)
+			curFastest = duration;
 	
 #ifdef PRINT_ITER_RESULTS
 		printf("Results (run %u): ", iQuery+1);
-		printf("count: %u, score: %u, duration %.lld microsec.\n", results.Count, results.Score, durations[iQuery].count());
+		printf("count: %u, score: %u, duration %.lld microsec.\n", results.Count, results.Score, duration.count());
+#else
+		if (duration < prevFastest)
+			printf("Faster: %.lld microsec.\n", duration.count());
 #endif
 
-#ifdef HIGHSCORE_LOOP
-		FreeWords(results);
-#else
 		resultsToFree.emplace_back(results);
-#endif
 	}
 
-	// Sort so we can conveniently pick the fastest run
-	std::sort(durations.begin(), durations.end());
-
 #ifdef HIGHSCORE_LOOP
-	if (prevFastest > durations[0])
+	if (curFastest < prevFastest)
 	{
-		printf("New best time: %.lld microsec.\n", durations[0].count());
-		prevFastest = durations[0];
+		printf("New fastest run: %.lld microsec.\n", curFastest.count());
+		prevFastest = curFastest;
 	}
 
 	if (prevFastest.count() >= HIGHSCORE_MICROSECONDS) 
 	{
-		durations.clear();
+		for (auto& result : resultsToFree)
+			FreeWords(result);
+
+		resultsToFree.clear();
 
 #if defined(HIGHSCORE_LOOP) && defined(HIGHSCORE_LOOP_RANDOMIZE_BOARD)
 		goto GenerateBoard;
@@ -185,7 +182,7 @@ RetrySameBoard:
 	}
 #endif
 
-#ifndef HIGHSCORE_LOOP
+#if !defined(HIGHSCORE_LOOP)
 
 #if defined(PRINT_WORDS)
 	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 
@@ -206,14 +203,14 @@ RetrySameBoard:
 	}
 #endif
 
+#endif
+
 	for (auto& result : resultsToFree)
 		FreeWords(result);
 
-#endif
-	
 	FreeDictionary();
 
-	const auto time = durations[0].count();
+	const auto time = prevFastest.count();
 	printf("\nSolver ran %u times, fastest: %.lld microsec. / approx. %.4lf second(s)\n", (unsigned) NUM_QUERIES, time, double(time)*0.000001);
 
 	return 0;
