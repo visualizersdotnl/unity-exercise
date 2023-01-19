@@ -160,7 +160,7 @@ RetrySameBoard:
 		resultsToFree.emplace_back(results);
 	}
 
-#ifdef HIGHSCORE_LOOP
+#if defined(HIGHSCORE_LOOP)
 	if (curFastest < prevFastest)
 	{
 		printf("New fastest run: %.lld microsec.\n", curFastest.count());
@@ -174,26 +174,24 @@ RetrySameBoard:
 
 		resultsToFree.clear();
 
-#if defined(HIGHSCORE_LOOP) && defined(HIGHSCORE_LOOP_RANDOMIZE_BOARD)
+#if defined(HIGHSCORE_LOOP_RANDOMIZE_BOARD)
 		goto GenerateBoard;
-#elif defined(HIGHSCORE_LOOP)
+#else
 		goto RetrySameBoard;
 #endif
 	}
 #endif
 
-#if !defined(HIGHSCORE_LOOP)
-
-#if defined(PRINT_WORDS)
-	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord) 
-		printf("%s\n", results[0].Words[iWord]);	
+#if !defined(HIGHSCORE_LOOP) && defined(PRINT_WORDS)
+	for (unsigned iWord = 0; iWord < resultsToFree[0].Count; ++iWord) 
+		printf("%s\n", resultsToFree[0].Words[iWord]);	
 #endif
 
-#if defined(DUPE_CHECK)
+#if !defined(HIGHSCORE_LOOP) && defined(DUPE_CHECK)
 	std::unordered_set<std::string> words;
-	for (unsigned iWord = 0; iWord < results[0].Count; ++iWord)
+	for (unsigned iWord = 0; iWord < resultsToFree[0].Count; ++iWord)
 	{
-		std::string word(results[0].Words[iWord]);
+		std::string word(resultsToFree[0].Words[iWord]);
 
 		auto pair = words.insert(word);
 		if (false == pair.second)
@@ -201,8 +199,6 @@ RetrySameBoard:
 			printf("Word found twice: %s\n", word.c_str());
 		}
 	}
-#endif
-
 #endif
 
 	for (auto& result : resultsToFree)

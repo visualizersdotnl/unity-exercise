@@ -376,7 +376,8 @@ public:
 		return m_indexBits;  
 	}
 
-	BOGGLE_INLINE_FORCE void PruneReverse()
+/*
+	BOGGLE_INLINE_FORCE void PruneReverse_Old()
 	{
 		DictionaryNode* current = this;
 		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
@@ -391,6 +392,24 @@ public:
 			--current->m_wordRefCount;
 #endif
 	
+			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
+		}
+	}
+*/
+
+	BOGGLE_INLINE_FORCE void PruneReverse()
+	{
+		DictionaryNode* current = this;
+		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
+		{
+			current->m_indexBits = current->m_indexBits*IsZero(current->m_wordRefCount-1);
+
+#if defined(FOR_INTEL)
+			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
+#else
+			--current->m_wordRefCount;
+#endif
+
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 		}
 	}
