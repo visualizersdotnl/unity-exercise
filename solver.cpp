@@ -249,11 +249,11 @@ public:
 	// Destructor is not called when using ThreadCopy!
 	~LoadDictionaryNode()
 	{
-		for (unsigned iBit = 1; iBit < kAlphaRange+USE_EXTRA_INDEX; ++iBit)
+		for (unsigned iBit = USE_EXTRA_INDEX; iBit < kAlphaRange+USE_EXTRA_INDEX; ++iBit)
 		{
 			if (m_indexBits & (1<<iBit))
 			{
-				auto* child = m_children[iBit-1];
+				auto* child = m_children[iBit-USE_EXTRA_INDEX];
 				child->~LoadDictionaryNode();
 				s_globalCustomAlloc.FreeUnsafe(child);
 			}
