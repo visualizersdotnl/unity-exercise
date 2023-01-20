@@ -8,8 +8,8 @@
 // When board randomization enabled, it pays off (usually) to do more queries to get better performance.
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
-	#define HIGHSCORE_MICROSECONDS 361000  // Stress test Ryzen 5900x
-	#define NUM_QUERIES 30
+	#define HIGHSCORE_MICROSECONDS 400000  // Stress test Ryzen 5900x
+	#define NUM_QUERIES 6
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
@@ -145,19 +145,26 @@ RetrySameBoard:
 		const auto start = std::chrono::high_resolution_clock::now();
 		Results results = FindWords(board.get(), xSize, ySize);
 		const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start);
+	
+#if defined(PRINT_ITER_RESULTS) && !defined(HIGHSCORE_LOOP)
+		printf("Results (run %u): ", iQuery+1);
+		printf("count: %u, score: %u, duration %.lld microsec.\n", results.Count, results.Score, duration.count());
 
 		if (duration < curFastest)
 			curFastest = duration;
-	
-#ifdef PRINT_ITER_RESULTS
-		printf("Results (run %u): ", iQuery+1);
-		printf("count: %u, score: %u, duration %.lld microsec.\n", results.Count, results.Score, duration.count());
-#else
-		if (duration < prevFastest)
+#elif defined(PRINT_ITER_RESULTS)
+		if (duration < curFastest)
 			printf("Faster: %.lld microsec.\n", duration.count());
 #endif
 
+		if (duration < curFastest)
+			curFastest = duration;
+
+#if 0 // defined(HIGHSCORE_LOOP)
+		FreeWords(results);
+#else
 		resultsToFree.emplace_back(results);
+#endif
 	}
 
 #if defined(HIGHSCORE_LOOP)

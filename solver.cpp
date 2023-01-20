@@ -361,6 +361,7 @@ public:
 				{
 					if (indexBits & 1)
 					{
+						// FIXME: sometimes this breaks!
 						node->m_children[index] = Copy(parent->GetChild(index));
 						node->GetChild(index)->m_children[kIndexParent] = nodeLower32;
 					}
