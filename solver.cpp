@@ -87,7 +87,9 @@
 // #define ASSERTIONS
 
 // Undef. to enable streamed (non-temporal) writes
-#define STREAM_WRITES
+#if defined(FOR_INTEL)
+	#define STREAM_WRITES
+#endif
 
 // Set to 0 to use index of letter 'U' instead of extra 4 bytes
 #define USE_EXTRA_INDEX 0
