@@ -89,9 +89,15 @@
 // Undef. to enable streamed (non-temporal) writes
 #define STREAM_WRITES
 
+// Set to 0 to use index of letter 'U' instead of extra 4 bytes
+#define USE_EXTRA_INDEX 0
+
 // static thread_local unsigned s_iThread;       // Dep. for thread heaps.
 #define GLOBAL_MEMORY_POOL_SIZE 1024*1024*2000   // Just allocate as much as we can in 1 go.
 #include "custom-allocator.h"                    // Depends on Ned Flanders & co. :)
+
+constexpr size_t kAlignTo = 16; // 128-bit
+constexpr size_t kCacheLineSize = sizeof(size_t)*8;
 
 // Undef. to kill prefetching
 // #define NO_PREFETCHES 
@@ -115,8 +121,6 @@
 	__inline void debug_print(const char* format, ...) {}
 #endif
 
-constexpr unsigned kAlphaRange = ('Z'-'A')+1;
-
 #if defined(SINGLE_THREAD)
 	constexpr size_t kNumThreads = 1;
 #else
@@ -129,9 +133,6 @@ constexpr unsigned kAlphaRange = ('Z'-'A')+1;
 #endif
 
 #endif
-
-constexpr size_t kAlignTo = 16; // 128-bit
-constexpr size_t kCacheLineSize = sizeof(size_t)*8;
 
 #ifndef NO_PREFETCHES
 
@@ -208,17 +209,24 @@ static std::vector<ThreadInfo> s_threadInfo;
 // Full dictionary
 static std::vector<Word> s_words;
 
+constexpr unsigned kAlphaRange = ('Z'-'A')+1;
+
 // Cheap way to tag along the tiles (few bits left)
 constexpr unsigned kTileVisitedBit = 1<<7;
 
 // If you see 'letter' and 'index' used: all it means is that an index is 0-based.
 BOGGLE_INLINE_FORCE unsigned LetterToIndex(unsigned letter)
 {
-	return 1 + (letter - static_cast<unsigned>('A'));
+	return USE_EXTRA_INDEX + (letter - static_cast<unsigned>('A'));
 }
 
-// constexpr auto kIndexU = 'U'-'A'; // LetterToIndex('U');
-constexpr auto kIndexParent = 0;
+constexpr auto kIndexU = 'U'-'A'; // LetterToIndex('U');
+
+#if 0 == USE_EXTRA_INDEX
+	constexpr auto kIndexParent = kIndexU;
+#else
+	constexpr auto kIndexParent = 0;
+#endif
 
 // FWD.
 class LoadDictionaryNode;
@@ -241,7 +249,7 @@ public:
 	// Destructor is not called when using ThreadCopy!
 	~LoadDictionaryNode()
 	{
-		for (unsigned iBit = 1; iBit < kAlphaRange+1; ++iBit)
+		for (unsigned iBit = 1; iBit < kAlphaRange+USE_EXTRA_INDEX; ++iBit)
 		{
 			if (m_indexBits & (1<<iBit))
 			{
@@ -263,7 +271,7 @@ public:
 		const unsigned bit = 1 << index;
 		if (m_indexBits & bit)
 		{
-			auto* child = m_children[index-1];
+			auto* child = m_children[index-USE_EXTRA_INDEX];
 			++child->m_wordRefCount;
 			return child;
 		}
@@ -273,21 +281,19 @@ public:
 		m_indexBits |= bit;
 
 		// What's won here is not so much locality, but fast sequential allocation
-		return m_children[index-1] = new (s_globalCustomAlloc.AllocateAlignedUnsafe(sizeof(LoadDictionaryNode), kAlignTo)) LoadDictionaryNode();
+		return m_children[index-USE_EXTRA_INDEX] = new (s_globalCustomAlloc.AllocateAlignedUnsafe(sizeof(LoadDictionaryNode), kAlignTo)) LoadDictionaryNode();
 	}
 
 	BOGGLE_INLINE_FORCE LoadDictionaryNode* GetChild(unsigned index)
 	{
 //		Assert(nullptr != m_children[index]);
-		return m_children[index-1];
+		return m_children[index-USE_EXTRA_INDEX];
 	}
 
 private:
-	// This order in conjuction with ThreadCopy below has proven to be fast.
 	int32_t m_wordIdx = -1; 
 	uint32_t m_indexBits = 0;
 	uint32_t m_wordRefCount = 1;
-	uint32_t m_padding;
 	LoadDictionaryNode* m_children[kAlphaRange];
 };
 
@@ -312,7 +318,7 @@ public:
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
-			m_pool->m_children[0] = 0; // Terminate at root.
+			m_pool->m_children[kIndexParent] = 0; // Terminate at root.
 		}
 
 		~ThreadCopy()
@@ -351,7 +357,7 @@ public:
 #endif
 				indexBits >>= index;
 			
-				for (; index < kAlphaRange+1; ++index)
+				for (; index < kAlphaRange+USE_EXTRA_INDEX; ++index)
 				{
 					if (indexBits & 1)
 					{
@@ -379,9 +385,36 @@ public:
 		return m_indexBits;  
 	}
 
+	// ------ PruneReverse() & friends ------
+
 	BOGGLE_INLINE_FORCE void PruneReverse()
 	{
 		DictionaryNode* current = this;
+
+		do
+		{
+			const uint32_t rootLower32 = current->m_children[kIndexParent];
+
+			if (0 == current->m_wordRefCount-1)
+				current->m_indexBits = 0;
+
+#if defined(STREAM_WRITES)
+			// This should make sense since we're not going to read this value for a while:
+			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
+#else
+			--current->m_wordRefCount;
+#endif
+
+			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
+		}
+		while (reinterpret_cast<uint64_t>(current) & 0xffffffff);
+	}
+
+	// Version like normal, except the loop is evaluated on top
+	BOGGLE_INLINE_FORCE void PruneReverse_Loop_Flipped()
+	{
+		DictionaryNode* current = this;
+
 		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
 		{
 			if (0 == current->m_wordRefCount-1)
@@ -392,21 +425,23 @@ public:
 #else
 			--current->m_wordRefCount;
 #endif
-	
+
 			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
 		}
 	}
 
-	BOGGLE_INLINE_FORCE void PruneReverse_NoCompare()
+	// Without a branch in the inner loop (check against m_wordRefCount)
+	BOGGLE_INLINE_FORCE void PruneReverse_Cleanest()
 	{
 		DictionaryNode* current = this;
+
 		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
 		{
-			current->m_indexBits = current->m_indexBits*IsNotZero(current->m_wordRefCount-1);
-
 #if defined(STREAM_WRITES)
+			_mm_stream_si32(reinterpret_cast<int*>(&current->m_indexBits), current->m_indexBits*IsNotZero(current->m_wordRefCount-1));
 			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
 #else
+			current->m_indexBits = current->m_indexBits*IsNotZero(current->m_wordRefCount-1);
 			--current->m_wordRefCount;
 #endif
 
@@ -414,9 +449,33 @@ public:
 		}
 	}
 
+	// Same as above, but different loop again
+	BOGGLE_INLINE_FORCE void PruneReverse_NoCompare_DoWhile()
+	{
+		DictionaryNode* current = this;
+
+		do
+		{
+			const uint32_t rootLower32 = current->m_children[kIndexParent];
+
+#if defined(STREAM_WRITES)
+			_mm_stream_si32(reinterpret_cast<int*>(&current->m_indexBits), current->m_indexBits*IsNotZero(current->m_wordRefCount-1));
+			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
+#else
+			current->m_indexBits = current->m_indexBits*IsNotZero(current->m_wordRefCount-1);
+			--current->m_wordRefCount;
+#endif
+
+			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
+		}
+		while (reinterpret_cast<uint64_t>(current) & 0xffffffff);
+	}
+
+	// ------ PruneReverse() ------
+
 	BOGGLE_INLINE_FORCE void RemoveChild(unsigned index)
 	{
-		Assert(index < kAlphaRange+1);
+		Assert(index < kAlphaRange+USE_EXTRA_INDEX);
 		Assert(HasChild(index));
 
 		m_indexBits ^= 1 << index;
@@ -425,13 +484,18 @@ public:
 	// Returns non-zero if true.
 	BOGGLE_INLINE_FORCE unsigned HasChild(unsigned index) const
 	{
-		Assert(index < kAlphaRange+1);
+		Assert(index < kAlphaRange+USE_EXTRA_INDEX);
 		return m_indexBits & (1 << index);
 	}
 
 	BOGGLE_INLINE_FORCE DictionaryNode* GetChild(unsigned index) const
 	{
+#if 1 == USE_EXTRA_INDEX
 		Assert(0 == index || HasChild(index));
+#else
+		Assert(HasChild(index));
+#endif
+
 		return reinterpret_cast<DictionaryNode*>(m_poolUpper32|m_children[index]);
 	}
 
@@ -458,13 +522,20 @@ public:
 	}
 
 private:
-	// This is aligned to 128 bytes, keep it that way!
 	uint32_t m_indexBits;
 	int32_t m_wordRefCount;
+
+#if 1 == USE_EXTRA_PADDING
+	uint8_t m_padding[4];
+#endif
+
 	uint64_t m_poolUpper32;
-	uint32_t m_children[kAlphaRange+1];
+	uint32_t m_children[kAlphaRange+USE_EXTRA_INDEX];
 	int32_t m_wordIdx; // Sits on a 16-byte boundary
 };
+
+// Keep the above exactly 128 bytes, keep it that way!
+static_assert(sizeof(DictionaryNode) == 128);
 
 // We keep one dictionary at a time so it's access is protected by a mutex, just to be safe.
 static std::mutex s_dictMutex;
@@ -1092,8 +1163,7 @@ private:
 		wordsFound.emplace_back(wordIdx);
 #endif
 
-		node->PruneReverse_NoCompare();
-//		node->PruneReverse();
+		node->PruneReverse();
 	}
 }
 
