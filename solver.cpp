@@ -695,8 +695,8 @@ public:
 		DictionaryLock dictLock;
 #endif
 		{
-			unsigned Score = 0;
 			unsigned Count = 0;
+			unsigned Score = 0;
 
 			// I'll be copying pointers, plain and simple, but not the safest given the API.
 			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), kAlignTo));
@@ -712,16 +712,16 @@ public:
 				std::vector<unsigned> wordsFound;
 				wordsFound.reserve(s_threadInfo[iThread].load);
 				ExecuteThread(iThread, wordsFound);
-				std::sort(wordsFound.begin(), wordsFound.end());
+//				std::sort(wordsFound.begin(), wordsFound.end());
 
 				for (const auto wordIdx : wordsFound)
 				{
 					const auto& word = s_words[wordIdx];
 					
-					Count += 1;
+					++Count;
 					Score += unsigned(word.score);
 
-#if defined(STREAM_WRITES)
+#if 0 // defined(STREAM_WRITES)
 					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
 //					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word.c_str()));
 #else
@@ -792,10 +792,10 @@ void Query::ExecuteThread(unsigned iThread, std::vector<unsigned>& wordsFound)
 #else
 				TraverseBoard(wordsFound, &visited[offsetY+iX], child, width, height, iX, offsetY);
 #endif
-			}
 
-			// Try to prefetch next cache line
-			NearPrefetch(visited + offsetY+iX+kCacheLineSize);
+				// Try to prefetch next cache line
+				ImmPrefetch(visited + offsetY+iX+kCacheLineSize);
+			}
 		}
 	}
 
