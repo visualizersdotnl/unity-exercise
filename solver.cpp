@@ -2,14 +2,13 @@
 	Boggle solver implementation, written the weekend of December 9 & 10, 2017 by Niels J. de Wit (ndewit@gmail.com).
 	Please check 'solver_submitted.cpp' for original submission version, this is the competition one.
 
-	This is an optimized version.
+	This is an optimized version, using OpenMP.
 
 	- Always check for leaks (Windows debug build does it automatically).
 	- FIXMEs.
 
 	To do (low priority):
 		- Building (or loading) my dictionary is slow(ish), I'm fine with that as I focus on the solver; or should I precalculate even more?
-		- Fix class members (notation).
 
 	Notes:
 		- Currently tested on Windows 10 (VS2019), Linux & OSX.
@@ -27,12 +26,16 @@
 
 	Optimization ideas:
 	- That memcpy() taking 3% (of whatever) is nagging me -> WIP
+	- Src: https://squadrick.dev/journal/going-faster-than-memcpy.html
 	- Copy() can be faster (analyze it)
 	- Prefetches help, not clear if it does on ARM/Silicon
-	- Streaming helps on Intel, not so much on ARM/Silicon
+	- Streaming helps on Intel, not so much on ARM/Silicon?
 	- Try 'reverse pruning' only to a certain degree (first test up to 3-letter words, then move up, maybe correlate it to an actual value (heuristic)) -> WIP
-	- Src: https://squadrick.dev/journal/going-faster-than-memcpy.html
-	*/
+
+	Things about the OpenMP version:
+	- Results are (FIXME) invalid as soon as a new dictionary is loaded!
+	- ...
+*/
 
 // Make VC++ 2015 shut up and walk in line.
 #define _CRT_SECURE_NO_WARNINGS 
@@ -54,9 +57,6 @@
 #include <vector>
 #include <algorithm>
 #include <cassert>
-// #include <unordered_map>
-// #include <atomic>
-// #include <map>
 
 #include <omp.h>
 
@@ -89,9 +89,6 @@
 // But basically the only gaurantee here is that this works with my own test!
 // #define NED_FLANDERS
 
-// Undef. to use only 1 thread; makes certain things easier to debug.
-#define SINGLE_THREAD
-
 // Undef. to kill assertions.
 // #define ASSERTIONS
 
@@ -110,10 +107,8 @@
 constexpr size_t kAlignTo = 16; // 128-bit
 constexpr size_t kCacheLineSize = sizeof(size_t)*8;
 
-// Undef. to kill prefetching
-#if defined(FOR_ARM)
-	#define NO_PREFETCHES // Read up on ARM & prefetching first!
-#endif
+// Undef. to kill prefetching (to do: read up on ARM/Silicon and prefetches)
+// #define NO_PREFETCHES 
 
 // Max. word length (for optimization)
 #define MAX_WORD_LEN 15
@@ -135,16 +130,10 @@ constexpr size_t kCacheLineSize = sizeof(size_t)*8;
 #endif
 
 #if defined(SINGLE_THREAD)
-	const size_t kNumThreads = 24+12; // omp_get_max_threads();
+	constexpr size_t kNumThreads = 1;
 #else
-	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
-	
-#if defined(_WIN32)
-	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2); // This causes all kinds of pre-emption stalls (see Superluminal) but for all the wrong reasons, better peak perf.
-#else
+	const size_t kNumConcurrrency = omp_get_max_threads();
 	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
-#endif
-
 #endif
 
 #ifndef NO_PREFETCHES
@@ -175,7 +164,7 @@ BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
 #if defined(__GNUC__)
 	__builtin_prefetch(address, 1, 0);
 #elif defined(_WIN32)
-	_mm_prefetch(address, _MM_HINT_T0);
+	_mm_prefetch(address, _MM_HINT_NTA);
 #endif
 }
 
@@ -474,8 +463,7 @@ static std::mutex s_dictMutex;
 static unsigned s_longestWord;
 static size_t s_wordCount;
 
-#if 0
-BOGGLE_INLINE static unsigned GetWordScore_Niels(size_t length) /* const */
+BOGGLE_INLINE static unsigned GetWordScore_Readable(size_t length) /* const */
 {
 	length -= 3;
 	length = length > 5 ? 5 : length; // This nicely compiles to a conditional move
@@ -484,28 +472,11 @@ BOGGLE_INLINE static unsigned GetWordScore_Niels(size_t length) /* const */
 	return kLUT[length];
 }
 
-BOGGLE_INLINE static unsigned GetWordScore_Albert_1(size_t length) /* const */
-{
-	length = length > 8 ? 8 : length;
-	length -= 3;
-
-	// Courtesy of Albert S.
-	size_t Albert = 0;
-	Albert += length>>1;
-	Albert += (length+1)>>2;
-	Albert += length>>2;
-	Albert += ((length+3)>>3)<<2;
-	Albert += ((length+3)>>3<<1);
-	return unsigned(Albert+1);
-	}
-}
-#endif
-
-BOGGLE_INLINE static uint8_t GetWordScore_Albert_2(size_t length) /* const */
+BOGGLE_INLINE static uint8_t GetWordScore_Albert(size_t length) /* const */
 {
 	length = length > 8 ? 8 : length;
 
-	// Courtesy of Albert S.
+	// Courtesy of Albert Sandberg, the bit magician.
 	size_t Albert = 0;
 	Albert += (length-3)>>1;
 	Albert += (length+10)>>4;
@@ -591,7 +562,7 @@ static bool IsWordValid(const std::string& word)
 	}
 
 	// Store word in dictionary (FIXME: less ham-fisted please).
-	s_words.emplace_back(Word(GetWordScore_Albert_2(length), word));
+	s_words.emplace_back(Word(GetWordScore_Albert(length), word));
 
 	// Store index in node.
 	node->m_wordIdx = int(s_wordCount);
@@ -670,12 +641,10 @@ void LoadDictionary(const char* path)
 		// Check thread load total.
 		size_t count = 0;
 		for (CONST auto& info : s_threadInfo)
-		{
 			count += info.load;
-		}
 
 		if (count != s_wordCount)
-			debug_print("Thread word count %zu != total word count %zu!", count, s_wordCount);
+			debug_print("Thread word count (load) %zu != total word count %zu!", count, s_wordCount);
 #endif
 	}
 
@@ -718,118 +687,43 @@ public:
 
 	~Query() {}
 
-public:
-	// FIXME: slim this down, fix notation! 
-	class ThreadContext
-	{
-	public:
-		ThreadContext(unsigned iThread, const Query* instance) :
-		m_iThread(iThread)
-,		width(instance->m_width)
-,		height(instance->m_height)
-,		sanitized(instance->m_sanitized)
-		{
-			Assert(iThread < kNumThreads);
-			Assert(nullptr != instance);
-		}
+	void ExecuteThread(unsigned iThread, std::vector<unsigned>& wordsFound);
 
-		~ThreadContext() 
-		{
-			// We don't have to free this memory
-//			s_threadCustomAlloc[m_iThread]->FreeUnsafe(visited);
-		}
-
-		void OnExecuteThread()
-		{
-//			s_iThread = m_iThread;
-
-			// Handle allocation and initialization of thread grid.
-			const auto gridSize = width*height;
-			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateAlignedUnsafe(gridSize, kAlignTo));
-			memcpy(visited, sanitized, gridSize);
-
-			// Reserve.
-			wordsFound.reserve(s_threadInfo[m_iThread].load); 
-		}
-
-		// Input
-		const unsigned m_iThread;
-		const unsigned width; const unsigned height;
-		const char* sanitized;
-		char* visited; // Contains letters and a few bits for state.
-
-		// Output
-		std::vector<unsigned> wordsFound;
-
-#if defined(NED_FLANDERS)
-		size_t reqStrBufSize = 0;
-#endif
-
-#if defined(DEBUG_STATS)
-		unsigned maxDepth;
-#endif
-	}; 
-
-public:
 	void Execute()
 	{
+#ifdef NED_FLANDERS
 		// Just in case another Execute() call is made on the same context: avoid leaking.
 		FreeWords(m_results);
 
 		// Bit of a step back from what it was, but as I'm picking words out of the global list now..
-#ifdef NED_FLANDERS
 		DictionaryLock dictLock;
 #endif
 		{
-			// Already set
-//			m_results.Count  = 0;
-//			m_results.Score  = 0;
+			unsigned Score = 0;
+			unsigned Count = 0;
 
-			// Kick off threads.
-//			std::vector<std::thread> threads;
-			std::vector<ThreadContext> contexts;
-//			threads.reserve(kNumThreads);
-			contexts.reserve(kNumThreads);
-
-//			debug_print("Kicking off %zu threads.\n", kNumThreads);
-			
-			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
-			{
-				contexts.emplace_back(ThreadContext(iThread, this));
-//				threads.emplace_back(std::thread(ExecuteThread, &contexts[iThread]));
-
-#ifdef _WIN32
-				// Works as a mild stimulant, if you will
-
-//				SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
-#elif defined(__GNUC__)
-//				sched_param parameters;
-//				const auto maximum = sched_get_priority_max(SCHED_RR);
-//				parameters.sched_priority = maximum-1;
-//				pthread_setschedparam(threads[iThread].native_handle(), SCHED_RR, &parameters);
-#endif
-			}
-
-//			for (auto& thread : threads)
-//				thread.join();
-
+			// I'll be copying pointers, plain and simple, but not the safest given the API.
 			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), kAlignTo));
+			char** words_cstr = const_cast<char**>(m_results.Words); 
 
-			#pragma omp parallel for schedule(static, 1) num_threads(kNumThreads)
+#if defined(NED_FLANDERS) // WIP!
+			m_reqStrBufSize = 0;
+#endif
+
+			#pragma omp parallel for reduction(+:Count) reduction(+:Score) schedule(static, 1) num_threads(int(kNumThreads))
 			for (int iThread = 0; iThread < kNumThreads; ++iThread)
-				ExecuteThread(&contexts[iThread]);
-
-#if !defined(NED_FLANDERS)
-			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data; we'll just be copying pointers (not fool proof).
-
-			for (const auto& context : contexts)
 			{
-				for (const auto wordIdx : context.wordsFound)
+				std::vector<unsigned> wordsFound;
+				wordsFound.reserve(s_threadInfo[iThread].load);
+				ExecuteThread(iThread, wordsFound);
+				std::sort(wordsFound.begin(), wordsFound.end());
+
+				for (const auto wordIdx : wordsFound)
 				{
 					const auto& word = s_words[wordIdx];
-
-					m_results.Score += unsigned(word.score);
-					++m_results.Count;
+					
+					Count += 1;
+					Score += unsigned(word.score);
 
 #if defined(STREAM_WRITES)
 					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
@@ -839,151 +733,106 @@ public:
 //					*words_cstr++ = const_cast<char*>(word.word.c_str());
 #endif
 				}
-
-				debug_print("Thread %u joined with %zu words (score %u).\n", context.m_iThread, contexts[context.m_iThread].wordsFound.size(), m_results.Score);
+				debug_print("Thread %u completed with %zu words.\n", iThread, wordsFound.size());
 			}
-#else
-			size_t totReqStrBufLen = 0;
-			for (const auto& context : contexts)
-				totReqStrBufLen += context.reqStrBufSize;
 
-			// Copy words to Results structure.
-			// I'd rather set pointers into the dictionary, but that would break the results as soon as new dictionary is loaded.
-
-			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data.
-			char* resBuf = new char[totReqStrBufLen]; // Allocate sequential buffer.
-
-			for (const auto& context : contexts)
-			{
-				for (const auto wordIdx : context.wordsFound)
-				{
-					const auto& word = s_words[wordIdx]; 
-
-					m_results.Score += unsigned(word.score);
-					++m_results.Count;
-
-					*words_cstr = resBuf;
-//					strcpy(*words_cstr++, word.word.c_str()); 
-//					const size_t length = word.word.length(); 
-					strcpy(*words_cstr++, word.word);
-					const size_t length = strlen(word.word);
-
-					resBuf += length+1;
-				}
-
-				debug_print("Thread %u joined with %zu words (score %u).\n", context.m_iThread, context.wordsFound.size(), m_results.Score);
-			}
-#endif
+			m_results.Count = Count;
+			m_results.Score = Score;
 		}
 	}
 
 private:
-	static void ExecuteThread(ThreadContext* context);
-
-private:
 #if defined(DEBUG_STATS)
-	static void BOGGLE_INLINE TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
-	static void BOGGLE_INLINE TraverseBoard(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth);
+	void BOGGLE_INLINE_FORCE TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY, uint8_t depth);
+	void BOGGLE_INLINE TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY, uint8_t depth);
 #else
-	static void BOGGLE_INLINE_FORCE TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
-	static void BOGGLE_INLINE TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	void BOGGLE_INLINE_FORCE TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
+	void BOGGLE_INLINE TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY);
 #endif
 
 	Results& m_results;
 	const char* m_sanitized;
 	const unsigned m_width, m_height;
-};
 
-/* static */ void Query::ExecuteThread(ThreadContext* context)
-{
-	// Initialize context
-	context->OnExecuteThread();
-
-	// Create copy of source dictionary tree
-	const auto threadCopy = DictionaryNode::ThreadCopy(context->m_iThread);
-	auto* root = threadCopy.Get();
-
-	// Grab stuff from context
-	const unsigned width  = context->width;
-	const unsigned height = context->height;
-
-	auto* visited = context->visited; // Attempt to prefetch grid
-	NearPrefetch(visited);
-
-#if !defined(FOR_INTEL)
-	auto& wordsFound = context->wordsFound;
+#if defined(NED_FLANDERS)
+	size_t m_reqStrBufSize;
 #endif
 
 #if defined(DEBUG_STATS)
-	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->m_iThread, s_threadInfo[context->m_iThread].load, s_threadInfo[context->m_iThread].nodes);
+	unsigned m_maxDepth;
+#endif
+};
 
-	context->maxDepth = 0;
+void Query::ExecuteThread(unsigned iThread, std::vector<unsigned>& wordsFound)
+{
+	const unsigned width  = m_width;
+	const unsigned height = m_height;
+
+	// Create copy of dictionary tree for this thread
+	const auto threadCopy = DictionaryNode::ThreadCopy(iThread);
+	auto* root = threadCopy.Get();
+
+#if defined(DEBUG_STATS)
+	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", iThread, s_threadInfo[iThread].load, s_threadInfo[iThread].nodes);
+	m_maxDepth = 0;
 #endif
 
-	for (unsigned offsetY = 0; offsetY <= width*(height-1); offsetY += width) 
+	// Allocate & copy grid (no necessity to free it, thread heaps will be discarded as a whole afterwards)
+	const auto gridSize = width*height;
+	char* visited = static_cast<char*>(s_threadCustomAlloc[iThread].AllocateAlignedUnsafe(gridSize, kAlignTo));
+	memcpy(visited, m_sanitized, gridSize);
+
+	for (unsigned offsetY = 0; offsetY <= width*(height-1); offsetY += m_width) 
 	{
-		// Try to prefetch next horizontal line of board
+		// Try to prefetch next horizontal line of board in advance
 		FarPrefetch(visited + offsetY+width);
 
-		#pragma omp parallel for // schedule(static) num_threads(2)
-		for (int iX = 0; iX < width; ++iX) 
+		for (int iX = 0; iX < int(width); ++iX) 
 		{
-			NearPrefetch(visited + offsetY+iX + kCacheLineSize);
-
 			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
 #if defined(DEBUG_STATS)
-				unsigned depth = 0;
-				TraverseBoard(*context, child, iX, offsetY, depth);
-#elif defined(FOR_ARM)
-				TraverseBoard(wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
-#elif defined(FOR_INTEL)
-				TraverseBoard(context->wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
+				TraverseBoard(wordsFound, &visited[offsetY+iX], child, width, height, iX, offsetY, 1);
+#else
+				TraverseBoard(wordsFound, &visited[offsetY+iX], child, width, height, iX, offsetY);
 #endif
 			}
+
+			// Try to prefetch next cache line
+			NearPrefetch(visited + offsetY+iX+kCacheLineSize);
 		}
 	}
 
-#if !defined(FOR_INTEL)
-	std::sort(wordsFound.begin(), wordsFound.end());
-#else
-	std::sort(context->wordsFound.begin(), context->wordsFound.end());
-#endif
-
 #if defined(NED_FLANDERS)
-	for (unsigned wordIdx : context->wordsFound)
+	for (unsigned wordIdx : wordsFound)
 	{
-		const size_t length = s_words[wordIdx].word.length(); // strlen(s_words[wordIdx].word);
-		context->reqStrBufSize += length + 1; // Plus one for zero terminator
+		const size_t length = strlen(s_words[wordIdx].word);
+//		const size_t length = s_words[wordIdx].word.length(); 
+		m_reqStrBufSize += length + 1; // Plus one for zero terminator
 	}
 #endif
 
 #if defined(DEBUG_STATS)
-	if (s_threadInfo[context->m_iThread].load > 0)
+	if (s_threadInfo[iThread].load > 0)
 	{
-		const float hitPct = float(context->wordsFound.size())/s_threadInfo[context->m_iThread].load;
-		debug_print("Thread %u has max. traversal depth %u (max. %u), hit rate %.2f\n", context->m_iThread, context->maxDepth, s_longestWord, hitPct); 
+		const float hitPct = float(wordsFound.size())/s_threadInfo[iThread].load;
+		debug_print("Thread %u has max. traversal depth %u (max. %u), hit rate %.2f\n", iThread, m_maxDepth, s_longestWord, hitPct); 
 	}
 #endif
 }
 
 #if defined(DEBUG_STATS)
-/* static */ BOGGLE_INLINE void Query::TraverseCall(ThreadContext& context, DictionaryNode *node, unsigned iX, unsigned offsetY, uint8_t depth)
+BOGGLE_INLINE_FORCE void Query::TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ BOGGLE_INLINE_FORCE void Query::TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+BOGGLE_INLINE_FORCE void Query::TraverseCall(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
-#if defined(DEBUG_STATS)
-	auto* visited = context.visited + offsetY+iX;
-#endif
-
-	const unsigned tile = *visited;
 	if (!(*visited & kTileVisitedBit)) // Not visited?
 	{
 		if (auto* child = node->GetChildChecked(*visited)) // With child?
 		{
 #if defined(DEBUG_STATS)
-			TraverseBoard(context, child, iX, offsetY, depth);
+			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY, depth);
 #else
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
@@ -995,9 +844,9 @@ private:
 }
 
 #if defined(DEBUG_STATS)
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(ThreadContext& context, DictionaryNode* node, unsigned iX, unsigned offsetY, uint8_t depth)
+void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY, uint8_t depth)
 #else
-/* static */ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
+void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char* visited, DictionaryNode* node, unsigned width, unsigned height, unsigned iX, unsigned offsetY)
 #endif
 {
 	Assert(nullptr != node);
@@ -1005,111 +854,80 @@ private:
 	const auto wordIdx = node->GetWordIndex();
 
 #if defined(DEBUG_STATS)
-	auto* visited = context.visited + offsetY+iX;
-
 	++depth;
-
-	Assert(depth < s_longestWord);
-	context.maxDepth = std::max<unsigned>(context.maxDepth, unsigned(depth));
+	Assert(depth <= s_longestWord);
+	m_maxDepth = std::max<unsigned>(m_maxDepth, depth);
 #endif
 
+	// Flag tile as visited while we traverse in search of a word (the branch predictor does a good enough job below).
 	*visited |= kTileVisitedBit;
 
-	// Recurse, as we've got a node that might be going somewhewre.
-	// USUALLY the predictor does it's job and the branches aren't expensive at all.
-
 #if defined(DEBUG_STATS)
-	const auto width = context.width;
-	const auto heightMinOne = context.height-1;
-	const bool xSafe = iX < width-1;
-	const bool ySafe = offsetY < width*heightMinOne;
-
-	if (iX > 0)
-		TraverseCall(context, node, iX-1, offsetY, depth);
-
-	if (xSafe)
-		TraverseCall(context, node, iX+1, offsetY, depth);
-
-	if (offsetY >= width) 
-	{
-		if (iX > 0) 
-			TraverseCall(context, node, iX-1, offsetY-width, depth);
-
-		TraverseCall(context, node, iX, offsetY-width, depth);
-
-		if (xSafe)
-			TraverseCall(context, node, iX+1, offsetY-width, depth);
-	}
-
-	if (ySafe)
-	{
-		if (iX > 0)
-			TraverseCall(context, node, iX-1, offsetY+width, depth);
-
-		TraverseCall(context, node, iX, offsetY+width, depth);
-
-		if (xSafe) 
-			TraverseCall(context, node, iX+1, offsetY+width, depth);
-	}
-#else
 	if (offsetY >= width) 
 	{
 		if (iX < width-1) 
-		{
-			TraverseCall(wordsFound, (visited - width) + 1, node, width, height, iX+1, offsetY-width);
-		}
+			TraverseCall(wordsFound, (visited - width) + 1, node, width, height, iX+1, offsetY-width, depth);
 
-		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
+		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width, depth);
 		
 		if (iX > 0) 
-		{
-			TraverseCall(wordsFound, (visited - width) - 1, node, width, height, iX-1, offsetY-width);
-		}
+			TraverseCall(wordsFound, (visited - width) - 1, node, width, height, iX-1, offsetY-width, depth);
 	}
 
 	if (iX > 0)
-	{
-		TraverseCall(wordsFound, visited-1, node, width, height, iX-1, offsetY);
-	}
+		TraverseCall(wordsFound, visited-1, node, width, height, iX-1, offsetY, depth);
 
 	if (iX < width-1) 
-	{
-		TraverseCall(wordsFound, visited+1, node, width, height, iX+1, offsetY);
-	}
+		TraverseCall(wordsFound, visited+1, node, width, height, iX+1, offsetY, depth);
 
 	if (offsetY < width*(height-1))
 	{
 		if (iX < width-1) 
-		{
+			TraverseCall(wordsFound, (visited + width) + 1, node, width, height, iX+1, offsetY+width, depth);
+
+		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width, depth);
+
+		if (iX > 0) 
+			TraverseCall(wordsFound, (visited + width) - 1, node, width, height, iX-1, offsetY+width, depth);
+	}
+#else
+	if (offsetY >= width) 
+	{
+		if (iX < width-1) 
+			TraverseCall(wordsFound, (visited - width) + 1, node, width, height, iX+1, offsetY-width);
+
+		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
+
+		if (iX > 0) 
+			TraverseCall(wordsFound, (visited - width) - 1, node, width, height, iX-1, offsetY-width);
+	}
+
+	if (iX > 0)
+		TraverseCall(wordsFound, visited-1, node, width, height, iX-1, offsetY);
+
+	if (iX < width-1) 
+		TraverseCall(wordsFound, visited+1, node, width, height, iX+1, offsetY);
+
+	if (offsetY < width*(height-1))
+	{
+		if (iX < width-1) 
 			TraverseCall(wordsFound, (visited + width) + 1, node, width, height, iX+1, offsetY+width);
-		}
 
 		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width);
 
 		if (iX > 0) 
-		{
 			TraverseCall(wordsFound, (visited + width) - 1, node, width, height, iX-1, offsetY+width);
-		}
 	}
 #endif
 
-#if defined(DEBUG_STATS)
-	--depth;
-#endif
-
-//	ImmPrefetch(reinterpret_cast<const char*>(node));
-
+	// Done!
 	*visited ^= kTileVisitedBit;
 
+	// Word found?
 	if (wordIdx >= 0) 
 	{
 		node->OnWordFound();
-
-#if defined(DEBUG_STATS)
-		context.wordsFound.push_back(wordIdx);
-#else
 		wordsFound.emplace_back(wordIdx);
-#endif
 	}
 }
 
@@ -1143,14 +961,18 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		const unsigned gridSize = width*height;
 
 #ifdef NED_FLANDERS
-		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAligned(gridSize*sizeof(char), kCacheLine));
+		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAligned(gridSize*sizeof(char), kAlignTo));
+
+		bool invalidBoard = false;
 
 		// Sanitize that checks for illegal input and uppercases.
-		size_t index = 0;
 		for (unsigned iY = 0; iY < height; ++iY)
 		{
-			for (unsigned iX = 0; iX < width; ++iX)
+			#pragma omp parallel for num_threads(4)
+			for (int iX = 0; iX < int(width); ++iX)
 			{
+				const unsigned index = iY*width + iX;
+
 				// FIXME: does not check for 'u'!
 				const char letter = board[index];
 				if (0 != isalpha((unsigned char) letter))
@@ -1161,12 +983,13 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 				else
 				{
 					// Invalid character: skip query.
-					return results;
-				}
-
-				++index;
+					invalidBoard = true;
+					break;				}
 			}
 		}
+
+		if (true == invalidBoard)
+			return results; // Skip query: no results.
 #else
 		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAlignedUnsafe(gridSize, kAlignTo));
 
@@ -1209,10 +1032,9 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 			s_globalCustomAlloc.FreeUnsafe(pool);
 #endif
 			
-			// Not necessary, because:
+			// Not necessary to delete 'allocator', because:
 			// - Allocator context itself is contained within pool just released, 100%
-			// - Allocator destructor has zero work to do
-//			delete allocator;
+			// - Thus, the CustomAllocator destructor has zero work to do
 		}
 
 		s_threadCustomAlloc.clear();
@@ -1229,18 +1051,8 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 
 void FreeWords(Results results)
 {
-#ifdef NED_FLANDERS
-	if (0 != results.Count && nullptr != results.Words)
-	{
-		// Allocated a single buffer.
-		delete[] results.Words[0];
-	}
-
-	results.UserData = nullptr;
-#else
 	if (nullptr != results.Words)
 		s_globalCustomAlloc.FreeUnsafe((void*) results.Words);
-#endif
 
 	results.Words = nullptr;
 	results.Count = results.Score = 0;

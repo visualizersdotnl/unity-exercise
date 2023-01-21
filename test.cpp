@@ -163,13 +163,13 @@ RetrySameBoard:
 		resultsToFree.emplace_back(results);
 	}
 
-#if defined(HIGHSCORE_LOOP)
 	if (curFastest < prevFastest)
 	{
 		printf("New fastest run: %.lld microsec.\n", curFastest.count());
 		prevFastest = curFastest;
 	}
 
+#if defined(HIGHSCORE_LOOP)
 	if (prevFastest.count() >= HIGHSCORE_MICROSECONDS) 
 	{
 		for (auto& result : resultsToFree)
