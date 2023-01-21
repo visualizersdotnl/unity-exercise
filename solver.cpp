@@ -13,7 +13,6 @@
 
 	Notes:
 		- Currently tested on Windows 10 (VS2019), Linux & OSX.
-		- It's currently faster on a proper multi-core CPU than the (Intel) Core M.
 		- Compile with full optimization (-O3 for ex.) for best performance.
 		  Disabling C++ exceptions helps too, as they hinder inlining and are not used.
 		- I could not assume anything about the test harness, so I did not; if you want debug output check debug_print().
@@ -29,7 +28,8 @@
 	Optimization ideas:
 	- That memcpy() taking 3% (of whatever) is nagging me
 	- Copy() can be faster (analyze it)
-	- Do some proper testing if prefetching and/or streaming (these definitely help on Intel) instructions really help you at all
+	- Prefetches help on Intel, not clear if it does on ARM/Silicon
+	- Streaming helps on Intel, not so much on ARM/Silicon
 	- Try 'reverse pruning' only to a certain degree (first test up to 3-letter words, then move up, maybe correlate it to an actual value (heuristic))
 */
 
