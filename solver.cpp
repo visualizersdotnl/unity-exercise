@@ -329,7 +329,7 @@ public:
 #endif
 
 			// Recursively copy them.
-			Copy(s_threadDicts[iThread]);
+			Copy(s_threadDicts[iThread], 0);
 		}
 
 		~ThreadCopy()
@@ -343,7 +343,7 @@ public:
 		}
 
 	private:
-		BOGGLE_INLINE_FORCE uint32_t Copy(LoadDictionaryNode* parent)
+		BOGGLE_INLINE_FORCE uint32_t Copy(LoadDictionaryNode* parent,  uint8_t depth)
 		{
 			DictionaryNode* node = m_pool + m_iAlloc;
 			const uint32_t nodeLower32 = (reinterpret_cast<intptr_t>(node) & 0xffffffff) * IsNotZero(m_iAlloc);
@@ -369,12 +369,14 @@ public:
 				if (index--)
 				{
 #endif
+					const bool setParentAddr = depth > 2; // FIXME: can I rid of the CMP generated (down the line by MSVC, in the loop) somehow?
+
 					for (indexBits >>= index; index < kAlphaRange+USE_EXTRA_INDEX; ++index, indexBits >>= 1)
 					{
 						if (indexBits & 1)
 						{
-							node->m_children[index] = Copy(parent->GetChild(index));
-							node->GetChild(index)->m_children[kIndexParent] = nodeLower32; // FIXME: sometimes this breaks!
+							node->m_children[index] = Copy(parent->GetChild(index), depth+1);
+							node->GetChild(index)->m_children[kIndexParent] = (0 == setParentAddr) ? 0 : nodeLower32;
 						}
 					}
 				}
@@ -399,6 +401,29 @@ public:
 	// ------ PruneReverse() & friends ------
 
 	BOGGLE_INLINE_FORCE void PruneReverse()
+	{
+		DictionaryNode* current = this;
+
+		do
+		{
+			const uint32_t rootLower32 = current->m_children[kIndexParent];
+
+			if (0 == current->m_wordRefCount-1)
+				current->m_indexBits = 0;
+
+#if defined(STREAM_WRITES)
+			// This should make sense since we're not going to read this value for a while:
+			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
+#else
+			--current->m_wordRefCount;
+#endif
+
+			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
+		}
+		while (reinterpret_cast<intptr_t>(current) & 0xffffffff);
+	}
+
+	BOGGLE_INLINE_FORCE void PruneReverse_Best_So_Far()
 	{
 		DictionaryNode* current = this;
 
