@@ -64,7 +64,7 @@ int main(int argC, char **arguments)
 
 	initialize_random_generator();
 
-	std::chrono::microseconds curFastest(HIGHSCORE_MICROSECONDS*10); // Just needed something 'big'
+	std::chrono::microseconds curFastest(10000000); // Just needed something 'big'
 	std::chrono::microseconds prevFastest(curFastest);
 
 	std::vector<Results> resultsToFree;

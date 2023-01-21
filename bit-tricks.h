@@ -31,5 +31,5 @@ BOGGLE_INLINE_FORCE size_t RoundPow2_64(size_t value)
 #endif
 
 // Thank you Bit Twiddling Hacks.
-BOGGLE_INLINE_FORCE unsigned IsNotZero(unsigned value) { return ((value | (~value + 1)) >> 31) & 1; }
+BOGGLE_INLINE_FORCE unsigned IsNotZero(unsigned value) { return ((value | (~value + 1)) >> 31); } // No need for '& 1'
 BOGGLE_INLINE_FORCE unsigned IsZero(unsigned value) { return 1 + (value >> 31) - (-value >> 31); }

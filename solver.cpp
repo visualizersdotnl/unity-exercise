@@ -320,7 +320,10 @@ public:
 
 			// Recursively copy them.
 			Copy(s_threadDicts[iThread]);
-			m_pool->m_children[kIndexParent] = 0; // Terminate at root.
+
+#if _DEBUG
+			m_pool->m_children[kIndexParent] = 0xcdcdcdcd;
+#endif
 		}
 
 		~ThreadCopy()
@@ -334,10 +337,12 @@ public:
 		}
 
 	private:
-		uint32_t Copy(LoadDictionaryNode* parent)
+		BOGGLE_INLINE_FORCE uint32_t Copy(LoadDictionaryNode* parent)
 		{
 			DictionaryNode* node = m_pool + m_iAlloc;
-			++m_iAlloc; // Next node!
+			const uint32_t nodeLower32 = (reinterpret_cast<intptr_t>(node) & 0xffffffff) * IsNotZero(m_iAlloc);
+
+			++m_iAlloc;
 
 			unsigned indexBits = node->m_indexBits = parent->m_indexBits;
 			node->m_wordRefCount = parent->m_wordRefCount;
@@ -346,7 +351,6 @@ public:
 			// Yes, you're seeing this correctly, we're chopping a 64-bit pointer in half.
 			// Quite volatile, but usually works out fine.
 			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000;
-			const uint32_t nodeLower32 = reinterpret_cast<uint64_t>(node) & 0xffffffff;
 
 #ifdef _WIN32
 			unsigned long index;
