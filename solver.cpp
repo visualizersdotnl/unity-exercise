@@ -371,7 +371,10 @@ public:
 				if (index--)
 				{
 #endif
-					const bool setParentAddr = depth > 2; // FIXME: can I rid of the CMP generated (down the line by MSVC, in the loop) somehow?
+					// FIXME: 
+					// - Can I rid of the CMP generated (down the line by MSVC, in the loop) somehow?
+					// -  A better heuristic? :)
+					const bool setParentAddr = depth > (MAX_WORD_LEN>>1); 
 
 					for (indexBits >>= index; index < kAlphaRange+USE_EXTRA_INDEX; ++index, indexBits >>= 1)
 					{
