@@ -356,25 +356,25 @@ public:
 			// Quite volatile, but usually works out fine.
 			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000;
 
+//			if (indexBits > 0)
+			{
 #ifdef _WIN32
-			unsigned long index;
-			if (_BitScanForward(&index, indexBits))
-			{
-#elif defined(__GNUC__)
-			int index = __builtin_ffs(int(indexBits));
-			if (index--)
-			{
-#endif
-				for (indexBits >>= index; index < kAlphaRange+USE_EXTRA_INDEX; ++index)
+				unsigned long index;
+				if (_BitScanForward(&index, indexBits))
 				{
-					if (indexBits & 1)
+#elif defined(__GNUC__)
+				int index = __builtin_ffs(int(indexBits));
+				if (index--)
+				{
+#endif
+					for (indexBits >>= index; index < kAlphaRange+USE_EXTRA_INDEX; ++index, indexBits >>= 1)
 					{
-						// FIXME: sometimes this breaks!
-						node->m_children[index] = Copy(parent->GetChild(index));
-						node->GetChild(index)->m_children[kIndexParent] = nodeLower32;
+						if (indexBits & 1)
+						{
+							node->m_children[index] = Copy(parent->GetChild(index));
+							node->GetChild(index)->m_children[kIndexParent] = nodeLower32; // FIXME: sometimes this breaks!
+						}
 					}
-
-					indexBits >>= 1;
 				}
 			}
 
