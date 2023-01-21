@@ -158,9 +158,9 @@ BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
 BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
 {
 #if defined(__GNUC__)
-	__builtin_prefetch(address, 1, 0);
+	__builtin_prefetch(address, 0 /* Only ever to read! */, 0);
 #elif defined(_WIN32)
-	_mm_prefetch(address, _MM_HINT_NTA);
+	_mm_prefetch(address, _MM_HINT_T0);
 #endif
 }
 
@@ -695,6 +695,8 @@ public:
 		DictionaryLock dictLock;
 #endif
 		{
+			omp_set_nested(1);
+
 			unsigned Count = 0;
 			unsigned Score = 0;
 
@@ -706,29 +708,36 @@ public:
 			m_reqStrBufSize = 0;
 #endif
 
-			#pragma omp parallel for reduction(+:Count) reduction(+:Score) schedule(static, 1) num_threads(int(kNumThreads))
+			#pragma omp parallel for ordered reduction(+:Count) reduction(+:Score) schedule(static, 1) num_threads(int(kNumThreads))
 			for (int iThread = 0; iThread < kNumThreads; ++iThread)
 			{
 				std::vector<unsigned> wordsFound;
 				wordsFound.reserve(s_threadInfo[iThread].load);
+
 				ExecuteThread(iThread, wordsFound);
-//				std::sort(wordsFound.begin(), wordsFound.end());
 
-				for (const auto wordIdx : wordsFound)
+				std::sort(wordsFound.begin(), wordsFound.end());
+//				FarPrefetch((const char*) &s_words[wordsFound[0]]);
+
+//				#pragma omp ordered
 				{
-					const auto& word = s_words[wordIdx];
+					for (const auto wordIdx : wordsFound)
+					{
+						const auto& word = s_words[wordIdx];
 					
-					++Count;
-					Score += unsigned(word.score);
+						++Count;
+						Score += unsigned(word.score);
 
-#if 0 // defined(STREAM_WRITES)
-					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
-//					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word.c_str()));
-#else
-					*words_cstr++ = const_cast<char*>(word.word);
-//					*words_cstr++ = const_cast<char*>(word.word.c_str());
-#endif
+	#if defined(STREAM_WRITES)
+	//					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
+	//					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word.c_str()));
+	#else
+						*words_cstr++ = const_cast<char*>(word.word);
+	//					*words_cstr++ = const_cast<char*>(word.word.c_str());
+	#endif
+					}
 				}
+				
 				debug_print("Thread %u completed with %zu words.\n", iThread, wordsFound.size());
 			}
 
