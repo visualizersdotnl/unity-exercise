@@ -31,7 +31,8 @@
 	- Prefetches help, not clear if it does on ARM/Silicon
 	- Streaming helps on Intel, not so much on ARM/Silicon
 	- Try 'reverse pruning' only to a certain degree (first test up to 3-letter words, then move up, maybe correlate it to an actual value (heuristic)) -> WIP
-*/
+	- Src: https://squadrick.dev/journal/going-faster-than-memcpy.html
+	*/
 
 // Make VC++ 2015 shut up and walk in line.
 #define _CRT_SECURE_NO_WARNINGS 
@@ -259,15 +260,8 @@ public:
 	// Destructor is not called when using ThreadCopy!
 	~LoadDictionaryNode()
 	{
-		for (unsigned iBit = USE_EXTRA_INDEX; iBit < kAlphaRange+USE_EXTRA_INDEX; ++iBit)
-		{
-			if (m_indexBits & (1<<iBit))
-			{
-				auto* child = m_children[iBit-USE_EXTRA_INDEX];
-				child->~LoadDictionaryNode();
-				s_globalCustomAlloc.FreeUnsafe(child);
-			}
-		}
+		for (auto* child : m_children)
+			delete child;
 	}
 
 	// Only called from LoadDictionary().
@@ -276,13 +270,10 @@ public:
 		const unsigned index = LetterToIndex(letter);
 
 		// Adding child en route to a new word, so up the ref. count
-		++m_wordRefCount;
-
 		const unsigned bit = 1 << index;
 		if (m_indexBits & bit)
 		{
 			auto* child = m_children[index-USE_EXTRA_INDEX];
-			++child->m_wordRefCount;
 			return child;
 		}
 
@@ -290,21 +281,19 @@ public:
 
 		m_indexBits |= bit;
 
-		// What's won here is not so much locality, but fast sequential allocation
-		return m_children[index-USE_EXTRA_INDEX] = new (s_globalCustomAlloc.AllocateAlignedUnsafe(sizeof(LoadDictionaryNode), kAlignTo)) LoadDictionaryNode();
+		return m_children[index-USE_EXTRA_INDEX] = new LoadDictionaryNode();
 	}
 
 	BOGGLE_INLINE_FORCE LoadDictionaryNode* GetChild(unsigned index)
 	{
-//		Assert(nullptr != m_children[index]);
+		Assert(nullptr != m_children[index-USE_EXTRA_INDEX]);
 		return m_children[index-USE_EXTRA_INDEX];
 	}
 
 private:
-	int32_t m_wordIdx = -1; 
 	uint32_t m_indexBits = 0;
-	uint32_t m_wordRefCount = 1;
-	LoadDictionaryNode* m_children[kAlphaRange];
+	int32_t m_wordIdx = -1; 
+	LoadDictionaryNode* m_children[kAlphaRange] = { nullptr };
 };
 
 // Actual processing node.
@@ -349,11 +338,7 @@ public:
 		{
 			DictionaryNode* node = m_pool + m_iAlloc++;
 
-			// Was/is a necessity to not prune to the root
-//			const uint32_t nodeLower32 = (reinterpret_cast<intptr_t>(node) & 0xffffffff) * IsNotZero(depth);
-
 			unsigned indexBits = node->m_indexBits = parent->m_indexBits;
-			node->m_wordRefCount = parent->m_wordRefCount;
 			node->m_wordIdx = parent->m_wordIdx;
 
 			// Yes, you're seeing this correctly, we're chopping a 64-bit pointer in half.
@@ -373,19 +358,10 @@ public:
 				if (index--)
 				{
 #endif
-					// FIXME: 
-					// - Can I rid of the CMP generated (down the line by MSVC, in the loop) somehow?
-					// - A better heuristic? :)
-					// - If you get rid of this, enable that line of code on top of the function again
-					const bool setParentAddr = depth > (MAX_WORD_LEN>>1); 
-
 					for (indexBits >>= index; index < kAlphaRange+USE_EXTRA_INDEX; ++index, indexBits >>= 1)
 					{
 						if (indexBits & 1)
-						{
 							node->m_children[index] = Copy(parent->GetChild(index), depth+1);
-							node->GetChild(index)->m_children[kIndexParent] = (0 == setParentAddr) ? 0 : nodeLower32;
-						}
 					}
 				}
 			}
@@ -408,6 +384,7 @@ public:
 
 	// ------ PruneReverse() & friends ------
 
+#if 0
 	BOGGLE_INLINE_FORCE void PruneReverse()
 	{
 		DictionaryNode* current = this;
@@ -514,6 +491,7 @@ public:
 		}
 		while (reinterpret_cast<uint64_t>(current) & 0xffffffff);
 	}
+#endif
 
 	// ------ PruneReverse() ------
 
@@ -567,12 +545,6 @@ public:
 
 private:
 	uint32_t m_indexBits;
-	int32_t m_wordRefCount;
-
-#if 1 == USE_EXTRA_PADDING
-	uint8_t m_padding[4];
-#endif
-
 	uint64_t m_poolUpper32;
 	uint32_t m_children[kAlphaRange+USE_EXTRA_INDEX];
 	int32_t m_wordIdx; // Sits on a 16-byte boundary
@@ -828,22 +800,6 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
-#if defined(FOR_INTEL)
-// Src: https://squadrick.dev/journal/going-faster-than-memcpy.html
-void _sse_async_cpy(void *d, const void *s, size_t n) {
-	// d, s -> 16 byte aligned
-	// n -> multiple of 16
-	auto *dVec = reinterpret_cast<__m128i *>(d);
-	const auto *sVec = reinterpret_cast<const __m128i *>(s);
-	size_t nVec = n / sizeof(__m128i);
-	for (; nVec > 0; nVec--, sVec++, dVec++) {
-		const __m128i temp = _mm_stream_load_si128(sVec);
-		_mm_stream_si128(dVec, temp);
-	}
-//	_mm_sfence();
-}
-#endif
-
 class Query
 {
 public:
@@ -883,7 +839,6 @@ public:
 			// Handle allocation and initialization of thread grid.
 			const auto gridSize = width*height;
 			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateAlignedUnsafe(gridSize, kAlignTo));
-//			_sse_async_cpy(visited, sanitized, gridSize);
 			memcpy(visited, sanitized, gridSize);
 
 			// Reserve.
@@ -1244,7 +1199,7 @@ private:
 		wordsFound.emplace_back(wordIdx);
 #endif
 
-		node->PruneReverse();
+//		node->PruneReverse();
 	}
 }
 
