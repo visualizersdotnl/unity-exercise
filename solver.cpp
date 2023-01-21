@@ -345,12 +345,12 @@ public:
 		}
 
 	private:
-		BOGGLE_INLINE_FORCE uint32_t Copy(LoadDictionaryNode* parent,  uint8_t depth)
+		BOGGLE_INLINE_FORCE uint32_t Copy(LoadDictionaryNode* parent, unsigned depth)
 		{
-			DictionaryNode* node = m_pool + m_iAlloc;
-			const uint32_t nodeLower32 = (reinterpret_cast<intptr_t>(node) & 0xffffffff) * IsNotZero(m_iAlloc);
+			DictionaryNode* node = m_pool + m_iAlloc++;
 
-			++m_iAlloc;
+			// Was/is a necessity to not prune to the root
+//			const uint32_t nodeLower32 = (reinterpret_cast<intptr_t>(node) & 0xffffffff) * IsNotZero(depth);
 
 			unsigned indexBits = node->m_indexBits = parent->m_indexBits;
 			node->m_wordRefCount = parent->m_wordRefCount;
@@ -359,6 +359,8 @@ public:
 			// Yes, you're seeing this correctly, we're chopping a 64-bit pointer in half.
 			// Quite volatile, but usually works out fine.
 			node->m_poolUpper32 = reinterpret_cast<uint64_t>(m_pool) & 0xffffffff00000000;
+
+			const uint32_t nodeLower32 = reinterpret_cast<intptr_t>(node) & 0xffffffff;
 
 //			if (indexBits > 0)
 			{
@@ -373,7 +375,8 @@ public:
 #endif
 					// FIXME: 
 					// - Can I rid of the CMP generated (down the line by MSVC, in the loop) somehow?
-					// -  A better heuristic? :)
+					// - A better heuristic? :)
+					// - If you get rid of this, enable that line of code on top of the function again
 					const bool setParentAddr = depth > (MAX_WORD_LEN>>1); 
 
 					for (indexBits >>= index; index < kAlphaRange+USE_EXTRA_INDEX; ++index, indexBits >>= 1)
