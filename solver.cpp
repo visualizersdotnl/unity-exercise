@@ -708,7 +708,7 @@ public:
 			m_reqStrBufSize = 0;
 #endif
 
-			#pragma omp parallel for ordered reduction(+:Count) reduction(+:Score) schedule(static, 1) num_threads(int(kNumThreads))
+			#pragma omp parallel for reduction(+:Count) reduction(+:Score) schedule(static, 1) num_threads(int(kNumThreads))
 			for (int iThread = 0; iThread < kNumThreads; ++iThread)
 			{
 				std::vector<unsigned> wordsFound;
@@ -719,7 +719,6 @@ public:
 				std::sort(wordsFound.begin(), wordsFound.end());
 //				FarPrefetch((const char*) &s_words[wordsFound[0]]);
 
-//				#pragma omp ordered
 				{
 					for (const auto wordIdx : wordsFound)
 					{
@@ -729,7 +728,7 @@ public:
 						Score += unsigned(word.score);
 
 	#if defined(STREAM_WRITES)
-	//					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
+						_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
 	//					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word.c_str()));
 	#else
 						*words_cstr++ = const_cast<char*>(word.word);
