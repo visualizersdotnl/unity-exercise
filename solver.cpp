@@ -108,7 +108,9 @@ constexpr size_t kAlignTo = 16; // 128-bit
 constexpr size_t kCacheLineSize = sizeof(size_t)*8;
 
 // Undef. to kill prefetching
-// #define NO_PREFETCHES 
+#if defined(FOR_ARM)
+	#define NO_PREFETCHES // Read up on ARM & prefetching first!
+#endif
 
 // Max. word length (for optimization)
 #define MAX_WORD_LEN 15
