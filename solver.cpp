@@ -1238,13 +1238,14 @@ private:
 	if (wordIdx >= 0) 
 	{
 		node->OnWordFound();
-		node->PruneReverse();
 
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
 #else
 		wordsFound.emplace_back(wordIdx);
 #endif
+
+		node->PruneReverse();
 	}
 }
 
