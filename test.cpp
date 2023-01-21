@@ -160,11 +160,7 @@ RetrySameBoard:
 		if (duration < curFastest)
 			curFastest = duration;
 
-#if 0 // defined(HIGHSCORE_LOOP)
-		FreeWords(results);
-#else
 		resultsToFree.emplace_back(results);
-#endif
 	}
 
 #if defined(HIGHSCORE_LOOP)

@@ -170,7 +170,7 @@ BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
 // Immediate prefetch (Win32: all levels if possible)
 BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
 {
-#if defined(__GNUC__) && defined(FOR_INTEL)
+#if defined(__GNUC__)
 	__builtin_prefetch(address, 1, 0);
 #elif defined(_WIN32)
 	_mm_prefetch(address, _MM_HINT_T0);
@@ -320,7 +320,7 @@ public:
 #endif
 
 			// Recursively copy them.
-			Copy(s_threadDicts[iThread], 0);
+			Copy(s_threadDicts[iThread]);
 		}
 
 		~ThreadCopy()
@@ -334,7 +334,7 @@ public:
 		}
 
 	private:
-		BOGGLE_INLINE_FORCE uint32_t Copy(LoadDictionaryNode* parent, unsigned depth)
+		BOGGLE_INLINE_FORCE uint32_t Copy(LoadDictionaryNode* parent)
 		{
 			DictionaryNode* node = m_pool + m_iAlloc++;
 
@@ -361,7 +361,7 @@ public:
 					for (indexBits >>= index; index < kAlphaRange+USE_EXTRA_INDEX; ++index, indexBits >>= 1)
 					{
 						if (indexBits & 1)
-							node->m_children[index] = Copy(parent->GetChild(index), depth+1);
+							node->m_children[index] = Copy(parent->GetChild(index));
 					}
 				}
 			}
@@ -381,8 +381,6 @@ public:
 	BOGGLE_INLINE_FORCE unsigned HasChildren() const { 
 		return m_indexBits;  
 	}
-
-	// ------ PruneReverse() & friends ------
 
 #if 0
 	BOGGLE_INLINE_FORCE void PruneReverse()
@@ -407,93 +405,7 @@ public:
 		}
 		while (reinterpret_cast<intptr_t>(current) & 0xffffffff);
 	}
-
-	BOGGLE_INLINE_FORCE void PruneReverse_Best_So_Far()
-	{
-		DictionaryNode* current = this;
-
-		do
-		{
-			const uint32_t rootLower32 = current->m_children[kIndexParent];
-
-			if (0 == current->m_wordRefCount-1)
-				current->m_indexBits = 0;
-
-#if defined(STREAM_WRITES)
-			// This should make sense since we're not going to read this value for a while:
-			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
-#else
-			--current->m_wordRefCount;
 #endif
-
-			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-		}
-		while (reinterpret_cast<uint64_t>(current) & 0xffffffff);
-	}
-
-	// Version like normal, except the loop is evaluated on top
-	BOGGLE_INLINE_FORCE void PruneReverse_Loop_Flipped()
-	{
-		DictionaryNode* current = this;
-
-		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
-		{
-			if (0 == current->m_wordRefCount-1)
-				current->m_indexBits = 0;
-
-#if defined(STREAM_WRITES)
-			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
-#else
-			--current->m_wordRefCount;
-#endif
-
-			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-		}
-	}
-
-	// Without a branch in the inner loop (check against m_wordRefCount)
-	BOGGLE_INLINE_FORCE void PruneReverse_Cleanest()
-	{
-		DictionaryNode* current = this;
-
-		while (const uint32_t rootLower32 = current->m_children[kIndexParent])
-		{
-#if defined(STREAM_WRITES)
-			_mm_stream_si32(reinterpret_cast<int*>(&current->m_indexBits), current->m_indexBits*IsNotZero(current->m_wordRefCount-1));
-			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
-#else
-			current->m_indexBits = current->m_indexBits*IsNotZero(current->m_wordRefCount-1);
-			--current->m_wordRefCount;
-#endif
-
-			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-		}
-	}
-
-	// Same as above, but different loop again
-	BOGGLE_INLINE_FORCE void PruneReverse_NoCompare_DoWhile()
-	{
-		DictionaryNode* current = this;
-
-		do
-		{
-			const uint32_t rootLower32 = current->m_children[kIndexParent];
-
-#if defined(STREAM_WRITES)
-			_mm_stream_si32(reinterpret_cast<int*>(&current->m_indexBits), current->m_indexBits*IsNotZero(current->m_wordRefCount-1));
-			_mm_stream_si32(&current->m_wordRefCount, current->m_wordRefCount-1);
-#else
-			current->m_indexBits = current->m_indexBits*IsNotZero(current->m_wordRefCount-1);
-			--current->m_wordRefCount;
-#endif
-
-			current = reinterpret_cast<DictionaryNode*>(m_poolUpper32|rootLower32);
-		}
-		while (reinterpret_cast<uint64_t>(current) & 0xffffffff);
-	}
-#endif
-
-	// ------ PruneReverse() ------
 
 	BOGGLE_INLINE_FORCE void RemoveChild(unsigned index)
 	{
@@ -777,13 +689,6 @@ void FreeDictionary()
 		// Delete per-thread dictionary trees.
 		for (auto* root : s_threadDicts)
 			delete root;
-//		{
-//			if (nullptr != root)
-//			{
-//				root->~LoadDictionaryNode();
-//				s_globalCustomAlloc.FreeUnsafe(root);
-//			}
-//		}
 
 		s_threadDicts.clear();
 
@@ -1198,8 +1103,6 @@ private:
 #else
 		wordsFound.emplace_back(wordIdx);
 #endif
-
-//		node->PruneReverse();
 	}
 }
 
