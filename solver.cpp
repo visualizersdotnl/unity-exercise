@@ -25,6 +25,10 @@
 		- My class design isn't really tight (functions and public member values galore), but for now that's fine.
 		
 	Most of these (mostly thread-safety related) stability claims only work if NED_FLANDERS (see below) is defined.
+
+	Optimization ideas:
+	- That memcpy() taking 3% (of whatever) is nagging me
+	- Copy() can be faster
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -318,12 +322,12 @@ public:
 			const auto size = s_threadInfo[iThread].nodes*sizeof(DictionaryNode);
 			m_pool = static_cast<DictionaryNode*>(s_threadCustomAlloc[iThread].AllocateAlignedUnsafe(size, kAlignTo));
 
-			// Recursively copy them.
-			Copy(s_threadDicts[iThread]);
-
 #if _DEBUG
 			m_pool->m_children[kIndexParent] = 0xcdcdcdcd;
 #endif
+
+			// Recursively copy them.
+			Copy(s_threadDicts[iThread]);
 		}
 
 		~ThreadCopy()
@@ -361,9 +365,7 @@ public:
 			if (index--)
 			{
 #endif
-				indexBits >>= index;
-			
-				for (; index < kAlphaRange+USE_EXTRA_INDEX; ++index)
+				for (indexBits >>= index; index < kAlphaRange+USE_EXTRA_INDEX; ++index)
 				{
 					if (indexBits & 1)
 					{
