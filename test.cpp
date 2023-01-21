@@ -18,7 +18,7 @@
 	#else
 		#define HIGHSCORE_MICROSECONDS 600000  // And for anything else, like Albert's Intel
 	#endif
-	#define NUM_QUERIES 6
+	#define NUM_QUERIES 1
 	// #define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #endif
 

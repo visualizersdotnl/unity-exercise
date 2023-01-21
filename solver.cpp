@@ -129,12 +129,8 @@ constexpr size_t kCacheLineSize = sizeof(size_t)*8;
 	__inline void debug_print(const char* format, ...) {}
 #endif
 
-#if defined(SINGLE_THREAD)
-	constexpr size_t kNumThreads = 1;
-#else
-	const size_t kNumConcurrrency = omp_get_max_threads();
-	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
-#endif
+const size_t kNumConcurrrency = omp_get_max_threads();
+const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
 
 #ifndef NO_PREFETCHES
 
