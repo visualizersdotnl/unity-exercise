@@ -3,13 +3,13 @@
 // #define PRINT_WORDS
 // #define PRINT_GRID
 // #define DUPE_CHECK
-// #define PRINT_ITER_RESULTS
+#define PRINT_ITER_RESULTS
 
 // When board randomization enabled, it pays off (usually) to do more queries to get better performance.
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECONDS 360000  // Stress test Ryzen 5900x
-	#define NUM_QUERIES 6
+	#define NUM_QUERIES 1 // 6
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
@@ -154,7 +154,7 @@ RetrySameBoard:
 			curFastest = duration;
 #elif defined(PRINT_ITER_RESULTS)
 		if (duration < curFastest)
-			printf("Faster: %.lld microsec.\n", duration.count());
+			printf("Faster: %.lld microsec. (Count %u, Score %u)\n", duration.count(), results.Count, results.Score);
 #endif
 
 		if (duration < curFastest)

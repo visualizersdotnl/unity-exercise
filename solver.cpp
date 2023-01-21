@@ -58,6 +58,8 @@
 // #include <atomic>
 // #include <map>
 
+#include <omp.h>
+
 #ifdef _WIN32
 	#include <windows.h>
 	#include <intrin.h>
@@ -88,7 +90,7 @@
 // #define NED_FLANDERS
 
 // Undef. to use only 1 thread; makes certain things easier to debug.
-// #define SINGLE_THREAD
+#define SINGLE_THREAD
 
 // Undef. to kill assertions.
 // #define ASSERTIONS
@@ -133,7 +135,7 @@ constexpr size_t kCacheLineSize = sizeof(size_t)*8;
 #endif
 
 #if defined(SINGLE_THREAD)
-	constexpr size_t kNumThreads = 1;
+	const size_t kNumThreads = 24+12; // omp_get_max_threads();
 #else
 	const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 	
@@ -784,35 +786,39 @@ public:
 //			m_results.Score  = 0;
 
 			// Kick off threads.
-			std::vector<std::thread> threads;
+//			std::vector<std::thread> threads;
 			std::vector<ThreadContext> contexts;
-			threads.reserve(kNumThreads);
+//			threads.reserve(kNumThreads);
 			contexts.reserve(kNumThreads);
 
-			debug_print("Kicking off %zu threads.\n", kNumThreads);
+//			debug_print("Kicking off %zu threads.\n", kNumThreads);
 			
 			for (unsigned iThread = 0; iThread < kNumThreads; ++iThread)
 			{
 				contexts.emplace_back(ThreadContext(iThread, this));
-				threads.emplace_back(std::thread(ExecuteThread, &contexts[iThread]));
+//				threads.emplace_back(std::thread(ExecuteThread, &contexts[iThread]));
 
 #ifdef _WIN32
 				// Works as a mild stimulant, if you will
 
-				SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
+//				SetThreadPriority(threads[iThread].native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
 #elif defined(__GNUC__)
-				sched_param parameters;
-				const auto maximum = sched_get_priority_max(SCHED_RR);
-				parameters.sched_priority = maximum-1;
-				pthread_setschedparam(threads[iThread].native_handle(), SCHED_RR, &parameters);
+//				sched_param parameters;
+//				const auto maximum = sched_get_priority_max(SCHED_RR);
+//				parameters.sched_priority = maximum-1;
+//				pthread_setschedparam(threads[iThread].native_handle(), SCHED_RR, &parameters);
 #endif
 			}
 
+//			for (auto& thread : threads)
+//				thread.join();
+
 			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), kAlignTo));
 
-			for (auto& thread : threads)
-				thread.join();
-					
+			#pragma omp parallel for schedule(static, 1) num_threads(kNumThreads)
+			for (int iThread = 0; iThread < kNumThreads; ++iThread)
+				ExecuteThread(&contexts[iThread]);
+
 #if !defined(NED_FLANDERS)
 			char** words_cstr = const_cast<char**>(m_results.Words); // After all I own this data; we'll just be copying pointers (not fool proof).
 
@@ -919,9 +925,10 @@ private:
 		// Try to prefetch next horizontal line of board
 		FarPrefetch(visited + offsetY+width);
 
-		for (unsigned iX = 0; iX < width; ++iX) 
+		#pragma omp parallel for // schedule(static) num_threads(2)
+		for (int iX = 0; iX < width; ++iX) 
 		{
-//			NearPrefetch(visited + offsetY+iX + kCacheLineSize);
+			NearPrefetch(visited + offsetY+iX + kCacheLineSize);
 
 			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
