@@ -828,6 +828,7 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
+#if defined(FOR_INTEL)
 // Src: https://squadrick.dev/journal/going-faster-than-memcpy.html
 void _sse_async_cpy(void *d, const void *s, size_t n) {
 	// d, s -> 16 byte aligned
@@ -841,6 +842,7 @@ void _sse_async_cpy(void *d, const void *s, size_t n) {
 	}
 //	_mm_sfence();
 }
+#endif
 
 class Query
 {
