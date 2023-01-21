@@ -1040,7 +1040,7 @@ private:
 	const unsigned height = context->height;
 
 	auto* visited = context->visited; // Attempt to prefetch grid
-	ImmPrefetch(visited);
+	NearPrefetch(visited);
 
 #if !defined(FOR_INTEL)
 	auto& wordsFound = context->wordsFound;
