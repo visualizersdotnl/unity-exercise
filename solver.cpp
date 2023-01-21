@@ -26,11 +26,11 @@
 	Most of these (mostly thread-safety related) stability claims only work if NED_FLANDERS (see below) is defined.
 
 	Optimization ideas:
-	- That memcpy() taking 3% (of whatever) is nagging me
+	- That memcpy() taking 3% (of whatever) is nagging me -> WIP
 	- Copy() can be faster (analyze it)
-	- Prefetches help on Intel, not clear if it does on ARM/Silicon
+	- Prefetches help, not clear if it does on ARM/Silicon
 	- Streaming helps on Intel, not so much on ARM/Silicon
-	- Try 'reverse pruning' only to a certain degree (first test up to 3-letter words, then move up, maybe correlate it to an actual value (heuristic))
+	- Try 'reverse pruning' only to a certain degree (first test up to 3-letter words, then move up, maybe correlate it to an actual value (heuristic)) -> WIP
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -828,6 +828,20 @@ void FreeDictionary()
 // This means that there will be no problem reloading the dictionary whilst solving, nor will concurrent FindWords()
 // calls cause any fuzz due to globals and such.
 
+// Src: https://squadrick.dev/journal/going-faster-than-memcpy.html
+void _sse_async_cpy(void *d, const void *s, size_t n) {
+	// d, s -> 16 byte aligned
+	// n -> multiple of 16
+	auto *dVec = reinterpret_cast<__m128i *>(d);
+	const auto *sVec = reinterpret_cast<const __m128i *>(s);
+	size_t nVec = n / sizeof(__m128i);
+	for (; nVec > 0; nVec--, sVec++, dVec++) {
+		const __m128i temp = _mm_stream_load_si128(sVec);
+		_mm_stream_si128(dVec, temp);
+	}
+//	_mm_sfence();
+}
+
 class Query
 {
 public:
@@ -867,12 +881,11 @@ public:
 			// Handle allocation and initialization of thread grid.
 			const auto gridSize = width*height;
 			visited = static_cast<char*>(s_threadCustomAlloc[m_iThread].AllocateAlignedUnsafe(gridSize, kAlignTo));
+//			_sse_async_cpy(visited, sanitized, gridSize);
+			memcpy(visited, sanitized, gridSize);
 
 			// Reserve.
 			wordsFound.reserve(s_threadInfo[m_iThread].load); 
-
-			// Copy *after* allocation.
-			memcpy(visited, sanitized, gridSize);
 		}
 
 		// Input
@@ -1027,7 +1040,7 @@ private:
 	const unsigned height = context->height;
 
 	auto* visited = context->visited; // Attempt to prefetch grid
-	NearPrefetch(visited);
+	ImmPrefetch(visited);
 
 #if !defined(FOR_INTEL)
 	auto& wordsFound = context->wordsFound;
@@ -1046,7 +1059,7 @@ private:
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			NearPrefetch(visited + offsetY+iX + kCacheLineSize);
+//			NearPrefetch(visited + offsetY+iX + kCacheLineSize);
 
 			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
@@ -1095,7 +1108,7 @@ private:
 	auto* visited = context.visited + offsetY+iX;
 #endif
 
-//	const unsigned tile = *visited;
+	const unsigned tile = *visited;
 	if (!(*visited & kTileVisitedBit)) // Not visited?
 	{
 		if (auto* child = node->GetChildChecked(*visited)) // With child?
@@ -1172,22 +1185,42 @@ private:
 #else
 	if (offsetY >= width) 
 	{
-		if (iX < width-1) TraverseCall(wordsFound, (visited - width) + 1, node, width, height, iX+1, offsetY-width);
+		if (iX < width-1) 
+		{
+			TraverseCall(wordsFound, (visited - width) + 1, node, width, height, iX+1, offsetY-width);
+		}
+
 		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width);
-		if (iX > 0) TraverseCall(wordsFound, (visited - width) - 1, node, width, height, iX-1, offsetY-width);
+		
+		if (iX > 0) 
+		{
+			TraverseCall(wordsFound, (visited - width) - 1, node, width, height, iX-1, offsetY-width);
+		}
 	}
 
 	if (iX > 0)
+	{
 		TraverseCall(wordsFound, visited-1, node, width, height, iX-1, offsetY);
+	}
 
 	if (iX < width-1) 
+	{
 		TraverseCall(wordsFound, visited+1, node, width, height, iX+1, offsetY);
+	}
 
 	if (offsetY < width*(height-1))
 	{
-		if (iX < width-1) TraverseCall(wordsFound, (visited + width) + 1, node, width, height, iX+1, offsetY+width);
+		if (iX < width-1) 
+		{
+			TraverseCall(wordsFound, (visited + width) + 1, node, width, height, iX+1, offsetY+width);
+		}
+
 		TraverseCall(wordsFound, visited + width, node, width, height, iX, offsetY+width);
-		if (iX > 0) TraverseCall(wordsFound, (visited + width) - 1, node, width, height, iX-1, offsetY+width);
+
+		if (iX > 0) 
+		{
+			TraverseCall(wordsFound, (visited + width) - 1, node, width, height, iX-1, offsetY+width);
+		}
 	}
 #endif
 
@@ -1195,19 +1228,21 @@ private:
 	--depth;
 #endif
 
+	// Rationale: we'll need the content of node again, soon enough
+	ImmPrefetch(reinterpret_cast<const char*>(node));
+
 	*visited ^= kTileVisitedBit;
 
 	if (wordIdx >= 0) 
 	{
 		node->OnWordFound();
+		node->PruneReverse();
 
 #if defined(DEBUG_STATS)
 		context.wordsFound.push_back(wordIdx);
 #else
 		wordsFound.emplace_back(wordIdx);
 #endif
-
-		node->PruneReverse();
 	}
 }
 
