@@ -1230,8 +1230,7 @@ private:
 	--depth;
 #endif
 
-	// Rationale: we'll need the content of node again, soon enough
-	ImmPrefetch(reinterpret_cast<const char*>(node));
+//	ImmPrefetch(reinterpret_cast<const char*>(node));
 
 	*visited ^= kTileVisitedBit;
 
