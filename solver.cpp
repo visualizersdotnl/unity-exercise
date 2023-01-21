@@ -28,7 +28,9 @@
 
 	Optimization ideas:
 	- That memcpy() taking 3% (of whatever) is nagging me
-	- Copy() can be faster
+	- Copy() can be faster (analyze it)
+	- Do some proper testing if prefetching and/or streaming (these definitely help on Intel) instructions really help you at all
+	- Try 'reverse pruning' only to a certain degree (first test up to 3-letter words, then move up, maybe correlate it to an actual value (heuristic))
 */
 
 // Make VC++ 2015 shut up and walk in line.

@@ -8,8 +8,8 @@
 // When board randomization enabled, it pays off (usually) to do more queries to get better performance.
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
-	#define HIGHSCORE_MICROSECONDS 380000  // Stress test Ryzen 5900x
-	#define NUM_QUERIES 6
+	#define HIGHSCORE_MICROSECONDS 360000  // Stress test Ryzen 5900x
+	#define NUM_QUERIES 24 // 6
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
@@ -214,7 +214,7 @@ RetrySameBoard:
 	FreeDictionary();
 
 	const auto time = prevFastest.count();
-	printf("\nSolver ran %u times, fastest: %.lld microsec. / approx. %.4lf second(s)\n", (unsigned) NUM_QUERIES, time, double(time)*0.000001);
+	printf("\nSolver (%u per-cycle iterations) , fastest: %.lld microsec. / approx. %.4lf second(s)\n", (unsigned) NUM_QUERIES, time, double(time)*0.000001);
 
 	return 0;
 }
