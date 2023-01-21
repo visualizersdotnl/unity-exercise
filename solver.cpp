@@ -695,7 +695,7 @@ public:
 		DictionaryLock dictLock;
 #endif
 		{
-			omp_set_nested(1);
+//			omp_set_nested(1);
 
 			unsigned Count = 0;
 			unsigned Score = 0;
