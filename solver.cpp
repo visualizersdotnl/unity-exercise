@@ -615,17 +615,12 @@ void LoadDictionary(const char* path)
 		const size_t wordsPerThread = numWords/kNumThreads;
 
 		unsigned iThread = 0;
-		size_t threadNumWords = 0;
-
 		for (const auto &word : words)
 		{
 			AddWordToDictionary(word, iThread);
 
-			if (++threadNumWords > wordsPerThread)
-			{
-				threadNumWords = 0;
+			if (s_threadInfo[iThread].load == wordsPerThread)
 				++iThread;
-			}
 		}
 
 #ifdef NED_FLANDERS		
