@@ -914,7 +914,7 @@ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char*
 	}
 #endif
 	
-	// Might be too close, after an inspection of the disassembly
+	// Might be too close, after an inspection of the assembly.
 //	ClosePrefetch(reinterpret_cast<char*>(node));
 
 	// Done!
