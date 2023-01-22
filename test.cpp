@@ -9,7 +9,7 @@
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECONDS 370000  // Stress test Ryzen 5900x
-	#define NUM_QUERIES 1
+	#define NUM_QUERIES 10
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
@@ -176,10 +176,12 @@ RetrySameBoard:
 #if defined(HIGHSCORE_LOOP)
 	if (prevFastest.count() >= HIGHSCORE_MICROSECONDS) 
 	{
-//		for (auto& result : resultsToFree)
-//			FreeWords(result);
+	/*
+		for (auto& result : resultsToFree)
+			FreeWords(result);
 
-//		resultsToFree.clear();
+		resultsToFree.clear();
+	*/
 
 #if defined(HIGHSCORE_LOOP_RANDOMIZE_BOARD)
 		goto GenerateBoard;

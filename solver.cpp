@@ -136,9 +136,9 @@ const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 
 // Yup, this sucks, but the load isn't balanced correctly (FIXME).
 #if defined(FOR_INTEL)
-	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/3);
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
 #elif defined(FOR_ARM)
-	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/3);
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
 #endif
 
 #ifndef NO_PREFETCHES
@@ -619,6 +619,7 @@ void LoadDictionary(const char* path)
 		// Pathetic attempt at load balancing:
 		const size_t numWords = words.size();
 		size_t wordsPerThread = numWords/kNumThreads;
+		Assert(0 == numWords % kNumThreads);
 		const unsigned maxNumRoots = unsigned(std::ceil(std::log2(kNumThreads)));
 
 		unsigned iThread = 0;
@@ -653,7 +654,11 @@ void LoadDictionary(const char* path)
 				const auto numBits = GetNumBits(s_threadDicts[iThread]->GetIndexBits());
 				if (numBits > maxNumRoots)
 				{
-					iThread =  (iThread-1) % kNumThreads;
+					do
+					{
+						iThread = (iThread-1) % kNumThreads;
+					}
+					while (GetNumBits(s_threadDicts[iThread]->GetIndexBits()) < maxNumRoots);
 				}
 			}
 		}
