@@ -658,7 +658,7 @@ void LoadDictionary(const char* path)
 					{
 						iThread = (iThread-1) % kNumThreads;
 					}
-					while (GetNumBits(s_threadDicts[iThread]->GetIndexBits()) < maxNumRoots);
+					while (GetNumBits(s_threadDicts[iThread]->GetIndexBits()) >= maxNumRoots);
 				}
 			}
 		}
@@ -960,11 +960,9 @@ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char*
 	if (wordIdx & ~0x7fffffff) 
 		return;
 
-//	if (0 == (wordIdx & ~0x7fffffff)) 
-//	{
-		node->OnWordFound();
-		wordsFound.emplace_back(wordIdx);
-//	}
+//	if (0 == (wordIdx & ~0x7fffffff)) {} 
+	node->OnWordFound();
+	wordsFound.emplace_back(wordIdx);
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
