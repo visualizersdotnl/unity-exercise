@@ -1,9 +1,4 @@
 
-// Custom allocator using TLSF:
-// - Global and per-thread heap.
-// - Both lockless ('Unsafe') and locked allocations.
-// - Optional new and delete operator overloads.
-
 #pragma once
 
 #include <mutex>
@@ -13,7 +8,11 @@
 #include "alloc-aligned.h"
 #include "inline.h"
 
-const size_t kPageSize = 4096; // Usually right ;)
+#if defined(FOR_INTEL)
+	const size_t kPageSize = 4096; // 4KB
+#elif defined(FOR_ARM)
+	const size_t kPageSize = 4096*4; // 16KB (assuming Apple M/Silicon)
+#endif
 
 class CustomAlloc
 {

@@ -92,9 +92,7 @@
 // #define ASSERTIONS
 
 // Undef. to enable streamed (non-temporal) writes
-#if defined(FOR_INTEL)
-	#define STREAM_WRITES
-#endif
+#define STREAM_WRITES
 
 // Set to 0 to use index of letter 'U' instead of extra 4 bytes
 #define USE_EXTRA_INDEX 0
@@ -104,7 +102,13 @@
 #include "custom-allocator.h"                    // Depends on Ned Flanders & co. :)
 
 constexpr size_t kAlignTo = 16; // 128-bit
-constexpr size_t kCacheLineSize = sizeof(size_t)*8;
+
+#if defined(FOR_INTEL)
+	constexpr size_t kCacheLineSize = sizeof(size_t)*8;
+#else
+	// FIXME: assuming Apple M (Silicon) 
+	constexpr size_t kCacheLineSize = 128; // It's all over the internet.
+#endif
 
 // Undef. to kill prefetching (to do: read up on ARM/Silicon and prefetches)
 // #define NO_PREFETCHES 
@@ -129,7 +133,12 @@ constexpr size_t kCacheLineSize = sizeof(size_t)*8;
 #endif
 
 const size_t kNumConcurrrency = std::thread::hardware_concurrency();
-const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
+
+#if defined(FOR_INTEL)
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
+#elif defined(FOR_ARM)
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2); // This shouldn't be right (FIXME)
+#endif
 
 #ifndef NO_PREFETCHES
 
