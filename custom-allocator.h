@@ -22,12 +22,24 @@ public:
 	CustomAlloc() {}
 
 	explicit CustomAlloc(size_t poolSize) :
-		m_instance(tlsf_create_with_pool(m_pool = mallocAligned(poolSize, kPageSize), poolSize)) {}
+		m_instance(tlsf_create_with_pool(m_pool = mallocAligned(poolSize, kPageSize), poolSize)) 
+	{
+#if defined(NED_FLANDERS)
+		m_isOwner = true;
+#endif
+	}
 
 	explicit CustomAlloc(char* pool, size_t poolSize) :
-		m_instance(tlsf_create_with_pool(m_pool = pool, poolSize)) {}
+		m_instance(tlsf_create_with_pool(m_pool = pool, poolSize))
+	{
+#if defined(NED_FLANDERS)
+		m_isOwner = false;
+#endif
+	}
 
 #if defined(NED_FLANDERS)
+
+	// That's right, we don't release an owned pool (s_globalCustomAlloc), why would we?
 	~CustomAlloc()
 	{
 		// Does nothing!
@@ -42,27 +54,39 @@ public:
 ,		m_pool(RHS.m_pool)
 ,		m_isOwner(RHS.m_isOwner)
 	{
-		// Disown RHS
 		RHS.m_isOwner = false;
 	}
+
+	CustomAlloc& operator=(const CustomAlloc& RHS)
+	{
+		m_instance = RHS.m_instance;
+		m_pool = RHS.m_pool;
+		m_isOwner = RHS.m_isOwner;
+
+		RHS.m_isOwner = false;
+
+		return *this;
+	}
+
 #endif
 
 	// The 'Unsafe' functions are lockless, do not use them multi-threaded.
-	// The ones under NED_FLANDERS do have a lock.
-
 	BOGGLE_INLINE_FORCE void* AllocateUnsafe(size_t size)
 	{
+//		m_approxLoad += size;
 		return tlsf_malloc(m_instance, size);
 	}
 
 	BOGGLE_INLINE_FORCE void* AllocateAlignedUnsafe(size_t size, size_t align)
 	{
+//		m_approxLoad += size;
 		return tlsf_memalign(m_instance, align, size);
 	}
 
 	BOGGLE_INLINE_FORCE void FreeUnsafe(void* address)
 	{
-		tlsf_free(m_instance, address);
+		/* const auto freed = */ tlsf_free(m_instance, address);
+//		m_approxLoad -= freed;
 	}
 
 #if defined(NED_FLANDERS)
@@ -81,37 +105,45 @@ public:
 	BOGGLE_INLINE void Free(void* address)
 	{
 		std::lock_guard lock(m_mutex);
-		tlsf_free(m_instance, address);
+		FreeUnsafe(address);
 	}
 #endif
 
+	// Approximation, doesn't keep overhead and alignment in mind.
 	BOGGLE_INLINE_FORCE void* GetPool() const
 	{
 		return m_pool;
 	}
 
-	// Use this to wipe the allocator state; this invalidates all allocations
+	// Use this to wipe the allocator state; this invalidates all allocations.
 	BOGGLE_INLINE void Reset(size_t poolSize) 
 	{
 		// Simply recreating the instance wipes all history
 		m_instance = tlsf_create_with_pool(m_pool, poolSize);
+//		m_approxLoad = 0;
 	}
+
+/*
+	// Returns allocated blocks *without* their overhead et cetera.
+	BOGGLE_INLINE_FORCE size_t GetApproxLoad() const {
+		return m_approxLoad;
+	}
+*/
 
 private: 
 	tlsf_t m_instance;
 	void* m_pool;
 
-#ifdef NED_FLANDERS
+#if defined(NED_FLANDERS)
 	mutable bool m_isOwner = false;
 	std::mutex m_mutex;
 #endif
 
+//	size_t m_approxLoad = 0;
 };
 
 // Global heap/pool
 static CustomAlloc s_globalCustomAlloc(GLOBAL_MEMORY_POOL_SIZE);
-
-// Per-thread heap/pool
 static std::vector<CustomAlloc> s_threadCustomAlloc;
 
 #if 0
