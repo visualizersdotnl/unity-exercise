@@ -913,13 +913,14 @@ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char*
 			TraverseCall(wordsFound, (visited + width) - 1, node, width, height, iX-1, offsetY+width);
 	}
 #endif
-
-	ClosePrefetch(reinterpret_cast<char*>(node));
+	
+	// Might be too close, after an inspection of the disassembly
+//	ClosePrefetch(reinterpret_cast<char*>(node));
 
 	// Done!
 	*visited ^= kTileVisitedBit;
 
-	if (wordIdx >= 0) 
+	if (0 == (wordIdx & ~0x7fffffff)) 
 	{
 		node->OnWordFound();
 		wordsFound.emplace_back(wordIdx);
