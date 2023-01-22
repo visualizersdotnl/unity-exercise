@@ -133,34 +133,19 @@ const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
 
 #ifndef NO_PREFETCHES
 
-// Far prefetch (Win32: only L3)
 BOGGLE_INLINE_FORCE static void FarPrefetch(const char* address)
 {
-#ifdef __GNUC__
-	__builtin_prefetch(address, 1, 3);
-#elif defined(_WIN32)
 	_mm_prefetch(address, _MM_HINT_T2);
-#endif
 }
 
-// Near prefetch (Win32: Only L2+)
 BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
 {
-#ifdef __GNUC__
-	__builtin_prefetch(address, 1, 1);
-#elif defined(_WIN32)
 	_mm_prefetch(address, _MM_HINT_T1);
-#endif
 }
 
-// Semi-immediate prefetch (Win32: all levels if possible)
 BOGGLE_INLINE_FORCE static void ClosePrefetch(const char* address)
 {
-#if defined(__GNUC__)
-	__builtin_prefetch(address, 1, 0);
-#elif defined(_WIN32)
 	_mm_prefetch(address, _MM_HINT_T0);
-#endif
 }
 
 #else
