@@ -136,7 +136,7 @@ const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 
 // Yup, this sucks, but the load isn't balanced correctly (FIXME).
 #if defined(FOR_INTEL)
-	const size_t kNumThreads = kNumConcurrrency + (kNumConcurrrency>>2);
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/3);
 #elif defined(FOR_ARM)
 	const size_t kNumThreads = omp_get_max_threads();
 #endif
@@ -626,19 +626,19 @@ void LoadDictionary(const char* path)
 			AddWordToDictionary(word, iThread);
 
 			const auto numBits = GetNumBits(s_threadDicts[iThread]->GetIndexBits());
-			const size_t load = s_threadInfo[iThread].load;
+			const unsigned load = unsigned(s_threadInfo[iThread].load);
 
 			if (numBits > maxNumRoots)
 			{
 				wordsPerThread += wordsPerThread>>numBits;
-				iThread =  (iThread > 0) ? iThread-1 : kNumThreads-1;
+				iThread =  (iThread > 0) ? iThread-1 :  unsigned(kNumThreads-1);
 			}
 			else if (load >= wordsPerThread)
 			{
 				const size_t nodes = s_threadInfo[iThread].nodes;
 //				const size_t load  = s_threadInfo[iThread].load;
 
-				unsigned curComp = nodes/(1+load);
+				unsigned curComp = unsigned(nodes)/(1+load);
 				for (unsigned iComp = 0; iComp < kNumThreads; ++iComp)
 				{
 					if (iComp == iThread)
@@ -651,7 +651,7 @@ void LoadDictionary(const char* path)
 					if (compNodes/(1+compLoad) < curComp)
 					{
 						iThread = iComp;
-						curComp = compNodes/(1+compLoad);
+						curComp = unsigned(compNodes/(1+compLoad));
 					}
 				}
 			}
@@ -711,6 +711,8 @@ public:
 
 	void Execute()
 	{
+//		debug_printf("Query::Execute(...) for %zu threads!\n", kNumThreads);
+
 #ifdef NED_FLANDERS
 		// Just in case another Execute() call is made on the same context: avoid leaking.
 		FreeWords(m_results);
