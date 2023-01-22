@@ -138,7 +138,7 @@ const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 #if defined(FOR_INTEL)
 	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/3);
 #elif defined(FOR_ARM)
-	const size_t kNumThreads = omp_get_max_threads()/3;
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/3);
 #endif
 
 #ifndef NO_PREFETCHES
@@ -616,27 +616,20 @@ void LoadDictionary(const char* path)
 
 		fclose(file);
 
+		// Pathetic attempt at load balancing:
 		const size_t numWords = words.size();
 		size_t wordsPerThread = numWords/kNumThreads;
-		const unsigned maxNumRoots = unsigned(std::log2(kNumThreads));
+		const unsigned maxNumRoots = unsigned(std::ceil(std::log2(kNumThreads)));
 
 		unsigned iThread = 0;
 		for (const auto &word : words)
 		{
 			AddWordToDictionary(word, iThread);
 
-			const auto numBits = GetNumBits(s_threadDicts[iThread]->GetIndexBits());
 			const unsigned load = unsigned(s_threadInfo[iThread].load);
-
-			if (numBits >= maxNumRoots)
-			{
-				wordsPerThread += wordsPerThread>>numBits;
-				iThread =  (iThread > 0) ? iThread-1 :  unsigned(kNumThreads-1);
-			}
-			else if (load >= wordsPerThread)
+			if (load >= wordsPerThread)
 			{
 				const size_t nodes = s_threadInfo[iThread].nodes;
-//				const size_t load  = s_threadInfo[iThread].load;
 
 				unsigned curComp = unsigned(nodes)/(1+load);
 				for (unsigned iComp = 0; iComp < kNumThreads; ++iComp)
@@ -648,11 +641,19 @@ void LoadDictionary(const char* path)
 					const size_t compLoad    = s_threadInfo[iComp].load;
 //					const size_t compNumBits = GetNumBits(s_threadDicts[iComp]->GetIndexBits());
 
-					if (compNodes/(1+compLoad) < curComp)
+					if (unsigned(compNodes/(1+compLoad)) < curComp)
 					{
 						iThread = iComp;
-						curComp = unsigned(compNodes/(1+compLoad));
+						break;
 					}
+				}
+			}
+			else
+			{
+				const auto numBits = GetNumBits(s_threadDicts[iThread]->GetIndexBits());
+				if (numBits > maxNumRoots)
+				{
+					iThread =  (iThread-1) % kNumThreads;
 				}
 			}
 		}
