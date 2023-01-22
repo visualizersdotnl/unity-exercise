@@ -914,17 +914,20 @@ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char*
 	}
 #endif
 	
-	// Might be too close, after an inspection of the assembly.
+	// Way too close, after an inspection of the assembly.
 //	ClosePrefetch(reinterpret_cast<char*>(node));
 
 	// Done!
 	*visited ^= kTileVisitedBit;
 
-	if (0 == (wordIdx & ~0x7fffffff)) 
-	{
+	if (wordIdx & ~0x7fffffff) 
+		return;
+
+//	if (0 == (wordIdx & ~0x7fffffff)) 
+//	{
 		node->OnWordFound();
 		wordsFound.emplace_back(wordIdx);
-	}
+//	}
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
