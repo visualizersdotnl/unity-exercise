@@ -176,10 +176,10 @@ RetrySameBoard:
 #if defined(HIGHSCORE_LOOP)
 	if (prevFastest.count() >= HIGHSCORE_MICROSECONDS) 
 	{
-		for (auto& result : resultsToFree)
-			FreeWords(result);
+//		for (auto& result : resultsToFree)
+//			FreeWords(result);
 
-		resultsToFree.clear();
+//		resultsToFree.clear();
 
 #if defined(HIGHSCORE_LOOP_RANDOMIZE_BOARD)
 		goto GenerateBoard;

@@ -982,9 +982,10 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAlignedUnsafe(gridSize, kAlignTo));
 
 		// Sanitize that just reorders and expects uppercase.
+		#pragma omp simd
 		for (int index = 0; index < int(gridSize); ++index)
 		{
-			sanitized[index] = LetterToIndex(board[index]); // FIXME: may need a 'toupper()' depending on the harness
+			sanitized[index] = (board[index] - 'A') + USE_EXTRA_INDEX; // LetterToIndex(board[index]); // FIXME: may need a 'toupper()' depending on the harness
 		}
 #endif
 
