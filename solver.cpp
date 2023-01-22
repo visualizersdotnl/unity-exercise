@@ -28,12 +28,12 @@
 	- That memcpy() taking 3% (of whatever) is nagging me -> WIP.
 	  + https://squadrick.dev/journal/going-faster-than-memcpy.html
 	- Copy() can be faster (analyze it).
-	- Prefetch instructions are a bitch to get right, streaming ones less zo.
+	- Prefetch instructions are a bitch to get right, streaming ones less so.
 	- Try 'reverse pruning' only to a certain degree (first test up to 3-letter words, then move up, maybe correlate it to an actual value (heuristic)). -> WIP
 
 	Things about the OpenMP version:
 	- Results are (FIXME) invalid as soon as a new dictionary is loaded!
-	- ...
+	- Problem: load is unbalanced in that *one* thread has a significantly higher load, you can see this in Superluminal when using correct number of threads.
 */
 
 // Make VC++ 2015 shut up and walk in line.
@@ -134,10 +134,11 @@ constexpr size_t kAlignTo = 16; // 128-bit
 
 const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 
+// Yup, this sucks, but the load isn't balanced correctly (FIXME).
 #if defined(FOR_INTEL)
 	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
 #elif defined(FOR_ARM)
-	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2); // This shouldn't be right (FIXME)
+	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
 #endif
 
 #ifndef NO_PREFETCHES
@@ -609,8 +610,7 @@ void LoadDictionary(const char* path)
 		while (EOF != character);
 
 		fclose(file);
-		
-		// Assign words to threads sequentially
+
 		const size_t numWords = words.size();
 		const size_t wordsPerThread = numWords/kNumThreads;
 
@@ -861,7 +861,7 @@ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char*
 		if (iX < width-1) 
 			TraverseCall(wordsFound, (visited - width) + 1, node, width, height, iX+1, offsetY-width, depth);
 
-		TraverseCall(wordsFound, visited - width, node, iX, offsetY-width, depth);
+		TraverseCall(wordsFound, visited - width, node, width, height, iX, offsetY-width, depth);
 		
 		if (iX > 0) 
 			TraverseCall(wordsFound, (visited - width) - 1, node, width, height, iX-1, offsetY-width, depth);
