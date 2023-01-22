@@ -136,9 +136,9 @@ const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 
 // Yup, this sucks, but the load isn't balanced correctly (FIXME).
 #if defined(FOR_INTEL)
-	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
+	const size_t kNumThreads = kNumConcurrrency + (kNumConcurrrency>>2);
 #elif defined(FOR_ARM)
-	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/2);
+	const size_t kNumThreads = omp_get_max_threads();
 #endif
 
 #ifndef NO_PREFETCHES
@@ -272,6 +272,11 @@ public:
 	{
 		Assert(nullptr != m_children[index-USE_EXTRA_INDEX]);
 		return m_children[index-USE_EXTRA_INDEX];
+	}
+
+	BOGGLE_INLINE_FORCE uint32_t GetIndexBits() const
+	{
+		return m_indexBits;
 	}
 
 private:
@@ -612,18 +617,47 @@ void LoadDictionary(const char* path)
 		fclose(file);
 
 		const size_t numWords = words.size();
-		const size_t wordsPerThread = numWords/kNumThreads;
+		size_t wordsPerThread = numWords/kNumThreads;
+		const unsigned maxNumRoots = unsigned(std::log(kNumThreads));
 
 		unsigned iThread = 0;
 		for (const auto &word : words)
 		{
 			AddWordToDictionary(word, iThread);
 
-			if (s_threadInfo[iThread].load == wordsPerThread)
-				++iThread;
+			const auto numBits = GetNumBits(s_threadDicts[iThread]->GetIndexBits());
+			const size_t load = s_threadInfo[iThread].load;
+
+			if (numBits > maxNumRoots)
+			{
+				wordsPerThread += wordsPerThread>>numBits;
+				iThread =  (iThread > 0) ? iThread-1 : kNumThreads-1;
+			}
+			else if (load >= wordsPerThread)
+			{
+				const size_t nodes = s_threadInfo[iThread].nodes;
+//				const size_t load  = s_threadInfo[iThread].load;
+
+				unsigned curComp = nodes/(1+load);
+				for (unsigned iComp = 0; iComp < kNumThreads; ++iComp)
+				{
+					if (iComp == iThread)
+						continue;
+
+					const size_t compNodes   = s_threadInfo[iComp].nodes;
+					const size_t compLoad    = s_threadInfo[iComp].load;
+//					const size_t compNumBits = GetNumBits(s_threadDicts[iComp]->GetIndexBits());
+
+					if (compNodes/(1+compLoad) < curComp)
+					{
+						iThread = iComp;
+						curComp = compNodes/(1+compLoad);
+					}
+				}
+			}
 		}
 
-#ifdef NED_FLANDERS		
+#ifdef NED_FLANDERS		 
 		// Check thread load total.
 		size_t count = 0;
 		for (CONST auto& info : s_threadInfo)
