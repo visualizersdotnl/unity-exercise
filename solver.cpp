@@ -769,7 +769,7 @@ void Query::ExecuteThread(unsigned iThread, std::vector<unsigned>& wordsFound)
 	for (unsigned offsetY = 0; offsetY <= width*(height-1); offsetY += m_width) 
 	{
 		// Try to get the next line closer by
-		FarPrefetch(visited + offsetY+width);
+		NearPrefetch(visited + offsetY+width);
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
