@@ -25,12 +25,11 @@
 	Most of these (mostly thread-safety related) stability claims only work if NED_FLANDERS (see below) is defined.
 
 	Optimization ideas:
-	- That memcpy() taking 3% (of whatever) is nagging me -> WIP
-	- Src: https://squadrick.dev/journal/going-faster-than-memcpy.html
-	- Copy() can be faster (analyze it)
-	- Prefetches help, not clear if it does on ARM/Silicon
-	- Streaming helps on Intel, not so much on ARM/Silicon?
-	- Try 'reverse pruning' only to a certain degree (first test up to 3-letter words, then move up, maybe correlate it to an actual value (heuristic)) -> WIP
+	- That memcpy() taking 3% (of whatever) is nagging me -> WIP.
+	  + https://squadrick.dev/journal/going-faster-than-memcpy.html
+	- Copy() can be faster (analyze it).
+	- Prefetch instructions are a bitch to get right, streaming ones less zo.
+	- Try 'reverse pruning' only to a certain degree (first test up to 3-letter words, then move up, maybe correlate it to an actual value (heuristic)). -> WIP
 
 	Things about the OpenMP version:
 	- Results are (FIXME) invalid as soon as a new dictionary is loaded!
@@ -154,13 +153,13 @@ BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
 #endif
 }
 
-// Immediate prefetch (Win32: all levels if possible)
-BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
+// Semi-immediate prefetch (Win32: all levels if possible)
+BOGGLE_INLINE_FORCE static void ClosePrefetch(const char* address)
 {
 #if defined(__GNUC__)
 	__builtin_prefetch(address, 1, 0);
 #elif defined(_WIN32)
-	_mm_prefetch(address, _MM_HINT_NTA);
+	_mm_prefetch(address, _MM_HINT_T0);
 #endif
 }
 
@@ -168,7 +167,7 @@ BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
 
 BOGGLE_INLINE_FORCE static void FarPrefetch(const char* address)  {}
 BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address) {}
-BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)  {}
+BOGGLE_INLINE_FORCE static void ClosePrefetch(const char* address)  {}
 
 #endif
 
@@ -775,7 +774,7 @@ void Query::ExecuteThread(unsigned iThread, std::vector<unsigned>& wordsFound)
 	const auto gridSize = width*height;
 	char* visited = static_cast<char*>(s_threadCustomAlloc[iThread].AllocateAlignedUnsafe(gridSize*sizeof(char), kAlignTo));
 	memcpy(visited, m_sanitized, gridSize);
-	NearPrefetch(visited);
+	ClosePrefetch(visited);
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", iThread, s_threadInfo[iThread].load, s_threadInfo[iThread].nodes);
@@ -784,13 +783,11 @@ void Query::ExecuteThread(unsigned iThread, std::vector<unsigned>& wordsFound)
 
 	for (unsigned offsetY = 0; offsetY <= width*(height-1); offsetY += m_width) 
 	{
-		// Try to prefetch next horizontal line of board in advance
+		// Try to get the next line closer by
 		FarPrefetch(visited + offsetY+width);
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-			NearPrefetch(visited + offsetY+width+kCacheLineSize);
-
 			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
 #if defined(DEBUG_STATS)
@@ -798,8 +795,6 @@ void Query::ExecuteThread(unsigned iThread, std::vector<unsigned>& wordsFound)
 #else
 				TraverseBoard(wordsFound, &visited[offsetY+iX], child, width, height, iX, offsetY);
 #endif
-
-				ImmPrefetch(visited + offsetY+iX+1);
 			}
 		}
 	}
@@ -834,19 +829,11 @@ BOGGLE_INLINE_FORCE void Query::TraverseCall(std::vector<unsigned>& wordsFound, 
 	{
 		if (auto* child = node->GetChildChecked(*visited))
 		{
-			const auto wordIdx = node->GetWordIndex();
-
 #if defined(DEBUG_STATS)
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY, depth);
 #else
 			TraverseBoard(wordsFound, visited, child, width, height, iX, offsetY);
 #endif
-
-			if (wordIdx >= 0) 
-			{
-				node->OnWordFound();
-				wordsFound.emplace_back(wordIdx);
-			}
 
 			if (!child->HasChildren())
 				node->RemoveChild(*visited);
@@ -861,6 +848,8 @@ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char*
 #endif
 {
 	Assert(nullptr != node);
+
+	const auto wordIdx = node->GetWordIndex();
 
 #if defined(DEBUG_STATS)
 	++depth;
@@ -931,8 +920,16 @@ void BOGGLE_INLINE Query::TraverseBoard(std::vector<unsigned>& wordsFound, char*
 	}
 #endif
 
+	ClosePrefetch(reinterpret_cast<char*>(node));
+
 	// Done!
 	*visited ^= kTileVisitedBit;
+
+	if (wordIdx >= 0) 
+	{
+		node->OnWordFound();
+		wordsFound.emplace_back(wordIdx);
+	}
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
