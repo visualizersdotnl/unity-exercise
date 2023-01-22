@@ -138,7 +138,7 @@ const size_t kNumConcurrrency = std::thread::hardware_concurrency();
 #if defined(FOR_INTEL)
 	const size_t kNumThreads = kNumConcurrrency+(kNumConcurrrency/3);
 #elif defined(FOR_ARM)
-	const size_t kNumThreads = omp_get_max_threads();
+	const size_t kNumThreads = omp_get_max_threads()/3;
 #endif
 
 #ifndef NO_PREFETCHES
@@ -618,7 +618,7 @@ void LoadDictionary(const char* path)
 
 		const size_t numWords = words.size();
 		size_t wordsPerThread = numWords/kNumThreads;
-		const unsigned maxNumRoots = unsigned(std::log(kNumThreads));
+		const unsigned maxNumRoots = unsigned(std::log2(kNumThreads));
 
 		unsigned iThread = 0;
 		for (const auto &word : words)
@@ -628,7 +628,7 @@ void LoadDictionary(const char* path)
 			const auto numBits = GetNumBits(s_threadDicts[iThread]->GetIndexBits());
 			const unsigned load = unsigned(s_threadInfo[iThread].load);
 
-			if (numBits > maxNumRoots)
+			if (numBits >= maxNumRoots)
 			{
 				wordsPerThread += wordsPerThread>>numBits;
 				iThread =  (iThread > 0) ? iThread-1 :  unsigned(kNumThreads-1);
