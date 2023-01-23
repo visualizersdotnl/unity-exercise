@@ -13,7 +13,11 @@
 #include "alloc-aligned.h"
 #include "inline.h"
 
-const size_t kPageSize = 4096; // Usually right ;)
+#if defined(FOR_INTEL)
+	const size_t kPageSize = 4096; // Usually right!
+#else
+	const size_t kPageSize = 4096*4; // According to the internet for Apple M1/M2.
+#endif
 
 class CustomAlloc
 {

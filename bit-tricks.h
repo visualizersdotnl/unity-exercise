@@ -33,3 +33,14 @@ BOGGLE_INLINE_FORCE size_t RoundPow2_64(size_t value)
 // Thank you Bit Twiddling Hacks.
 BOGGLE_INLINE_FORCE unsigned IsNotZero(unsigned value) { return ((value | (~value + 1)) >> 31); } // No need for '& 1'
 BOGGLE_INLINE_FORCE unsigned IsZero(unsigned value) { return 1 + (value >> 31) - (-value >> 31); }
+
+BOGGLE_INLINE_FORCE unsigned GetNumBits(unsigned integer)
+{
+	unsigned bitCount;
+	for (bitCount = 0; integer > 0; integer >>= 1)
+	{
+		bitCount += integer & 1;
+	}
+
+	return bitCount;
+}

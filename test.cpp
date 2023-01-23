@@ -8,17 +8,17 @@
 // When board randomization enabled, it pays off (usually) to do more queries to get better performance.
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
-	#define HIGHSCORE_MICROSECONDS 360000  // Stress test Ryzen 5900x
-	#define NUM_QUERIES 6
+	#define HIGHSCORE_MICROSECONDS 370000  // Stress test Ryzen 5900x
+	#define NUM_QUERIES 1
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
 	#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-		#define HIGHSCORE_MICROSECONDS 610000  // Stress test for M1 MAX
+		#define HIGHSCORE_MICROSECONDS 620000  // Stress test for M1 MAX
 	#else
 		#define HIGHSCORE_MICROSECONDS 600000  // And for anything else, like Albert's Intel
 	#endif
-	#define NUM_QUERIES 6
+	#define NUM_QUERIES 1
 	// #define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #endif
 
@@ -153,14 +153,19 @@ RetrySameBoard:
 		if (duration < curFastest)
 			curFastest = duration;
 #elif defined(PRINT_ITER_RESULTS)
-		if (duration < curFastest)
-			printf("Faster: %.lld microsec.\n", duration.count());
-#endif
-
+		if (duration < curFastest) {
+			printf("Faster: %.lld microsec. (Count %u, Score %u)\n", duration.count(), results.Count, results.Score);
+		}
+#else
 		if (duration < curFastest)
 			curFastest = duration;
+#endif
 
+#if defined(HIGHSCORE_LOOP)
+		FreeWords(results);
+#else
 		resultsToFree.emplace_back(results);
+#endif
 	}
 
 #if defined(HIGHSCORE_LOOP)
@@ -172,10 +177,10 @@ RetrySameBoard:
 
 	if (prevFastest.count() >= HIGHSCORE_MICROSECONDS) 
 	{
-		for (auto& result : resultsToFree)
-			FreeWords(result);
+//		for (auto& result : resultsToFree)
+//			FreeWords(result);
 
-		resultsToFree.clear();
+//		resultsToFree.clear();
 
 #if defined(HIGHSCORE_LOOP_RANDOMIZE_BOARD)
 		goto GenerateBoard;

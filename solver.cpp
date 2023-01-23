@@ -32,7 +32,10 @@
 	- Streaming helps on Intel, not so much on ARM/Silicon
 	- Try 'reverse pruning' only to a certain degree (first test up to 3-letter words, then move up, maybe correlate it to an actual value (heuristic)) -> WIP
 	- Src: https://squadrick.dev/journal/going-faster-than-memcpy.html
-	*/
+
+	Recent:
+	- Integrated some changes from OpenMP branch.
+*/
 
 // Make VC++ 2015 shut up and walk in line.
 #define _CRT_SECURE_NO_WARNINGS 
@@ -106,11 +109,16 @@
 #include "custom-allocator.h"                    // Depends on Ned Flanders & co. :)
 
 constexpr size_t kAlignTo = 16; // 128-bit
-constexpr size_t kCacheLineSize = sizeof(size_t)*8;
+
+#if defined(FOR_INTEL)
+	constexpr size_t kCacheLineSize = sizeof(size_t)*8;
+#elif defined(FOR_ARM)
+	constexpr size_t kCacheLineSize = 128; // Read the internet. For Apple M1/M2.
+#endif
 
 // Undef. to kill prefetching
 #if defined(FOR_ARM)
-	#define NO_PREFETCHES // Read up on ARM & prefetching first!
+//	#define NO_PREFETCHES // Read up on ARM & prefetching first!
 #endif
 
 // Max. word length (for optimization)
@@ -150,31 +158,19 @@ constexpr size_t kCacheLineSize = sizeof(size_t)*8;
 // Far prefetch (Win32: only L3)
 BOGGLE_INLINE_FORCE static void FarPrefetch(const char* address)
 {
-#ifdef __GNUC__
-	__builtin_prefetch(address, 1, 3);
-#elif defined(_WIN32)
 	_mm_prefetch(address, _MM_HINT_T2);
-#endif
 }
 
 // Near prefetch (Win32: Only L2+)
 BOGGLE_INLINE_FORCE static void NearPrefetch(const char* address)
 {
-#ifdef __GNUC__
-	__builtin_prefetch(address, 1, 1);
-#elif defined(_WIN32)
 	_mm_prefetch(address, _MM_HINT_T1);
-#endif
 }
 
 // Immediate prefetch (Win32: all levels if possible)
 BOGGLE_INLINE_FORCE static void ImmPrefetch(const char* address)
 {
-#if defined(__GNUC__)
-	__builtin_prefetch(address, 1, 0);
-#elif defined(_WIN32)
 	_mm_prefetch(address, _MM_HINT_T0);
-#endif
 }
 
 #else
@@ -288,6 +284,10 @@ public:
 	{
 		Assert(nullptr != m_children[index-USE_EXTRA_INDEX]);
 		return m_children[index-USE_EXTRA_INDEX];
+	}
+
+	BOGGLE_INLINE_FORCE uint32_t GetIndexBits() const {
+		return m_indexBits;
 	}
 
 private:
@@ -649,6 +649,7 @@ void LoadDictionary(const char* path)
 		// Assign words to threads sequentially
 		const size_t numWords = words.size();
 		const size_t wordsPerThread = numWords/kNumThreads;
+		const unsigned maxNumRoots = unsigned(std::ceil(std::log2(kNumThreads)));
 
 		unsigned iThread = 0;
 		size_t threadNumWords = 0;
@@ -657,10 +658,38 @@ void LoadDictionary(const char* path)
 		{
 			AddWordToDictionary(word, iThread);
 
-			if (++threadNumWords > wordsPerThread)
+			const unsigned load = unsigned(s_threadInfo[iThread].load);
+			if (load >= wordsPerThread)
 			{
-				threadNumWords = 0;
-				++iThread;
+				const size_t nodes = s_threadInfo[iThread].nodes;
+
+				unsigned curComp = unsigned(nodes)/(1+load);
+				for (unsigned iComp = 0; iComp < kNumThreads; ++iComp)
+				{
+					if (iComp == iThread)
+						continue;
+
+					const size_t compNodes = s_threadInfo[iComp].nodes;
+					const size_t compLoad = s_threadInfo[iComp].load;
+
+					if (unsigned(compNodes/(1+compLoad)) < curComp)
+					{
+						iThread = iComp;
+						break;
+					}
+				}
+			}
+			else
+			{
+				const auto numBits = GetNumBits(s_threadDicts[iThread]->GetIndexBits());
+				if (numBits > maxNumRoots)
+				{
+					do
+					{
+						iThread = (iThread-1) % kNumThreads;
+					}
+					while (GetNumBits(s_threadDicts[iThread]->GetIndexBits()) >= maxNumRoots);
+				}
 			}
 		}
 
@@ -808,7 +837,8 @@ public:
 #endif
 			}
 
-			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), kAlignTo));
+//			m_results.Words = static_cast<char**>(s_globalCustomAlloc.AllocateAlignedUnsafe(s_wordCount*sizeof(char*), kAlignTo));
+			m_results.Words = static_cast<char**>(mallocAligned(s_wordCount*sizeof(char*), kAlignTo));
 
 			for (auto& thread : threads)
 				thread.join();
@@ -822,8 +852,8 @@ public:
 				{
 					const auto& word = s_words[wordIdx];
 
-					m_results.Score += unsigned(word.score);
 					++m_results.Count;
+					m_results.Score += unsigned(word.score);
 
 #if defined(STREAM_WRITES)
 					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
@@ -902,11 +932,9 @@ private:
 	const unsigned height = context->height;
 
 	auto* visited = context->visited; // Attempt to prefetch grid
-	NearPrefetch(visited);
+//	NearPrefetch(visited);
 
-#if !defined(FOR_INTEL)
 	auto& wordsFound = context->wordsFound;
-#endif
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", context->m_iThread, s_threadInfo[context->m_iThread].load, s_threadInfo[context->m_iThread].nodes);
@@ -917,31 +945,22 @@ private:
 	for (unsigned offsetY = 0; offsetY <= width*(height-1); offsetY += width) 
 	{
 		// Try to prefetch next horizontal line of board
-		FarPrefetch(visited + offsetY+width);
+		NearPrefetch(visited + offsetY+width);
 
 		for (unsigned iX = 0; iX < width; ++iX) 
 		{
-//			NearPrefetch(visited + offsetY+iX + kCacheLineSize);
-
 			if (auto* child = root->GetChildChecked(visited[offsetY+iX]))
 			{
 #if defined(DEBUG_STATS)
 				unsigned depth = 0;
 				TraverseBoard(*context, child, iX, offsetY, depth);
-#elif defined(FOR_ARM)
-				TraverseBoard(wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
-#elif defined(FOR_INTEL)
-				TraverseBoard(context->wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
 #endif
+				TraverseBoard(wordsFound, visited + offsetY+iX, child, width, height, iX, offsetY);
 			}
 		}
 	}
 
-#if !defined(FOR_INTEL)
 	std::sort(wordsFound.begin(), wordsFound.end());
-#else
-	std::sort(context->wordsFound.begin(), context->wordsFound.end());
-#endif
 
 #if defined(NED_FLANDERS)
 	for (unsigned wordIdx : context->wordsFound)
@@ -970,7 +989,6 @@ private:
 	auto* visited = context.visited + offsetY+iX;
 #endif
 
-	const unsigned tile = *visited;
 	if (!(*visited & kTileVisitedBit)) // Not visited?
 	{
 		if (auto* child = node->GetChildChecked(*visited)) // With child?
@@ -1094,16 +1112,16 @@ private:
 
 	*visited ^= kTileVisitedBit;
 
-	if (wordIdx >= 0) 
-	{
-		node->OnWordFound();
+	if (wordIdx & ~0x7fffffff)
+		return;
+
+	node->OnWordFound();
 
 #if defined(DEBUG_STATS)
-		context.wordsFound.push_back(wordIdx);
+	context.wordsFound.push_back(wordIdx);
 #else
-		wordsFound.emplace_back(wordIdx);
+	wordsFound.emplace_back(wordIdx);
 #endif
-	}
 }
 
 Results FindWords(const char* board, unsigned width, unsigned height)
@@ -1133,6 +1151,8 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 	// Board parameters check out?
 	if (nullptr != board && !(0 == width || 0 == height))
 	{
+		s_globalCustomAlloc.Reset(GLOBAL_MEMORY_POOL_SIZE);
+
 		const unsigned gridSize = width*height;
 
 #ifdef NED_FLANDERS
@@ -1164,11 +1184,10 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		char* sanitized = static_cast<char*>(s_globalCustomAlloc.AllocateAlignedUnsafe(gridSize, kAlignTo));
 
 		// Sanitize that just reorders and expects uppercase.
+		#pragma omp simd
 		for (unsigned index = 0; index < gridSize; ++index)
 		{
-			const char letter = *board++;
-			const unsigned sanity = LetterToIndex(letter); // LetterToIndex(toupper(letter));
-			sanitized[index] = sanity;
+			sanitized[index] = (board[index] - 'A') + USE_EXTRA_INDEX;
 		}
 #endif
 
@@ -1192,29 +1211,16 @@ Results FindWords(const char* board, unsigned width, unsigned height)
 		Query query(results, sanitized, width, height);
 		query.Execute();
 
+#ifdef NED_FLANDERS
 		for (auto& allocator : s_threadCustomAlloc)
 		{
 			void* pool = allocator.GetPool();
-
-#ifdef NED_FLANDERS
 			s_globalCustomAlloc.Free(pool);
-#else
-			s_globalCustomAlloc.FreeUnsafe(pool);
-#endif
-			
-			// Not necessary, because:
-			// - Allocator context itself is contained within pool just released, 100%
-			// - Allocator destructor has zero work to do
-//			delete allocator;
 		}
+		s_globalCustomAlloc.Free(sanitized);
+#endif
 
 		s_threadCustomAlloc.clear();
-
-#ifdef NED_FLANDERS
-		s_globalCustomAlloc.Free(sanitized);
-#else
-		s_globalCustomAlloc.FreeUnsafe(sanitized);
-#endif
 	}
 
 	return results;
@@ -1232,7 +1238,8 @@ void FreeWords(Results results)
 	results.UserData = nullptr;
 #else
 	if (nullptr != results.Words)
-		s_globalCustomAlloc.FreeUnsafe((void*) results.Words);
+//		s_globalCustomAlloc.FreeUnsafe((void*) results.Words);
+		freeAligned((void*) results.Words);
 #endif
 
 	results.Words = nullptr;
