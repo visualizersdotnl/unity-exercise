@@ -3,7 +3,7 @@
 // #define PRINT_WORDS
 // #define PRINT_GRID
 // #define DUPE_CHECK
-// #define PRINT_ITER_RESULTS
+#define PRINT_ITER_RESULTS
 
 // When board randomization enabled, it pays off (usually) to do more queries to get better performance.
 #ifdef _WIN32
@@ -156,10 +156,10 @@ RetrySameBoard:
 		if (duration < curFastest) {
 			printf("Faster: %.lld microsec. (Count %u, Score %u)\n", duration.count(), results.Count, results.Score);
 		}
-#else
+#endif
+		
 		if (duration < curFastest)
 			curFastest = duration;
-#endif
 
 #if defined(HIGHSCORE_LOOP)
 		FreeWords(results);
