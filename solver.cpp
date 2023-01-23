@@ -808,7 +808,7 @@ void Query::ExecuteThread(unsigned iThread, std::vector<unsigned>& wordsFound)
 	const auto gridSize = width*height;
 	char* visited = static_cast<char*>(s_threadCustomAlloc[iThread].AllocateAlignedUnsafe(gridSize*sizeof(char), kAlignTo));
 	memcpy(visited, m_sanitized, gridSize);
-	ClosePrefetch(visited);
+	// ClosePrefetch(visited);
 
 	wordsFound.reserve(s_threadInfo[iThread].load);
 
