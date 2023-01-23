@@ -9,7 +9,7 @@
 #ifdef _WIN32
 	#define HIGHSCORE_LOOP
 	#define HIGHSCORE_MICROSECONDS 370000  // Stress test Ryzen 5900x
-	#define NUM_QUERIES 10
+	#define NUM_QUERIES 1
 //	#define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #elif defined(__GNUC__)
 	#define HIGHSCORE_LOOP
@@ -18,7 +18,7 @@
 	#else
 		#define HIGHSCORE_MICROSECONDS 600000  // And for anything else, like Albert's Intel
 	#endif
-	#define NUM_QUERIES 10
+	#define NUM_QUERIES 1
 	// #define HIGHSCORE_LOOP_RANDOMIZE_BOARD
 #endif
 

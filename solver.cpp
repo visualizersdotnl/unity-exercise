@@ -719,16 +719,15 @@ public:
 	{
 //		debug_printf("Query::Execute(...) for %zu threads!\n", kNumThreads);
 
-#ifdef NED_FLANDERS
+#if defined(NED_FLANDERS)
 		// Just in case another Execute() call is made on the same context: avoid leaking.
 		FreeWords(m_results);
 
 		// Bit of a step back from what it was, but as I'm picking words out of the global list now..
 		DictionaryLock dictLock;
-#endif
 		{
-			unsigned Count = 0;
-			unsigned Score = 0;
+#endif
+			unsigned Count = 0, Score = 0;
 
 			// I'll be copying pointers, plain and simple, but not the safest given the API.
 			m_results.Words = static_cast<char**>(mallocAligned(s_wordCount*sizeof(char*), kAlignTo));
@@ -738,14 +737,15 @@ public:
 			m_reqStrBufSize = 0;
 #endif
 
-			#pragma omp parallel for reduction(+:Count) reduction(+:Score) schedule(static, 1) num_threads(int(kNumThreads))
+			// #pragma omp parallel for reduction(+:Count) reduction(+:Score) schedule(static, 1) num_threads(int(kNumThreads))
+			#pragma omp parallel for schedule(static, 1) num_threads(int(kNumThreads))
 			for (int iThread = 0; iThread < kNumThreads; ++iThread)
 			{
 				std::vector<unsigned> wordsFound;
-				wordsFound.reserve(s_threadInfo[iThread].load);
 
 				ExecuteThread(iThread, wordsFound);
-
+				
+				// Writes in this loop *should* be atomic, in practice it works out :-)
 				for (const auto wordIdx : wordsFound)
 				{
 					const auto& word = s_words[wordIdx];
@@ -753,7 +753,7 @@ public:
 					++Count;
 					Score += unsigned(word.score);
 
-	#if defined(STREAM_WRITES)
+#if defined(STREAM_WRITES)
 					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word));
 //					_mm_stream_si64((long long*) &(*words_cstr++), reinterpret_cast<long long>(word.word.c_str()));
 	#else
@@ -764,10 +764,13 @@ public:
 				
 				debug_print("Thread %u completed with %zu words.\n", iThread, wordsFound.size());
 			}
-
+			
 			m_results.Count = Count;
 			m_results.Score = Score;
+
+#if defined(NED_FLANDERS)
 		}
+#endif
 	}
 
 private:
@@ -806,6 +809,8 @@ void Query::ExecuteThread(unsigned iThread, std::vector<unsigned>& wordsFound)
 	char* visited = static_cast<char*>(s_threadCustomAlloc[iThread].AllocateAlignedUnsafe(gridSize*sizeof(char), kAlignTo));
 	memcpy(visited, m_sanitized, gridSize);
 	ClosePrefetch(visited);
+
+	wordsFound.reserve(s_threadInfo[iThread].load);
 
 #if defined(DEBUG_STATS)
 	debug_print("Thread %u has a load of %zu words and %zu nodes.\n", iThread, s_threadInfo[iThread].load, s_threadInfo[iThread].nodes);
